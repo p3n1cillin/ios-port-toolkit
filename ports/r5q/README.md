@@ -30,5 +30,6 @@ binaries, no build outputs and no phone backups are in this repository (see [the
   (MSA memory assigned through TrustZone, board data sent), the firmware is ready and in mission mode.
   Next: the host's copy engines, HTC/WMI, and a network interface.
 
-Paths in the scripts point at the original machine's checkout (`C:\Users\user\...`, a WSL workspace under
-`/var/tmp/codex-ios-r5q/work`); adjust them to your own.
+Setting up a machine to build and run it: [docs/SETUP.md](../../docs/SETUP.md). Licences: the loader and the kernel
+drivers are Apple Public Source License 2.0 (modified from the donor port), the rest MIT; see
+[NOTICE.md](../../NOTICE.md).

@@ -1,7 +1,8 @@
 #!/bin/bash
+R5Q_WORK=${R5Q_WORK:-/var/tmp/codex-ios-r5q/work}   # the Linux-side workspace (docs/SETUP.md)
 # Static disassembly of the stock r5q hypervisor image (data only; never executed).
 set -eu
-cd /var/tmp/codex-ios-r5q/work/research-fw
+cd ${R5Q_WORK}/research-fw
 OD=aarch64-linux-gnu-objdump
 seg() { dd if=hyp.mbn of="$1" bs=1 skip=$(( $2 )) count=$(( $3 )) status=none; }
 seg hyp-seg0.bin 0x3000 0xd59c

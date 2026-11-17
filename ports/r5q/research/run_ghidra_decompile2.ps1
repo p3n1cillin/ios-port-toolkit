@@ -1,8 +1,8 @@
 # Second pass: decompile the TVM mapping-commit worker, its gating condition, and the KPP-init flag users.
 $ErrorActionPreference = 'Stop'
 $env:JAVA_HOME = 'C:\Program Files\Java\jdk-21'
-$gh = 'C:\Users\user\AppData\Local\Programs\Ghidra\ghidra_12.2_PUBLIC'
-$base = 'C:\Users\user\source\repos\WIP\S10-Lite-project\work\ios-r5q\research'
+$gh = if ($env:GHIDRA_HOME) { $env:GHIDRA_HOME } else { throw 'set GHIDRA_HOME to the Ghidra install folder' }
+$base = $PSScriptRoot
 $proj = Join-Path $base 'ghidra-proj'
 $scripts = Join-Path $base 'ghidra-scripts'
 $fw = Join-Path $base 'fw\hyp.mbn'

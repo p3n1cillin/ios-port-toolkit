@@ -1,3 +1,4 @@
+/* Modified for the Galaxy S10 Lite (r5q) native iOS port, November 2026, from the donor G986N-iOS (commit 946de0fed8e5, a port of HackiOS): Apple Public Source License 2.0, see LICENSE and MODIFICATIONS.md in this directory. */
 /*
  * The touch screen of the Samsung Galaxy S20+ 5G (y2q): a Samsung LSI controller of the kind
  * Samsung's kernels call "sec_ts" (firmware tsp_sec/y79a_y2.bin), at address 0x48 on the I2C bus

@@ -1,7 +1,8 @@
 #!/bin/bash
+R5Q_PORT=${R5Q_PORT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/." && pwd)}   # ports/r5q of this repository
 # Package and bundle Tests 19-23 as guarded, UNFLASHED hardware tests.
 set -eu
-R=/mnt/c/Users/user/source/repos/WIP/S10-Lite-project/work/ios-r5q
+R=${R5Q_PORT}
 cd "$R"
 declare -A WHAT=(
  [19]="stops in C after the full cache clean, just before the MMU-off jump (MMU on)"

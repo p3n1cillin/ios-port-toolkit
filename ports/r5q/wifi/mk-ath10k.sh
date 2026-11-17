@@ -1,4 +1,6 @@
 #!/bin/bash
+R5Q_PORT=${R5Q_PORT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}   # ports/r5q of this repository
+R5Q_WORK=${R5Q_WORK:-/var/tmp/codex-ios-r5q/work}   # the Linux-side workspace (docs/SETUP.md)
 # r5q (Galaxy S10 Lite, SM8150): Linux's ath10k (SNOC: the WCN3990-family Wi-Fi inside the SoC, firmware on the modem),
 # built the way tools/mk-ath11k.sh builds ath11k -- same Linux and FreeBSD releases, same layer (wifi/lx). This is the
 # first, measuring step: how much of ath10k compiles on the layer, and what it then still wants (out/stubs.txt,
@@ -43,7 +45,7 @@
 set -e
 VERSION=7.0.14
 SHA256=de9999b784d2293f00d39c62d8f92a08ab8a54bc4e80ffd250a0c09cb07a0f98
-ROOT=${WIFI_ROOT:-/var/tmp/codex-ios-r5q/work/redwood-src}
+ROOT=${WIFI_ROOT:-${R5Q_WORK}/redwood-src}
 B=$ROOT/xnu-deps/build/ath10k
 ATH=drivers/net/wireless/ath
 mkdir -p "$B"
@@ -126,13 +128,13 @@ DRIVER="core ce htc htt htt_rx htt_tx mac wmi wmi-tlv txrx hw qmi qmi_wlfw_v01 s
 ATHLIB="main regd key"
 CC="clang -target arm64-apple-ios16.5"
 LD=$ROOT/xnu-deps/host/bin/ld64
-CFLAGS="-I/mnt/c/Users/user/source/repos/WIP/S10-Lite-project/work/ios-r5q/wifi/include -mkernel -mgeneral-regs-only -fno-builtin -fno-common -ffreestanding -fno-strict-aliasing
+CFLAGS="-I${R5Q_PORT}/wifi/include -mkernel -mgeneral-regs-only -fno-builtin -fno-common -ffreestanding -fno-strict-aliasing
 	-funsigned-char -nostdinc -std=gnu17 -O2 -g -w
 	-D__FreeBSD__=15 -D_KERNEL -DKLD_MODULE -DHAVE_KERNEL_OPTION_HEADERS -include opt_global.h
 	-I$W/include -Igen -I$S -I$S/contrib/ck/include
 	-I$S/compat/linuxkpi/common/include -I$S/compat/linuxkpi/dummy/include
 	-include $S/compat/linuxkpi/common/include/linux/kconfig.h -DLINUXKPI_VERSION=70000"
-R5Q=/mnt/c/Users/user/source/repos/WIP/S10-Lite-project/work/ios-r5q/wifi
+R5Q=${R5Q_PORT}/wifi
 DFLAGS="-I$R5Q/include -Isrc/ath10k -Isrc/ath -Isrc -include $W/include/lx_prelude.h -include $R5Q/include/lx_ath10k.h
 	-DCONFIG_ATH10K_SNOC
 	-DKBUILD_MODNAME=\"ath10k\""

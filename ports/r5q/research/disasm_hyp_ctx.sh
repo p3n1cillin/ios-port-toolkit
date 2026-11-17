@@ -1,6 +1,7 @@
 #!/bin/bash
+R5Q_WORK=${R5Q_WORK:-/var/tmp/codex-ios-r5q/work}   # the Linux-side workspace (docs/SETUP.md)
 # Print disassembly context around given hypervisor addresses (data only).
-cd /var/tmp/codex-ios-r5q/work/research-fw || exit 1
+cd ${R5Q_WORK}/research-fw || exit 1
 ctx() { # ctx ADDR BEFORE AFTER
 	local n; n=$(grep -n "^ *$1:" hyp-seg3.dis | cut -d: -f1)
 	[ -n "$n" ] || { echo "no $1"; return; }

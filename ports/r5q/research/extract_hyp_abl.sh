@@ -1,8 +1,10 @@
 #!/bin/bash
+R5Q_STOCK=${R5Q_STOCK:?set R5Q_STOCK to the folder with the stock SM-G770F firmware (AP_/BL_/CP_ tar.md5)}
+R5Q_WORK=${R5Q_WORK:-/var/tmp/codex-ios-r5q/work}   # the Linux-side workspace (docs/SETUP.md)
 # Extract hyp.mbn and abl.elf from the stock SM-G770F BL package as DATA (never executed).
 set -eu
-SRC=/mnt/c/Users/user/source/repos/WIP/S10-Lite-project/work/s10-relock/BL_G770FXXS9HXA1_G770FXXS9HXA1_MQB76443424_REV00_user_low_ship_MULTI_CERT.tar.md5
-OUT=/var/tmp/codex-ios-r5q/work/research-fw
+SRC=${R5Q_STOCK}/BL_G770FXXS9HXA1_G770FXXS9HXA1_MQB76443424_REV00_user_low_ship_MULTI_CERT.tar.md5
+OUT=${R5Q_WORK}/research-fw
 mkdir -p "$OUT"; cd "$OUT"
 tar -xf "$SRC" hyp.mbn.lz4 abl.elf.lz4
 command -v lz4 >/dev/null || { echo "lz4 missing"; exit 3; }

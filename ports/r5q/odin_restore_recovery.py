@@ -1,12 +1,13 @@
 """Restore stock recovery.img via Samsung Download Mode (Odin/Loke protocol on COM14)."""
 import hashlib
+import os
 import pathlib
 import serial
 import struct
 import sys
 
 PORT = sys.argv[1] if len(sys.argv) > 1 else "COM14"
-IMG_PATH = pathlib.Path(r"c:\Users\user\source\repos\WIP\S10-Lite-project\outputs\S10-Lite-native-iOS-port\test2\restore\recovery-original.img")
+IMG_PATH = pathlib.Path(os.environ.get('R5Q_RECOVERY_IMG', 'recovery-original.img'))   # the phone's own original recovery
 EXPECTED_SHA256 = "332e1dd4a1c87bcd929696c5e1aa4f6730795c5de440acface1572ae3ba383cd"
 
 data = IMG_PATH.read_bytes()

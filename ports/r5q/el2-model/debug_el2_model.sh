@@ -1,6 +1,7 @@
 #!/bin/bash
+R5Q_WORK=${R5Q_WORK:-/var/tmp/codex-ios-r5q/work}   # the Linux-side workspace (docs/SETUP.md)
 # One VM-only boot under the stand-in with QEMU's exception log (EMULATION ONLY, debugging the model).
-W=/var/tmp/codex-ios-r5q/work/el2-model
+W=${R5Q_WORK}/el2-model
 d=$W/run-cp999-vm
 cd "$d" || exit 1
 cp /usr/share/AAVMF/AAVMF_VARS.fd vars.fd

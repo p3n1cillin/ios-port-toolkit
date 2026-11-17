@@ -1,8 +1,10 @@
 #!/bin/bash
+R5Q_PORT=${R5Q_PORT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/." && pwd)}   # ports/r5q of this repository
+R5Q_WORK=${R5Q_WORK:-/var/tmp/codex-ios-r5q/work}   # the Linux-side workspace (docs/SETUP.md)
 # Copy work products created outside the project folder (WSL workspace) into it. Idempotent.
 set -eu
-P=/mnt/c/Users/user/source/repos/WIP/S10-Lite-project/work/ios-r5q
-W=/var/tmp/codex-ios-r5q/work
+P=${R5Q_PORT}
+W=${R5Q_WORK}
 mkdir -p "$P/research/samsung-kernel-subset" "$P/research/fw" "$P/research/fw/disasm" "$P/el2-model/built" "$P/port/build/qemu-boot" "$P/donor-additions/qemu"
 # Samsung SM-G770F GPL kernel subset (sparse checkout, commit 153e588c), minus git metadata
 rsync -a --exclude .git "$W/research-src/sm-g770f-kernel/" "$P/research/samsung-kernel-subset/"

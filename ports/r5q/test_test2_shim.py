@@ -5,7 +5,7 @@ import pathlib
 import struct
 from unicorn import Uc, UC_ARCH_ARM64, UC_MODE_ARM, UC_HOOK_CODE
 
-base = pathlib.Path('/mnt/c/Users/user/source/repos/WIP/S10-Lite-project/work/ios-r5q/port/build')
+base = pathlib.Path(__file__).resolve().parent / 'port' / 'build'
 shim = (base / 'r5q-test2-shim.bin').read_bytes()
 fd = (base / 'r5q-test2-uefi.fd').read_bytes()
 payload = (base / 'r5q-test2-payload.bin').read_bytes()

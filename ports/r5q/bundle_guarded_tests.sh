@@ -1,6 +1,7 @@
 #!/bin/bash
+R5Q_PORT=${R5Q_PORT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/." && pwd)}   # ports/r5q of this repository
 set -eu
-R=/mnt/c/Users/user/source/repos/WIP/S10-Lite-project/work/ios-r5q
+R=${R5Q_PORT}
 cd "$R"
 declare -A BASE=([25]=20 [26]=21 [27]=22 [28]=23)
 declare -A WHAT=(

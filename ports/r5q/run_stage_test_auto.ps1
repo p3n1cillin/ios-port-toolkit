@@ -4,10 +4,11 @@
 # Run 19 first, then 24 (watchdog probe), then 20, 21, 22, 23; stop at the first that does not return.
 param([Parameter(Mandatory)][ValidateRange(19, 69)][int]$Number)
 $ErrorActionPreference = 'Continue'
-$env:Path = "C:\Users\user\AppData\Local\Microsoft\WinGet\Packages\Google.PlatformTools_Microsoft.Winget.Source_8wekyb3d8bbwe\platform-tools;$env:Path"
+if ($env:PLATFORM_TOOLS) { $env:Path = "$env:PLATFORM_TOOLS;$env:Path" }   # fastboot/adb: on PATH, or in PLATFORM_TOOLS
 $py = Join-Path $env:LOCALAPPDATA 'Programs\Python\Python313\python.exe'
-$work = 'C:\Users\user\source\repos\WIP\S10-Lite-project\work\ios-r5q'
-$bundle = "C:\Users\user\source\repos\WIP\S10-Lite-project\outputs\S10-Lite-native-iOS-port\test$Number"
+$work = $PSScriptRoot
+$outputs = if ($env:R5Q_OUTPUTS) { $env:R5Q_OUTPUTS } else { Join-Path $PSScriptRoot 'outputs' }   # test bundles
+$bundle = Join-Path $outputs "test$Number"
 $markers = @('[TEST17] BootShim entry', '[TEST17] BootShim: entering SEC',
              "TEST$Number FIRMWARE RETURN PATH ONLY", '[LAB] before MMU-off handoff')
 switch ($Number) {

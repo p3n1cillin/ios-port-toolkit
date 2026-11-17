@@ -1,6 +1,7 @@
 #!/bin/bash
+R5Q_WORK=${R5Q_WORK:-/var/tmp/codex-ios-r5q/work}   # the Linux-side workspace (docs/SETUP.md)
 # Locate the stock ABL code that shuts caches/MMU down before jumping to Linux (data only, never run).
-cd /var/tmp/codex-ios-r5q/work || exit 1
+cd ${R5Q_WORK} || exit 1
 OD=aarch64-linux-gnu-objdump
 for f in abl_pe_ac.efi abl_pe_2100e8.efi abl_pe_4c111c.efi; do
 	echo "=== $f ($(stat -c %s $f) bytes)"

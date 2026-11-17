@@ -1,7 +1,8 @@
 #!/bin/bash
+R5Q_WORK=${R5Q_WORK:-/var/tmp/codex-ios-r5q/work}   # the Linux-side workspace (docs/SETUP.md)
 # Fetch only the hypervisor/watchdog/reset-related paths of the pinned Samsung SM-G770F GPL kernel.
 set -eu
-D=/var/tmp/codex-ios-r5q/work/research-src/sm-g770f-kernel
+D=${R5Q_WORK}/research-src/sm-g770f-kernel
 COMMIT=153e588c8576dcf60cdc4d3a31765ee8721bfec3
 mkdir -p "$D"; cd "$D"
 [ -d .git ] || { git init -q; git remote add origin https://github.com/Androser420/sm-g770f-kernel.git; }

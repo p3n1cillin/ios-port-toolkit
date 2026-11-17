@@ -36,7 +36,7 @@ sub('[ "$1" = fetch ] && { echo "mk-ath11k.sh: ath11k of Linux $VERSION: $B/src/
 sub('DRIVER="core hal qmi ce hw fw htc wmi mac reg peer dp dp_rx dp_tx hal_rx hal_tx dbring p2p"',
     'DRIVER="core ce htc htt htt_rx htt_tx mac wmi wmi-tlv txrx hw qmi qmi_wlfw_v01 snoc p2p bmi"\nATHLIB="main regd key"')
 sub('''DFLAGS="-Isrc/ath11k -Isrc -include $W/include/lx_prelude.h -DCONFIG_ATH11K_AHB -DCONFIG_ATH11K_DEBUG
-	-DKBUILD_MODNAME=\\"ath11k\\""''', '''R5Q=/mnt/c/Users/user/source/repos/WIP/S10-Lite-project/work/ios-r5q/wifi
+	-DKBUILD_MODNAME=\\"ath11k\\""''', '''R5Q=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 DFLAGS="-I$R5Q/include -Isrc/ath10k -Isrc/ath -Isrc -include $W/include/lx_prelude.h -include $R5Q/include/lx_ath10k.h
 	-DCONFIG_ATH10K_SNOC
 	-DKBUILD_MODNAME=\\"ath10k\\""''')
@@ -56,7 +56,7 @@ sub(': > out/stubs.txt\n', ': > out/stubs.txt\n: > out/missing.txt\n')
 sub('	ath11k_*|__ath11k_*) ;;', '	ath10k_*|__ath10k_*|ath_*|ath11k_*|__ath11k_*) ;;')
 sub('	*) echo "mk-ath11k.sh: nothing defines $s" >&2; missing=1; continue ;;', '	*) echo "$s" >> out/missing.txt; continue ;;')
 sub('[ -z "$missing" ] || exit 1\n', 'echo "mk-ath10k.sh: $(wc -l < out/missing.txt) names nothing defines yet (out/missing.txt)"\n')
-sub('CFLAGS="-mkernel', 'CFLAGS="-I/mnt/c/Users/user/source/repos/WIP/S10-Lite-project/work/ios-r5q/wifi/include -mkernel')
+sub('CFLAGS="-mkernel', 'CFLAGS="-I$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/include -mkernel')
 s = s.replace('out/ath11k.o', 'out/ath10k.o').replace('mk-ath11k.sh:', 'mk-ath10k.sh:')
 (here / 'mk-ath10k.sh').write_text(s, newline='\n')
 print('wrote mk-ath10k.sh')

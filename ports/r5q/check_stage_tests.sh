@@ -1,6 +1,7 @@
 #!/bin/bash
+R5Q_PORT=${R5Q_PORT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/." && pwd)}   # ports/r5q of this repository
 # Emulator-check the Tests 19-23 roundtrip and shim cases. EMULATION ONLY.
-R=/mnt/c/Users/user/source/repos/WIP/S10-Lite-project/work/ios-r5q
+R=${R5Q_PORT}
 cd "$R"
 for n in 19 20 21 22 23; do
 	out=$(python3 run_test${n}_checks.py "$R" 2>&1)

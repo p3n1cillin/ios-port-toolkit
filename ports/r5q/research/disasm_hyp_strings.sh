@@ -1,6 +1,7 @@
 #!/bin/bash
+R5Q_WORK=${R5Q_WORK:-/var/tmp/codex-ios-r5q/work}   # the Linux-side workspace (docs/SETUP.md)
 # Print strings at addresses used near the TVM enable, and the caller of 0x8576ecf8. Data only.
-cd /var/tmp/codex-ios-r5q/work/research-fw || exit 1
+cd ${R5Q_WORK}/research-fw || exit 1
 str() { dd if=hyp-seg3.bin bs=1 skip=$(( 0x$1 - 0x85740000 )) count=120 status=none | tr '\0' '\n' | head -1; }
 for a in 8578ed49 85778cb7 8577897d 85778a04; do printf '%s: %s\n' "$a" "$(str $a)"; done
 echo "== all string refs inside 0x8576ecf8..0x8576fa80 (adrp+add pairs into the 0x8578e000/0x85778000 pages)"

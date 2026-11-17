@@ -1,10 +1,11 @@
 # One authorized Test 17 hardware run: automatic capture/restore, then a 12 h restore watcher
 # only if Android did not return in time. Never retries or starts another test.
 $ErrorActionPreference = 'Continue'
-$env:Path = "C:\Users\user\AppData\Local\Microsoft\WinGet\Packages\Google.PlatformTools_Microsoft.Winget.Source_8wekyb3d8bbwe\platform-tools;$env:Path"
+if ($env:PLATFORM_TOOLS) { $env:Path = "$env:PLATFORM_TOOLS;$env:Path" }   # fastboot/adb: on PATH, or in PLATFORM_TOOLS
 $py = Join-Path $env:LOCALAPPDATA 'Programs\Python\Python313\python.exe'
-$work = 'C:\Users\user\source\repos\WIP\S10-Lite-project\work\ios-r5q'
-$bundle = 'C:\Users\user\source\repos\WIP\S10-Lite-project\outputs\S10-Lite-native-iOS-port\test17'
+$work = $PSScriptRoot
+$outputs = if ($env:R5Q_OUTPUTS) { $env:R5Q_OUTPUTS } else { Join-Path $PSScriptRoot 'outputs' }   # test bundles
+$bundle = Join-Path $outputs 'test17'
 & $py -I "$work\run_native_test.py" $bundle --operator Manage-Test17.ps1 --timeout 300 `
     --expect '[TEST17] BootShim entry' --expect '[TEST17] BootShim: entering SEC' `
     --expect 'TEST1 HANDOFF OK' --expect '[TEST12] Resetting via PSHOLD'

@@ -2,7 +2,8 @@
 
 > **This repository** also carries the S10 Lite port's own working tree in [ports/r5q](ports/r5q/README.md)
 > (loader, kernel drivers, build pipeline, phone tool, notes; up to Test 110: charging and the Wi-Fi
-> firmware's handshake work). Third-party material and what is left out: [NOTICE.md](NOTICE.md).
+> firmware's handshake work). Set-up: [docs/SETUP.md](docs/SETUP.md). Licences: MIT, with the loader and kernel
+> drivers under the Apple Public Source License 2.0: [NOTICE.md](NOTICE.md).
 
 This toolkit captures how iOS 16.5 was made to boot natively on the **Samsung Galaxy S10 Lite** (SM-G770F,
 `r5q`, Snapdragon 855 / SM8150). As of Test 68 the phone runs to a usable home screen with:

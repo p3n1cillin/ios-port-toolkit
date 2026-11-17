@@ -1,6 +1,7 @@
 #!/bin/bash
+R5Q_WORK=${R5Q_WORK:-/var/tmp/codex-ios-r5q/work}   # the Linux-side workspace (docs/SETUP.md)
 # Read-only greps over the pinned Samsung SM-G770F kernel subset (reset, download mode, debug level).
-cd /var/tmp/codex-ios-r5q/work/research-src/sm-g770f-kernel || exit 1
+cd ${R5Q_WORK}/research-src/sm-g770f-kernel || exit 1
 F=drivers/power/reset/msm-poweroff.c
 echo "== $F"
 grep -n "download_mode\s*=\|static int download_mode\|scm_disable_sdi\|set_dload_mode(\|sec_debug\|SEC_DEBUG\|DLOAD\|in_panic\|deassert_ps_hold\|PS_HOLD\|warm\|RESTART_REASON\|qpnp_pon_system_pwr_off\|PON_POWER_OFF" "$F" | head -60

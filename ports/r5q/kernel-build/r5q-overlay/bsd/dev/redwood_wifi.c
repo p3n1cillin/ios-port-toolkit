@@ -1,3 +1,4 @@
+/* Modified for the Galaxy S10 Lite (r5q) native iOS port, November 2026, from the donor G986N-iOS (commit 946de0fed8e5, a port of HackiOS): Apple Public Source License 2.0, see LICENSE and MODIFICATIONS.md in this directory. */
 /*
  * The Wi-Fi of the POCO X5 Pro (redwood), from nothing and step by step. Every address below
  * belongs to this phone, and nothing here is touched unless a boot-arg asks for it.

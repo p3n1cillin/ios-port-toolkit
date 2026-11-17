@@ -1,7 +1,8 @@
 #!/bin/bash
+R5Q_PORT=${R5Q_PORT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/." && pwd)}   # ports/r5q of this repository
 # Build the Tests 19-23 loaders (return-path stage bisection), EMULATION-CHECKED ONLY until bundled.
 set -eu
-R=/mnt/c/Users/user/source/repos/WIP/S10-Lite-project/work/ios-r5q
+R=${R5Q_PORT}
 cd /tmp
 for spec in ${SPECS:-"19 1" "20 2" "21 3" "22 4" "23 0" "24 5"}; do
 	set -- $spec

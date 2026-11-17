@@ -1,13 +1,15 @@
 #!/bin/bash
+R5Q_PORT=${R5Q_PORT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}   # ports/r5q of this repository
+R5Q_WORK=${R5Q_WORK:-/var/tmp/codex-ios-r5q/work}   # the Linux-side workspace (docs/SETUP.md)
 # EMULATION ONLY: run the port loader's return-path self-test (checkpoint 999) and chosen kernel
 # checkpoints under an EL2 stand-in for Samsung uH (shim.S), in QEMU virt with virtualization=on.
 # usage: run_el2_model.sh [CHECKPOINT ...]   (default: 999)
 set -u
-SRC=/mnt/c/Users/user/source/repos/WIP/S10-Lite-project/work/ios-r5q/el2-model
-OUT=/mnt/c/Users/user/source/repos/WIP/S10-Lite-project/work/ios-r5q/port/build/el2-model
-W=/var/tmp/codex-ios-r5q/work/el2-model
-KERNEL=/mnt/c/Users/user/source/repos/WIP/S10-Lite-project/work/ios-r5q/port/build/xnu-source-rebuild.macho
-LOADER=${LOADER:-/var/tmp/codex-ios-r5q/work/port-loader-qemu.efi}
+SRC=${R5Q_PORT}/el2-model
+OUT=${R5Q_PORT}/port/build/el2-model
+W=${R5Q_WORK}/el2-model
+KERNEL=${R5Q_PORT}/port/build/xnu-source-rebuild.macho
+LOADER=${LOADER:-${R5Q_WORK}/port-loader-qemu.efi}
 PREFIX=${PREFIX:-}
 mkdir -p "$W" "$OUT"; cd "$W"
 CHECKPOINTS=${*:-999}

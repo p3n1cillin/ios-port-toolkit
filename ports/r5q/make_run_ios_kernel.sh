@@ -1,8 +1,9 @@
 #!/bin/bash
+R5Q_WORK=${R5Q_WORK:-/var/tmp/codex-ios-r5q/work}   # the Linux-side workspace (docs/SETUP.md)
 # Make qemu/run-ios-kernel.sh in the donor tree: run-ios.sh with the kernel taken from $KERNEL
 # instead of the fixed xnu-src path. EMULATION ONLY; the donor's own run-ios.sh is left unchanged.
 set -eu
-cd /var/tmp/codex-ios-r5q/work/linux-source
+cd ${R5Q_WORK}/linux-source
 sed -e 's|^K=xnu-src/xnu-8796.121.2/BUILD/obj/DEVELOPMENT_ARM64_BCM2837/mach.development.bcm2837$|K=${KERNEL:?set KERNEL to the kernel to boot}|' \
     -e 's|^\[ -f \$K \] .*|[ -f "$K" ] \|\| { echo "run-ios-kernel.sh: no kernel at $K" >\&2; exit 1; }|' \
     qemu/run-ios.sh > qemu/run-ios-kernel.sh

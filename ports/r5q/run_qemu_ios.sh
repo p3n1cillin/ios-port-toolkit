@@ -1,12 +1,14 @@
 #!/bin/bash
+R5Q_PORT=${R5Q_PORT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/." && pwd)}   # ports/r5q of this repository
+R5Q_WORK=${R5Q_WORK:-/var/tmp/codex-ios-r5q/work}   # the Linux-side workspace (docs/SETUP.md)
 # EMULATION ONLY: boot full iOS 16.5 (donor userland images) in QEMU with a chosen kernel.
 # usage: [LOADER=loader.efi] run_qemu_ios.sh KERNEL LABEL SECONDS SHOT_AT...
 # The log and screenshots go to port/build/qemu-boot/ios-LABEL*. No network (-nic none).
 set -u
 KERNEL=$1 LABEL=$2 SECS=$3; shift 3
-OUT=/mnt/c/Users/user/source/repos/WIP/S10-Lite-project/work/ios-r5q/port/build/qemu-boot
-DONOR=/var/tmp/codex-ios-r5q/work/linux-source
-LOG=/var/tmp/codex-ios-r5q/work/qemu-ios-$LABEL.log
+OUT=${R5Q_PORT}/port/build/qemu-boot
+DONOR=${R5Q_WORK}/linux-source
+LOG=${R5Q_WORK}/qemu-ios-$LABEL.log
 cd "$DONOR" || exit 1
 KERNEL=$KERNEL LOADER=${LOADER:-} QEMU_EFI=/usr/share/AAVMF/AAVMF_CODE.fd QEMU_VARS=/usr/share/AAVMF/AAVMF_VARS.fd \
 	qemu/run-ios-kernel.sh "$SECS" -nic none > "$LOG" 2>&1 &

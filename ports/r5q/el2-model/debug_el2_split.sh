@@ -1,6 +1,7 @@
 #!/bin/bash
+R5Q_WORK=${R5Q_WORK:-/var/tmp/codex-ios-r5q/work}   # the Linux-side workspace (docs/SETUP.md)
 # Split the stand-in boot failure: does AAVMF boot with virtualization=on (at EL2) with/without our DTB?
-W=/var/tmp/codex-ios-r5q/work/el2-model
+W=${R5Q_WORK}/el2-model
 d=$W/run-split; rm -rf "$d"; mkdir -p "$d"; cd "$d"
 boot() { # boot LABEL extra-args...
 	local label=$1; shift

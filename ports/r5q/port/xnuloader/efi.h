@@ -1,3 +1,4 @@
+/* Modified for the Galaxy S10 Lite (r5q) native iOS port, November 2026, from the donor G986N-iOS (commit 946de0fed8e5, a port of HackiOS): Apple Public Source License 2.0, see LICENSE and MODIFICATIONS.md in this directory. */
 /*
  * Minimal UEFI definitions for the XNU loader (freestanding, no EDK2).
  * Only what the loader touches is declared; unused slots are void pointers

@@ -1,6 +1,7 @@
 #!/bin/bash
+R5Q_WORK=${R5Q_WORK:-/var/tmp/codex-ios-r5q/work}   # the Linux-side workspace (docs/SETUP.md)
 # Trace what reaches the TVM enable (0x8576f9ac) and the boot TVM flag writer (0x85743d50). Data only.
-cd /var/tmp/codex-ios-r5q/work/research-fw || exit 1
+cd ${R5Q_WORK}/research-fw || exit 1
 D=hyp-seg3.dis
 at() { grep -n "^ *$1:" $D | cut -d: -f1; }
 show() { local n; n=$(at "$1"); [ -n "$n" ] && sed -n "$((n-$2)),$((n+$3))p" $D | cut -f1,3- | cut -c1-90; }

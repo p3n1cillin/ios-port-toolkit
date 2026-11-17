@@ -1,3 +1,4 @@
+/* Modified for the Galaxy S10 Lite (r5q) native iOS port, November 2026, from the donor G986N-iOS (commit 946de0fed8e5, a port of HackiOS): Apple Public Source License 2.0, see LICENSE and MODIFICATIONS.md in this directory. */
 /*
  * MiniIOMobileFramebuffer: a stand-in for Apple's display driver family, as seen by
  * IOMobileFramebuffer.framework (and through it by CoreAnimation's window server).

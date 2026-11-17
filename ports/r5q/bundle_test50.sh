@@ -1,6 +1,7 @@
 #!/bin/bash
+R5Q_PORT=${R5Q_PORT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/." && pwd)}   # ports/r5q of this repository
 set -eu
-R=/mnt/c/Users/user/source/repos/WIP/S10-Lite-project/work/ios-r5q
+R=${R5Q_PORT}
 cd "$R"
 python3 package_test50.py "$R" | grep -E '"sha256"' | head -1
 python3 bundle_native_test.py 50 --firmware-number 50 --mode diagnostic \

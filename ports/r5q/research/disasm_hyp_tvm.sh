@@ -1,6 +1,7 @@
 #!/bin/bash
+R5Q_WORK=${R5Q_WORK:-/var/tmp/codex-ios-r5q/work}   # the Linux-side workspace (docs/SETUP.md)
 # Who enables HCR_EL2.TVM / stage 2 in the r5q uH image, and what its sysreg-trap handler does (data only).
-cd /var/tmp/codex-ios-r5q/work/research-fw || exit 1
+cd ${R5Q_WORK}/research-fw || exit 1
 D=hyp-seg3.dis
 echo "== callers of the TVM-enable routine 0x8576bf74 and TVM-disable 0x8576bf9c"
 grep -n -E 'bl\s+0x8576bf74|bl\s+0x8576bf9c|b\s+0x8576bf74' $D | head

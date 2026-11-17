@@ -1,3 +1,4 @@
+/* Modified for the Galaxy S10 Lite (r5q) native iOS port, November 2026, from the donor G986N-iOS (commit 946de0fed8e5, a port of HackiOS): Apple Public Source License 2.0, see LICENSE and MODIFICATIONS.md in this directory. */
 /*
  * The clock speed of the processor cores the kernel runs on, on the POCO X5 Pro (redwood).
  * Only with boot-arg cpufreq=1: the addresses are this phone's.
