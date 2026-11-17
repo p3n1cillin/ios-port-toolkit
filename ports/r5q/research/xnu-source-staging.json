@@ -1,0 +1,55 @@
+{
+  "status": "sources only; no fetched build code executed",
+  "inputs": [
+    {
+      "name": "AvailabilityVersions",
+      "url": "https://github.com/apple-oss-distributions/AvailabilityVersions.git",
+      "commit": "5d9baee345b3bc72b26c71adc65f94f2d5e9ced2",
+      "path": "/var/tmp/codex-ios-r5q/work/xnu-source-cache/AvailabilityVersions",
+      "status": "verified"
+    },
+    {
+      "name": "libdispatch",
+      "url": "https://github.com/apple-oss-distributions/libdispatch.git",
+      "commit": "a641558f447659d90ad002ef0ee6f0212273fbfc",
+      "path": "/var/tmp/codex-ios-r5q/work/xnu-source-cache/libdispatch",
+      "status": "verified"
+    },
+    {
+      "name": "libpthread",
+      "url": "https://github.com/apple-oss-distributions/libpthread.git",
+      "commit": "a6c70ca0e544347a0377babf748f831577ec24f9",
+      "path": "/var/tmp/codex-ios-r5q/work/xnu-source-cache/libpthread",
+      "status": "verified"
+    },
+    {
+      "name": "mm_bootstrap_cmds",
+      "url": "https://github.com/markmentovai/bootstrap_cmds.git",
+      "commit": "f337e600741638896fb6056ce87c6479f74b89a3",
+      "path": "/var/tmp/codex-ios-r5q/work/xnu-source-cache/mm_bootstrap_cmds",
+      "status": "verified"
+    },
+    {
+      "name": "tcsh",
+      "url": "https://github.com/tcsh-org/tcsh.git",
+      "commit": "b7db07931546178c4cb2542b5fc850c483628ed5",
+      "path": "/var/tmp/codex-ios-r5q/work/xnu-source-cache/tcsh",
+      "status": "verified"
+    },
+    {
+      "name": "unifdef",
+      "url": "https://github.com/fanf2/unifdef.git",
+      "commit": "08d12cd3059fe072929ea001ad9833f5487fd355",
+      "path": "/var/tmp/codex-ios-r5q/work/xnu-source-cache/unifdef",
+      "status": "verified"
+    },
+    {
+      "name": "xnu",
+      "url": "https://github.com/apple-oss-distributions/xnu.git",
+      "tag": "xnu-8796.121.2",
+      "commit": "c54f35ca767986246321eb901baf8f5ff7923f6a",
+      "path": "/var/tmp/codex-ios-r5q/work/apple-xnu-8796.121.2",
+      "status": "verified"
+    }
+  ]
+}

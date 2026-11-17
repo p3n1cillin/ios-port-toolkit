@@ -1,0 +1,2755 @@
+{
+ "soc": "sc7180",
+ "vendor": "qcom",
+ "_generated_by": "toolkit/tools/qcom_socdata.py",
+ "_sources": {
+  "pinctrl": "pinctrl-sc7180.c",
+  "gcc": "gcc-sc7180.c",
+  "bindings": "qcom,gcc-sc7180.h",
+  "dtsi": "sc7180.dtsi"
+ },
+ "gpio_stride": "0x1000",
+ "gic": {
+  "dist": "0x17a00000",
+  "redist": "0x17a60000"
+ },
+ "tlmm": {
+  "tiles": [
+   "north",
+   "south",
+   "west"
+  ],
+  "bases": {
+   "west": "0x3500000",
+   "north": "0x3900000",
+   "south": "0x3d00000",
+   "_source": "sc7180.dtsi tlmm reg/reg-names"
+  },
+  "pins": {
+   "0": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "qup01",
+     "cri_trng",
+     null,
+     "phase_flag",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "1": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "qup01",
+     "cri_trng",
+     null,
+     "phase_flag",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "2": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "qup01",
+     "cri_trng",
+     null,
+     "phase_flag",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "3": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "qup01",
+     "sp_cmu",
+     "dbg_out",
+     "qdss_cti",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "4": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "sdc1_tb",
+     null,
+     "qdss_cti",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "5": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "sdc2_tb",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "6": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qup11_i2c",
+     "qup11_uart",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "7": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qup11_i2c",
+     "qup11_uart",
+     "ddr_bist",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "8": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "gp_pdm1",
+     "ddr_bist",
+     null,
+     "phase_flag",
+     "qdss_cti",
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "9": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "ddr_bist",
+     null,
+     "phase_flag",
+     "qdss_cti",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "10": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "mdp_vsync",
+     "ddr_bist",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "11": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "mdp_vsync",
+     "edp_lcd",
+     null,
+     "phase_flag",
+     "ddr_pxi2",
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "12": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "mdp_vsync",
+     "m_voc",
+     "qup01",
+     null,
+     "phase_flag",
+     "wlan2_adc0",
+     "atest_usb10",
+     "ddr_pxi3",
+     null
+    ]
+   },
+   "13": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "cam_mclk",
+     "pll_bypassnl",
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "14": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "cam_mclk",
+     "pll_reset",
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "15": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "cam_mclk",
+     "qup02_i2c",
+     "qup02_uart",
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "16": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "cam_mclk",
+     "qup02_i2c",
+     "qup02_uart",
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "17": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "cci_i2c",
+     null,
+     "phase_flag",
+     "qdss",
+     null,
+     "wlan1_adc0",
+     "atest_usb12",
+     "ddr_pxi1",
+     "atest_char"
+    ]
+   },
+   "18": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "cci_i2c",
+     "agera_pll",
+     null,
+     "phase_flag",
+     "qdss",
+     "vsense_trigger",
+     "ddr_pxi0",
+     "atest_char3",
+     null
+    ]
+   },
+   "19": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "cci_i2c",
+     null,
+     "phase_flag",
+     "qdss",
+     "atest_char2",
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "20": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "cci_i2c",
+     null,
+     "phase_flag",
+     "qdss",
+     "atest_char1",
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "21": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "cci_timer0",
+     "gcc_gp2",
+     null,
+     "qdss",
+     "atest_char0",
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "22": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "cci_timer1",
+     "gcc_gp3",
+     null,
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "23": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "cci_timer2",
+     "cam_mclk",
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "24": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "cci_timer3",
+     "cci_async",
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "25": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "cci_timer4",
+     "cci_async",
+     "qup05",
+     null,
+     "phase_flag",
+     "qdss",
+     null,
+     null,
+     null
+    ]
+   },
+   "26": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "cci_async",
+     "qup05",
+     null,
+     "phase_flag",
+     "qdss",
+     "atest_tsens",
+     "atest_usb11",
+     "ddr_pxi2",
+     null
+    ]
+   },
+   "27": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "cci_i2c",
+     "qup05",
+     "PLL_BIST",
+     null,
+     "phase_flag",
+     "qdss",
+     "ddr_pxi0",
+     null,
+     null
+    ]
+   },
+   "28": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "cci_i2c",
+     "qup05",
+     null,
+     "phase_flag",
+     "qdss",
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "29": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     null,
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "30": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "31": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     null,
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "32": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     null,
+     "phase_flag",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "33": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "sd_write",
+     null,
+     "phase_flag",
+     "qdss_cti",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "34": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "qup00",
+     null,
+     "phase_flag",
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "35": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "qup00",
+     null,
+     "phase_flag",
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "36": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "qup00",
+     null,
+     "phase_flag",
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "37": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "qup00",
+     "gp_pdm0",
+     null,
+     "phase_flag",
+     "qdss",
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "38": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "qup03",
+     null,
+     "phase_flag",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "39": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "qup03",
+     null,
+     "phase_flag",
+     "atest_tsens2",
+     "wlan2_adc1",
+     "atest_usb1",
+     null,
+     null,
+     null
+    ]
+   },
+   "40": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "qup03",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "41": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "qup03",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "42": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qup12",
+     null,
+     "phase_flag",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "43": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qup12",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "44": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qup12",
+     null,
+     "phase_flag",
+     "qdss_cti",
+     "wlan1_adc1",
+     "atest_usb13",
+     "ddr_pxi1",
+     null,
+     null
+    ]
+   },
+   "45": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qup12",
+     "qdss_cti",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "46": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qup13_i2c",
+     "qup13_uart",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "47": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qup13_i2c",
+     "qup13_uart",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "48": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "gcc_gp1",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "49": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "mi2s_1",
+     "btfm_slimbus",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "50": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "mi2s_1",
+     "btfm_slimbus",
+     "gp_pdm1",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "51": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "mi2s_1",
+     "btfm_slimbus",
+     "atest_usb2",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "52": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "mi2s_1",
+     "btfm_slimbus",
+     "atest_usb23",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "53": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "mi2s_0",
+     "qup15",
+     "qdss",
+     "atest_usb22",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "54": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "mi2s_0",
+     "qup15",
+     "qdss",
+     "atest_usb21",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "55": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "mi2s_0",
+     "qup15",
+     "qdss",
+     "atest_usb20",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "56": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "mi2s_0",
+     "qup15",
+     "gcc_gp1",
+     null,
+     "phase_flag",
+     "qdss",
+     null,
+     null,
+     null
+    ]
+   },
+   "57": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "lpass_ext",
+     "audio_ref",
+     "jitter_bist",
+     "gp_pdm2",
+     null,
+     "phase_flag",
+     "qdss",
+     null,
+     null
+    ]
+   },
+   "58": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "lpass_ext",
+     null,
+     "phase_flag",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "59": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qup10",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "60": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qup10",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "61": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qup10",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "62": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qup10",
+     "tgu_ch3",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "63": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qspi_clk",
+     "mdp_vsync0",
+     "mi2s_2",
+     "mdp_vsync1",
+     "mdp_vsync2",
+     "mdp_vsync3",
+     "tgu_ch0",
+     null,
+     "phase_flag"
+    ]
+   },
+   "64": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qspi_data",
+     "mi2s_2",
+     "tgu_ch1",
+     null,
+     "phase_flag",
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "65": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qspi_data",
+     "mi2s_2",
+     "vfr_1",
+     "tgu_ch2",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "66": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qspi_data",
+     "mi2s_2",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "67": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qspi_data",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "68": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qspi_cs",
+     "qup10",
+     "gp_pdm0",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "69": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "70": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     "mdp_vsync",
+     "ldo_en",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "71": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     null,
+     "mdp_vsync",
+     "ldo_update",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "72": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qspi_cs",
+     "qup10",
+     "prng_rosc",
+     null,
+     "qdss_cti",
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "73": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "74": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "75": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "uim2",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "76": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "uim2",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "77": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "uim2",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "78": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "uim2",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "79": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "uim1",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "80": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "uim1",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "81": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "uim1",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "82": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "uim1",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "83": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     "_V_GPIO",
+     "_V_PPS_IN",
+     "_V_PPS_OUT",
+     "gps_tx",
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "84": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     "_V_GPIO",
+     "_V_PPS_IN",
+     "_V_PPS_OUT",
+     "gps_tx",
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "85": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "uim_batt",
+     "dp_hot",
+     "aoss_cti",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "86": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qup14",
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "87": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qup14",
+     "adsp_ext",
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "88": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qup14",
+     "qdss",
+     "tsense_pwm1",
+     "tsense_pwm2",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "89": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qup14",
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "90": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qup14",
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "91": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qup14",
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "92": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "93": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "94": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "qup01",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "95": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "96": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "qlink_request",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "97": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "qlink_enable",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "98": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "99": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     "pa_indicator",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "100": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "101": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "102": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "103": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "104": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "usb_phy",
+     null,
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "105": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "106": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "107": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     "_V_GPIO",
+     "_V_PPS_IN",
+     "_V_PPS_OUT",
+     "gps_tx",
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "108": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "mss_lte",
+     null,
+     "phase_flag",
+     "ddr_pxi3",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "109": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "mss_lte",
+     "gps_tx",
+     null,
+     "phase_flag",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "110": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "111": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "112": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "113": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "114": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "115": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "qup04_i2c",
+     "qup04_uart",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "116": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "qup04_i2c",
+     "qup04_uart",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "117": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "dp_hot",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "118": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   }
+  }
+ },
+ "gcc": {
+  "base": "0x100000",
+  "clocks": {
+   "11": {
+    "binding": "GCC_CAMERA_HF_AXI_CLK",
+    "kind": "branch",
+    "halt_reg": "0xb020",
+    "enable_reg": "0xb020",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_camera_hf_axi_clk"
+   },
+   "12": {
+    "binding": "GCC_CAMERA_THROTTLE_HF_AXI_CLK",
+    "kind": "branch",
+    "halt_reg": "0xb080",
+    "enable_reg": "0xb080",
+    "hwcg_reg": "0xb080",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_camera_throttle_hf_axi_clk"
+   },
+   "14": {
+    "binding": "GCC_CE1_AHB_CLK",
+    "kind": "branch",
+    "halt_reg": "0x4100c",
+    "enable_reg": "0x52000",
+    "hwcg_reg": "0x4100c",
+    "enable_bit": 3,
+    "halt_check": "BRANCH_HALT_VOTED",
+    "name": "gcc_ce1_ahb_clk"
+   },
+   "15": {
+    "binding": "GCC_CE1_AXI_CLK",
+    "kind": "branch",
+    "halt_reg": "0x41008",
+    "enable_reg": "0x52000",
+    "enable_bit": 4,
+    "halt_check": "BRANCH_HALT_VOTED",
+    "name": "gcc_ce1_axi_clk"
+   },
+   "16": {
+    "binding": "GCC_CE1_CLK",
+    "kind": "branch",
+    "halt_reg": "0x41004",
+    "enable_reg": "0x52000",
+    "enable_bit": 5,
+    "halt_check": "BRANCH_HALT_VOTED",
+    "name": "gcc_ce1_clk"
+   },
+   "17": {
+    "binding": "GCC_CFG_NOC_USB3_PRIM_AXI_CLK",
+    "kind": "branch",
+    "halt_reg": "0x502c",
+    "enable_reg": "0x502c",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_cfg_noc_usb3_prim_axi_clk"
+   },
+   "18": {
+    "binding": "GCC_CPUSS_AHB_CLK",
+    "kind": "branch",
+    "halt_reg": "0x48000",
+    "enable_reg": "0x52000",
+    "enable_bit": 21,
+    "halt_check": "BRANCH_HALT_VOTED",
+    "name": "gcc_cpuss_ahb_clk"
+   },
+   "19": {
+    "binding": "GCC_CPUSS_AHB_CLK_SRC",
+    "kind": "rcg",
+    "cmd_rcgr": "0x48014"
+   },
+   "21": {
+    "binding": "GCC_CPUSS_RBCPR_CLK",
+    "kind": "branch",
+    "halt_reg": "0x48008",
+    "enable_reg": "0x48008",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_cpuss_rbcpr_clk"
+   },
+   "22": {
+    "binding": "GCC_DDRSS_GPU_AXI_CLK",
+    "kind": "branch",
+    "halt_reg": "0x4452c",
+    "enable_reg": "0x4452c",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_VOTED",
+    "name": "gcc_ddrss_gpu_axi_clk"
+   },
+   "24": {
+    "binding": "GCC_DISP_GPLL0_CLK_SRC",
+    "kind": "branch",
+    "enable_reg": "0x52000",
+    "enable_bit": 18,
+    "halt_check": "BRANCH_HALT_DELAY",
+    "name": "gcc_disp_gpll0_clk_src"
+   },
+   "25": {
+    "binding": "GCC_DISP_GPLL0_DIV_CLK_SRC",
+    "kind": "branch",
+    "enable_reg": "0x52000",
+    "enable_bit": 19,
+    "halt_check": "BRANCH_HALT_DELAY",
+    "name": "gcc_disp_gpll0_div_clk_src"
+   },
+   "26": {
+    "binding": "GCC_DISP_HF_AXI_CLK",
+    "kind": "branch",
+    "halt_reg": "0xb024",
+    "enable_reg": "0xb024",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_disp_hf_axi_clk"
+   },
+   "27": {
+    "binding": "GCC_DISP_THROTTLE_HF_AXI_CLK",
+    "kind": "branch",
+    "halt_reg": "0xb084",
+    "enable_reg": "0xb084",
+    "hwcg_reg": "0xb084",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_disp_throttle_hf_axi_clk"
+   },
+   "29": {
+    "binding": "GCC_GP1_CLK",
+    "kind": "branch",
+    "halt_reg": "0x64000",
+    "enable_reg": "0x64000",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_gp1_clk"
+   },
+   "30": {
+    "binding": "GCC_GP1_CLK_SRC",
+    "kind": "rcg",
+    "cmd_rcgr": "0x64004"
+   },
+   "31": {
+    "binding": "GCC_GP2_CLK",
+    "kind": "branch",
+    "halt_reg": "0x65000",
+    "enable_reg": "0x65000",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_gp2_clk"
+   },
+   "32": {
+    "binding": "GCC_GP2_CLK_SRC",
+    "kind": "rcg",
+    "cmd_rcgr": "0x65004"
+   },
+   "33": {
+    "binding": "GCC_GP3_CLK",
+    "kind": "branch",
+    "halt_reg": "0x66000",
+    "enable_reg": "0x66000",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_gp3_clk"
+   },
+   "34": {
+    "binding": "GCC_GP3_CLK_SRC",
+    "kind": "rcg",
+    "cmd_rcgr": "0x66004"
+   },
+   "36": {
+    "binding": "GCC_GPU_GPLL0_CLK_SRC",
+    "kind": "branch",
+    "enable_reg": "0x52000",
+    "enable_bit": 15,
+    "halt_check": "BRANCH_HALT_DELAY",
+    "name": "gcc_gpu_gpll0_clk_src"
+   },
+   "37": {
+    "binding": "GCC_GPU_GPLL0_DIV_CLK_SRC",
+    "kind": "branch",
+    "enable_reg": "0x52000",
+    "enable_bit": 16,
+    "halt_check": "BRANCH_HALT_DELAY",
+    "name": "gcc_gpu_gpll0_div_clk_src"
+   },
+   "38": {
+    "binding": "GCC_GPU_MEMNOC_GFX_CLK",
+    "kind": "branch",
+    "halt_reg": "0x7100c",
+    "enable_reg": "0x7100c",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_VOTED",
+    "name": "gcc_gpu_memnoc_gfx_clk"
+   },
+   "39": {
+    "binding": "GCC_GPU_SNOC_DVM_GFX_CLK",
+    "kind": "branch",
+    "halt_reg": "0x71018",
+    "enable_reg": "0x71018",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_gpu_snoc_dvm_gfx_clk"
+   },
+   "40": {
+    "binding": "GCC_NPU_AXI_CLK",
+    "kind": "branch",
+    "halt_reg": "0x4d008",
+    "enable_reg": "0x4d008",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_npu_axi_clk"
+   },
+   "41": {
+    "binding": "GCC_NPU_BWMON_AXI_CLK",
+    "kind": "branch",
+    "halt_reg": "0x73008",
+    "enable_reg": "0x73008",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_npu_bwmon_axi_clk"
+   },
+   "42": {
+    "binding": "GCC_NPU_BWMON_DMA_CFG_AHB_CLK",
+    "kind": "branch",
+    "halt_reg": "0x73018",
+    "enable_reg": "0x73018",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_npu_bwmon_dma_cfg_ahb_clk"
+   },
+   "43": {
+    "binding": "GCC_NPU_BWMON_DSP_CFG_AHB_CLK",
+    "kind": "branch",
+    "halt_reg": "0x7301c",
+    "enable_reg": "0x7301c",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_npu_bwmon_dsp_cfg_ahb_clk"
+   },
+   "44": {
+    "binding": "GCC_NPU_CFG_AHB_CLK",
+    "kind": "branch",
+    "halt_reg": "0x4d004",
+    "enable_reg": "0x4d004",
+    "hwcg_reg": "0x4d004",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_npu_cfg_ahb_clk"
+   },
+   "45": {
+    "binding": "GCC_NPU_DMA_CLK",
+    "kind": "branch",
+    "halt_reg": "0x4d1a0",
+    "enable_reg": "0x4d1a0",
+    "hwcg_reg": "0x4d1a0",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_npu_dma_clk"
+   },
+   "46": {
+    "binding": "GCC_NPU_GPLL0_CLK_SRC",
+    "kind": "branch",
+    "enable_reg": "0x52000",
+    "enable_bit": 25,
+    "halt_check": "BRANCH_HALT_DELAY",
+    "name": "gcc_npu_gpll0_clk_src"
+   },
+   "47": {
+    "binding": "GCC_NPU_GPLL0_DIV_CLK_SRC",
+    "kind": "branch",
+    "enable_reg": "0x52000",
+    "enable_bit": 26,
+    "halt_check": "BRANCH_HALT_DELAY",
+    "name": "gcc_npu_gpll0_div_clk_src"
+   },
+   "48": {
+    "binding": "GCC_PDM2_CLK",
+    "kind": "branch",
+    "halt_reg": "0x3300c",
+    "enable_reg": "0x3300c",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_pdm2_clk"
+   },
+   "49": {
+    "binding": "GCC_PDM2_CLK_SRC",
+    "kind": "rcg",
+    "cmd_rcgr": "0x33010"
+   },
+   "50": {
+    "binding": "GCC_PDM_AHB_CLK",
+    "kind": "branch",
+    "halt_reg": "0x33004",
+    "enable_reg": "0x33004",
+    "hwcg_reg": "0x33004",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_pdm_ahb_clk"
+   },
+   "51": {
+    "binding": "GCC_PDM_XO4_CLK",
+    "kind": "branch",
+    "halt_reg": "0x33008",
+    "enable_reg": "0x33008",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_pdm_xo4_clk"
+   },
+   "52": {
+    "binding": "GCC_PRNG_AHB_CLK",
+    "kind": "branch",
+    "halt_reg": "0x34004",
+    "enable_reg": "0x52000",
+    "hwcg_reg": "0x34004",
+    "enable_bit": 13,
+    "halt_check": "BRANCH_HALT_VOTED",
+    "name": "gcc_prng_ahb_clk"
+   },
+   "53": {
+    "binding": "GCC_QSPI_CNOC_PERIPH_AHB_CLK",
+    "kind": "branch",
+    "halt_reg": "0x4b004",
+    "enable_reg": "0x4b004",
+    "hwcg_reg": "0x4b004",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_qspi_cnoc_periph_ahb_clk"
+   },
+   "54": {
+    "binding": "GCC_QSPI_CORE_CLK",
+    "kind": "branch",
+    "halt_reg": "0x4b008",
+    "enable_reg": "0x4b008",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_qspi_core_clk"
+   },
+   "55": {
+    "binding": "GCC_QSPI_CORE_CLK_SRC",
+    "kind": "rcg",
+    "cmd_rcgr": "0x4b00c"
+   },
+   "56": {
+    "binding": "GCC_QUPV3_WRAP0_CORE_2X_CLK",
+    "kind": "branch",
+    "halt_reg": "0x17014",
+    "enable_reg": "0x52008",
+    "enable_bit": 9,
+    "halt_check": "BRANCH_HALT_VOTED",
+    "name": "gcc_qupv3_wrap0_core_2x_clk"
+   },
+   "57": {
+    "binding": "GCC_QUPV3_WRAP0_CORE_CLK",
+    "kind": "branch",
+    "halt_reg": "0x1700c",
+    "enable_reg": "0x52008",
+    "enable_bit": 8,
+    "halt_check": "BRANCH_HALT_VOTED",
+    "name": "gcc_qupv3_wrap0_core_clk"
+   },
+   "58": {
+    "binding": "GCC_QUPV3_WRAP0_S0_CLK",
+    "kind": "branch",
+    "halt_reg": "0x17030",
+    "enable_reg": "0x52008",
+    "enable_bit": 10,
+    "halt_check": "BRANCH_HALT_VOTED",
+    "name": "gcc_qupv3_wrap0_s0_clk"
+   },
+   "59": {
+    "binding": "GCC_QUPV3_WRAP0_S0_CLK_SRC",
+    "kind": "rcg",
+    "cmd_rcgr": "0x17034"
+   },
+   "60": {
+    "binding": "GCC_QUPV3_WRAP0_S1_CLK",
+    "kind": "branch",
+    "halt_reg": "0x17160",
+    "enable_reg": "0x52008",
+    "enable_bit": 11,
+    "halt_check": "BRANCH_HALT_VOTED",
+    "name": "gcc_qupv3_wrap0_s1_clk"
+   },
+   "61": {
+    "binding": "GCC_QUPV3_WRAP0_S1_CLK_SRC",
+    "kind": "rcg",
+    "cmd_rcgr": "0x17164"
+   },
+   "62": {
+    "binding": "GCC_QUPV3_WRAP0_S2_CLK",
+    "kind": "branch",
+    "halt_reg": "0x17290",
+    "enable_reg": "0x52008",
+    "enable_bit": 12,
+    "halt_check": "BRANCH_HALT_VOTED",
+    "name": "gcc_qupv3_wrap0_s2_clk"
+   },
+   "63": {
+    "binding": "GCC_QUPV3_WRAP0_S2_CLK_SRC",
+    "kind": "rcg",
+    "cmd_rcgr": "0x17294"
+   },
+   "64": {
+    "binding": "GCC_QUPV3_WRAP0_S3_CLK",
+    "kind": "branch",
+    "halt_reg": "0x173c0",
+    "enable_reg": "0x52008",
+    "enable_bit": 13,
+    "halt_check": "BRANCH_HALT_VOTED",
+    "name": "gcc_qupv3_wrap0_s3_clk"
+   },
+   "65": {
+    "binding": "GCC_QUPV3_WRAP0_S3_CLK_SRC",
+    "kind": "rcg",
+    "cmd_rcgr": "0x173c4"
+   },
+   "66": {
+    "binding": "GCC_QUPV3_WRAP0_S4_CLK",
+    "kind": "branch",
+    "halt_reg": "0x174f0",
+    "enable_reg": "0x52008",
+    "enable_bit": 14,
+    "halt_check": "BRANCH_HALT_VOTED",
+    "name": "gcc_qupv3_wrap0_s4_clk"
+   },
+   "67": {
+    "binding": "GCC_QUPV3_WRAP0_S4_CLK_SRC",
+    "kind": "rcg",
+    "cmd_rcgr": "0x174f4"
+   },
+   "68": {
+    "binding": "GCC_QUPV3_WRAP0_S5_CLK",
+    "kind": "branch",
+    "halt_reg": "0x17620",
+    "enable_reg": "0x52008",
+    "enable_bit": 15,
+    "halt_check": "BRANCH_HALT_VOTED",
+    "name": "gcc_qupv3_wrap0_s5_clk"
+   },
+   "69": {
+    "binding": "GCC_QUPV3_WRAP0_S5_CLK_SRC",
+    "kind": "rcg",
+    "cmd_rcgr": "0x17624"
+   },
+   "70": {
+    "binding": "GCC_QUPV3_WRAP1_CORE_2X_CLK",
+    "kind": "branch",
+    "halt_reg": "0x18004",
+    "enable_reg": "0x52008",
+    "enable_bit": 18,
+    "halt_check": "BRANCH_HALT_VOTED",
+    "name": "gcc_qupv3_wrap1_core_2x_clk"
+   },
+   "71": {
+    "binding": "GCC_QUPV3_WRAP1_CORE_CLK",
+    "kind": "branch",
+    "halt_reg": "0x18008",
+    "enable_reg": "0x52008",
+    "enable_bit": 19,
+    "halt_check": "BRANCH_HALT_VOTED",
+    "name": "gcc_qupv3_wrap1_core_clk"
+   },
+   "72": {
+    "binding": "GCC_QUPV3_WRAP1_S0_CLK",
+    "kind": "branch",
+    "halt_reg": "0x18014",
+    "enable_reg": "0x52008",
+    "enable_bit": 22,
+    "halt_check": "BRANCH_HALT_VOTED",
+    "name": "gcc_qupv3_wrap1_s0_clk"
+   },
+   "73": {
+    "binding": "GCC_QUPV3_WRAP1_S0_CLK_SRC",
+    "kind": "rcg",
+    "cmd_rcgr": "0x18018"
+   },
+   "74": {
+    "binding": "GCC_QUPV3_WRAP1_S1_CLK",
+    "kind": "branch",
+    "halt_reg": "0x18144",
+    "enable_reg": "0x52008",
+    "enable_bit": 23,
+    "halt_check": "BRANCH_HALT_VOTED",
+    "name": "gcc_qupv3_wrap1_s1_clk"
+   },
+   "75": {
+    "binding": "GCC_QUPV3_WRAP1_S1_CLK_SRC",
+    "kind": "rcg",
+    "cmd_rcgr": "0x18148"
+   },
+   "76": {
+    "binding": "GCC_QUPV3_WRAP1_S2_CLK",
+    "kind": "branch",
+    "halt_reg": "0x18274",
+    "enable_reg": "0x52008",
+    "enable_bit": 24,
+    "halt_check": "BRANCH_HALT_VOTED",
+    "name": "gcc_qupv3_wrap1_s2_clk"
+   },
+   "77": {
+    "binding": "GCC_QUPV3_WRAP1_S2_CLK_SRC",
+    "kind": "rcg",
+    "cmd_rcgr": "0x18278"
+   },
+   "78": {
+    "binding": "GCC_QUPV3_WRAP1_S3_CLK",
+    "kind": "branch",
+    "halt_reg": "0x183a4",
+    "enable_reg": "0x52008",
+    "enable_bit": 25,
+    "halt_check": "BRANCH_HALT_VOTED",
+    "name": "gcc_qupv3_wrap1_s3_clk"
+   },
+   "79": {
+    "binding": "GCC_QUPV3_WRAP1_S3_CLK_SRC",
+    "kind": "rcg",
+    "cmd_rcgr": "0x183a8"
+   },
+   "80": {
+    "binding": "GCC_QUPV3_WRAP1_S4_CLK",
+    "kind": "branch",
+    "halt_reg": "0x184d4",
+    "enable_reg": "0x52008",
+    "enable_bit": 26,
+    "halt_check": "BRANCH_HALT_VOTED",
+    "name": "gcc_qupv3_wrap1_s4_clk"
+   },
+   "81": {
+    "binding": "GCC_QUPV3_WRAP1_S4_CLK_SRC",
+    "kind": "rcg",
+    "cmd_rcgr": "0x184d8"
+   },
+   "82": {
+    "binding": "GCC_QUPV3_WRAP1_S5_CLK",
+    "kind": "branch",
+    "halt_reg": "0x18604",
+    "enable_reg": "0x52008",
+    "enable_bit": 27,
+    "halt_check": "BRANCH_HALT_VOTED",
+    "name": "gcc_qupv3_wrap1_s5_clk"
+   },
+   "83": {
+    "binding": "GCC_QUPV3_WRAP1_S5_CLK_SRC",
+    "kind": "rcg",
+    "cmd_rcgr": "0x18608"
+   },
+   "84": {
+    "binding": "GCC_QUPV3_WRAP_0_M_AHB_CLK",
+    "kind": "branch",
+    "halt_reg": "0x17004",
+    "enable_reg": "0x52008",
+    "enable_bit": 6,
+    "halt_check": "BRANCH_HALT_VOTED",
+    "name": "gcc_qupv3_wrap_0_m_ahb_clk"
+   },
+   "85": {
+    "binding": "GCC_QUPV3_WRAP_0_S_AHB_CLK",
+    "kind": "branch",
+    "halt_reg": "0x17008",
+    "enable_reg": "0x52008",
+    "hwcg_reg": "0x17008",
+    "enable_bit": 7,
+    "halt_check": "BRANCH_HALT_VOTED",
+    "name": "gcc_qupv3_wrap_0_s_ahb_clk"
+   },
+   "86": {
+    "binding": "GCC_QUPV3_WRAP_1_M_AHB_CLK",
+    "kind": "branch",
+    "halt_reg": "0x1800c",
+    "enable_reg": "0x52008",
+    "enable_bit": 20,
+    "halt_check": "BRANCH_HALT_VOTED",
+    "name": "gcc_qupv3_wrap_1_m_ahb_clk"
+   },
+   "87": {
+    "binding": "GCC_QUPV3_WRAP_1_S_AHB_CLK",
+    "kind": "branch",
+    "halt_reg": "0x18010",
+    "enable_reg": "0x52008",
+    "hwcg_reg": "0x18010",
+    "enable_bit": 21,
+    "halt_check": "BRANCH_HALT_VOTED",
+    "name": "gcc_qupv3_wrap_1_s_ahb_clk"
+   },
+   "88": {
+    "binding": "GCC_SDCC1_AHB_CLK",
+    "kind": "branch",
+    "halt_reg": "0x12008",
+    "enable_reg": "0x12008",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_sdcc1_ahb_clk"
+   },
+   "89": {
+    "binding": "GCC_SDCC1_APPS_CLK",
+    "kind": "branch",
+    "halt_reg": "0x1200c",
+    "enable_reg": "0x1200c",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_sdcc1_apps_clk"
+   },
+   "90": {
+    "binding": "GCC_SDCC1_APPS_CLK_SRC",
+    "kind": "rcg",
+    "cmd_rcgr": "0x12028"
+   },
+   "91": {
+    "binding": "GCC_SDCC1_ICE_CORE_CLK",
+    "kind": "branch",
+    "halt_reg": "0x12040",
+    "enable_reg": "0x12040",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_sdcc1_ice_core_clk"
+   },
+   "92": {
+    "binding": "GCC_SDCC1_ICE_CORE_CLK_SRC",
+    "kind": "rcg",
+    "cmd_rcgr": "0x12010"
+   },
+   "93": {
+    "binding": "GCC_SDCC2_AHB_CLK",
+    "kind": "branch",
+    "halt_reg": "0x14008",
+    "enable_reg": "0x14008",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_sdcc2_ahb_clk"
+   },
+   "94": {
+    "binding": "GCC_SDCC2_APPS_CLK",
+    "kind": "branch",
+    "halt_reg": "0x14004",
+    "enable_reg": "0x14004",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_sdcc2_apps_clk"
+   },
+   "95": {
+    "binding": "GCC_SDCC2_APPS_CLK_SRC",
+    "kind": "rcg",
+    "cmd_rcgr": "0x1400c"
+   },
+   "96": {
+    "binding": "GCC_SYS_NOC_CPUSS_AHB_CLK",
+    "kind": "branch",
+    "halt_reg": "0x4144",
+    "enable_reg": "0x52000",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT_VOTED",
+    "name": "gcc_sys_noc_cpuss_ahb_clk"
+   },
+   "97": {
+    "binding": "GCC_UFS_MEM_CLKREF_CLK",
+    "kind": "branch",
+    "halt_reg": "0x8c000",
+    "enable_reg": "0x8c000",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_ufs_mem_clkref_clk"
+   },
+   "98": {
+    "binding": "GCC_UFS_PHY_AHB_CLK",
+    "kind": "branch",
+    "halt_reg": "0x77014",
+    "enable_reg": "0x77014",
+    "hwcg_reg": "0x77014",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_ufs_phy_ahb_clk"
+   },
+   "99": {
+    "binding": "GCC_UFS_PHY_AXI_CLK",
+    "kind": "branch",
+    "halt_reg": "0x77038",
+    "enable_reg": "0x77038",
+    "hwcg_reg": "0x77038",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_ufs_phy_axi_clk"
+   },
+   "100": {
+    "binding": "GCC_UFS_PHY_AXI_CLK_SRC",
+    "kind": "rcg",
+    "cmd_rcgr": "0x77020"
+   },
+   "101": {
+    "binding": "GCC_UFS_PHY_ICE_CORE_CLK",
+    "kind": "branch",
+    "halt_reg": "0x77090",
+    "enable_reg": "0x77090",
+    "hwcg_reg": "0x77090",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_ufs_phy_ice_core_clk"
+   },
+   "102": {
+    "binding": "GCC_UFS_PHY_ICE_CORE_CLK_SRC",
+    "kind": "rcg",
+    "cmd_rcgr": "0x77048"
+   },
+   "103": {
+    "binding": "GCC_UFS_PHY_PHY_AUX_CLK",
+    "kind": "branch",
+    "halt_reg": "0x77094",
+    "enable_reg": "0x77094",
+    "hwcg_reg": "0x77094",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_ufs_phy_phy_aux_clk"
+   },
+   "104": {
+    "binding": "GCC_UFS_PHY_PHY_AUX_CLK_SRC",
+    "kind": "rcg",
+    "cmd_rcgr": "0x77098"
+   },
+   "105": {
+    "binding": "GCC_UFS_PHY_RX_SYMBOL_0_CLK",
+    "kind": "branch",
+    "halt_reg": "0x7701c",
+    "enable_reg": "0x7701c",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT_SKIP",
+    "name": "gcc_ufs_phy_rx_symbol_0_clk"
+   },
+   "106": {
+    "binding": "GCC_UFS_PHY_TX_SYMBOL_0_CLK",
+    "kind": "branch",
+    "halt_reg": "0x77018",
+    "enable_reg": "0x77018",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT_SKIP",
+    "name": "gcc_ufs_phy_tx_symbol_0_clk"
+   },
+   "107": {
+    "binding": "GCC_UFS_PHY_UNIPRO_CORE_CLK",
+    "kind": "branch",
+    "halt_reg": "0x7708c",
+    "enable_reg": "0x7708c",
+    "hwcg_reg": "0x7708c",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_ufs_phy_unipro_core_clk"
+   },
+   "108": {
+    "binding": "GCC_UFS_PHY_UNIPRO_CORE_CLK_SRC",
+    "kind": "rcg",
+    "cmd_rcgr": "0x77060"
+   },
+   "109": {
+    "binding": "GCC_USB30_PRIM_MASTER_CLK",
+    "kind": "branch",
+    "halt_reg": "0xf010",
+    "enable_reg": "0xf010",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_usb30_prim_master_clk"
+   },
+   "110": {
+    "binding": "GCC_USB30_PRIM_MASTER_CLK_SRC",
+    "kind": "rcg",
+    "cmd_rcgr": "0xf01c"
+   },
+   "111": {
+    "binding": "GCC_USB30_PRIM_MOCK_UTMI_CLK",
+    "kind": "branch",
+    "halt_reg": "0xf018",
+    "enable_reg": "0xf018",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_usb30_prim_mock_utmi_clk"
+   },
+   "112": {
+    "binding": "GCC_USB30_PRIM_MOCK_UTMI_CLK_SRC",
+    "kind": "rcg",
+    "cmd_rcgr": "0xf034"
+   },
+   "113": {
+    "binding": "GCC_USB30_PRIM_SLEEP_CLK",
+    "kind": "branch",
+    "halt_reg": "0xf014",
+    "enable_reg": "0xf014",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_usb30_prim_sleep_clk"
+   },
+   "114": {
+    "binding": "GCC_USB3_PRIM_CLKREF_CLK",
+    "kind": "branch",
+    "halt_reg": "0x8c010",
+    "enable_reg": "0x8c010",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_usb3_prim_clkref_clk"
+   },
+   "115": {
+    "binding": "GCC_USB3_PRIM_PHY_AUX_CLK",
+    "kind": "branch",
+    "halt_reg": "0xf050",
+    "enable_reg": "0xf050",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_usb3_prim_phy_aux_clk"
+   },
+   "116": {
+    "binding": "GCC_USB3_PRIM_PHY_AUX_CLK_SRC",
+    "kind": "rcg",
+    "cmd_rcgr": "0xf060"
+   },
+   "117": {
+    "binding": "GCC_USB3_PRIM_PHY_COM_AUX_CLK",
+    "kind": "branch",
+    "halt_reg": "0xf054",
+    "enable_reg": "0xf054",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_usb3_prim_phy_com_aux_clk"
+   },
+   "118": {
+    "binding": "GCC_USB3_PRIM_PHY_PIPE_CLK",
+    "kind": "branch",
+    "halt_reg": "0xf058",
+    "enable_reg": "0xf058",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT_SKIP",
+    "name": "gcc_usb3_prim_phy_pipe_clk"
+   },
+   "119": {
+    "binding": "GCC_USB_PHY_CFG_AHB2PHY_CLK",
+    "kind": "branch",
+    "halt_reg": "0x6a004",
+    "enable_reg": "0x6a004",
+    "hwcg_reg": "0x6a004",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_usb_phy_cfg_ahb2phy_clk"
+   },
+   "121": {
+    "binding": "GCC_VIDEO_AXI_CLK",
+    "kind": "branch",
+    "halt_reg": "0xb01c",
+    "enable_reg": "0xb01c",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_video_axi_clk"
+   },
+   "122": {
+    "binding": "GCC_VIDEO_GPLL0_DIV_CLK_SRC",
+    "kind": "branch",
+    "enable_reg": "0x52000",
+    "enable_bit": 20,
+    "halt_check": "BRANCH_HALT_DELAY",
+    "name": "gcc_video_gpll0_div_clk_src"
+   },
+   "123": {
+    "binding": "GCC_VIDEO_THROTTLE_AXI_CLK",
+    "kind": "branch",
+    "halt_reg": "0xb07c",
+    "enable_reg": "0xb07c",
+    "hwcg_reg": "0xb07c",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_video_throttle_axi_clk"
+   },
+   "125": {
+    "binding": "GCC_MSS_CFG_AHB_CLK",
+    "kind": "branch",
+    "halt_reg": "0x8a000",
+    "enable_reg": "0x8a000",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_mss_cfg_ahb_clk"
+   },
+   "126": {
+    "binding": "GCC_MSS_MFAB_AXIS_CLK",
+    "kind": "branch",
+    "halt_reg": "0x8a004",
+    "enable_reg": "0x8a004",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT_VOTED",
+    "name": "gcc_mss_mfab_axis_clk"
+   },
+   "127": {
+    "binding": "GCC_MSS_NAV_AXI_CLK",
+    "kind": "branch",
+    "halt_reg": "0x8a00c",
+    "enable_reg": "0x8a00c",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT_VOTED",
+    "name": "gcc_mss_nav_axi_clk"
+   },
+   "128": {
+    "binding": "GCC_MSS_Q6_MEMNOC_AXI_CLK",
+    "kind": "branch",
+    "halt_reg": "0x8a154",
+    "enable_reg": "0x8a154",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_mss_q6_memnoc_axi_clk"
+   },
+   "129": {
+    "binding": "GCC_MSS_SNOC_AXI_CLK",
+    "kind": "branch",
+    "halt_reg": "0x8a150",
+    "enable_reg": "0x8a150",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_mss_snoc_axi_clk"
+   },
+   "130": {
+    "binding": "GCC_SEC_CTRL_CLK_SRC",
+    "kind": "rcg",
+    "cmd_rcgr": "0x3d030"
+   },
+   "131": {
+    "binding": "GCC_LPASS_CFG_NOC_SWAY_CLK",
+    "kind": "branch",
+    "halt_reg": "0x47018",
+    "enable_reg": "0x47018",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT_DELAY",
+    "name": "gcc_lpass_cfg_noc_sway_clk"
+   }
+  }
+ },
+ "qup_se_clocks": {
+  "0x880000": "GCC_QUPV3_WRAP0_S0_CLK",
+  "0x884000": "GCC_QUPV3_WRAP0_S1_CLK",
+  "0x888000": "GCC_QUPV3_WRAP0_S2_CLK",
+  "0x88c000": "GCC_QUPV3_WRAP0_S3_CLK",
+  "0x890000": "GCC_QUPV3_WRAP0_S4_CLK",
+  "0x894000": "GCC_QUPV3_WRAP0_S5_CLK",
+  "0xa80000": "GCC_QUPV3_WRAP1_S0_CLK",
+  "0xa84000": "GCC_QUPV3_WRAP1_S1_CLK",
+  "0xa88000": "GCC_QUPV3_WRAP1_S2_CLK",
+  "0xa8c000": "GCC_QUPV3_WRAP1_S3_CLK",
+  "0xa90000": "GCC_QUPV3_WRAP1_S4_CLK",
+  "0xa94000": "GCC_QUPV3_WRAP1_S5_CLK"
+ }
+}

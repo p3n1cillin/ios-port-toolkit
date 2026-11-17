@@ -1,0 +1,386 @@
+{
+ "soc": "gs101",
+ "vendor": "google-tensor (exynos-derived)",
+ "_generated_by": "toolkit/tools/soc_other.py",
+ "_sources": {
+  "banks": "pinctrl-exynos-arm64.c",
+  "dtsi": "gs101.dtsi"
+ },
+ "pin_state": "samsung,pins = \"bank-N\"; samsung,pin-function = <F>",
+ "bank_registers": {
+  "con": "0x0 (4 bits a pin)",
+  "dat": "0x4",
+  "pud": "0x8",
+  "drv": "0xC"
+ },
+ "gic": {
+  "dist": "0x10400000",
+  "redist": "0x10440000"
+ },
+ "i2c": [
+  {
+   "node": "hsi2c_1: i2c@10900000",
+   "base": "0x10900000"
+  },
+  {
+   "node": "hsi2c_2: i2c@10910000",
+   "base": "0x10910000"
+  },
+  {
+   "node": "hsi2c_3: i2c@10920000",
+   "base": "0x10920000"
+  },
+  {
+   "node": "hsi2c_4: i2c@10930000",
+   "base": "0x10930000"
+  },
+  {
+   "node": "hsi2c_5: i2c@10940000",
+   "base": "0x10940000"
+  },
+  {
+   "node": "hsi2c_6: i2c@10950000",
+   "base": "0x10950000"
+  },
+  {
+   "node": "hsi2c_7: i2c@10960000",
+   "base": "0x10960000"
+  },
+  {
+   "node": "hsi2c_8: i2c@10970000",
+   "base": "0x10970000"
+  },
+  {
+   "node": "hsi2c_14: i2c@10a20000",
+   "base": "0x10a20000"
+  },
+  {
+   "node": "hsi2c_0: i2c@10d10000",
+   "base": "0x10d10000"
+  },
+  {
+   "node": "hsi2c_9: i2c@10d20000",
+   "base": "0x10d20000"
+  },
+  {
+   "node": "hsi2c_10: i2c@10d30000",
+   "base": "0x10d30000"
+  },
+  {
+   "node": "hsi2c_11: i2c@10d40000",
+   "base": "0x10d40000"
+  },
+  {
+   "node": "hsi2c_12: i2c@10d50000",
+   "base": "0x10d50000"
+  },
+  {
+   "node": "hsi2c_13: i2c@10d60000",
+   "base": "0x10d60000"
+  }
+ ],
+ "controllers": [
+  {
+   "banks_array": "gs101_pin_alive",
+   "banks": [
+    {
+     "name": "gpa0",
+     "pins": 8,
+     "offset": "0x0"
+    },
+    {
+     "name": "gpa1",
+     "pins": 7,
+     "offset": "0x20"
+    },
+    {
+     "name": "gpa2",
+     "pins": 5,
+     "offset": "0x40"
+    },
+    {
+     "name": "gpa3",
+     "pins": 4,
+     "offset": "0x60"
+    },
+    {
+     "name": "gpa4",
+     "pins": 4,
+     "offset": "0x80"
+    },
+    {
+     "name": "gpa5",
+     "pins": 7,
+     "offset": "0xa0"
+    },
+    {
+     "name": "gpa9",
+     "pins": 8,
+     "offset": "0xc0"
+    },
+    {
+     "name": "gpa10",
+     "pins": 2,
+     "offset": "0xe0"
+    }
+   ],
+   "label": "pinctrl_gpio_alive",
+   "base": "0x174d0000"
+  },
+  {
+   "banks_array": "gs101_pin_far_alive",
+   "banks": [
+    {
+     "name": "gpa6",
+     "pins": 8,
+     "offset": "0x0"
+    },
+    {
+     "name": "gpa7",
+     "pins": 4,
+     "offset": "0x20"
+    },
+    {
+     "name": "gpa8",
+     "pins": 8,
+     "offset": "0x40"
+    },
+    {
+     "name": "gpa11",
+     "pins": 2,
+     "offset": "0x60"
+    }
+   ],
+   "label": "pinctrl_far_alive",
+   "base": "0x174e0000"
+  },
+  {
+   "banks_array": "gs101_pin_gsacore",
+   "banks": [
+    {
+     "name": "gps0",
+     "pins": 2,
+     "offset": "0x0"
+    },
+    {
+     "name": "gps1",
+     "pins": 8,
+     "offset": "0x20"
+    },
+    {
+     "name": "gps2",
+     "pins": 3,
+     "offset": "0x40"
+    }
+   ],
+   "label": "pinctrl_gsacore",
+   "base": "0x17a80000"
+  },
+  {
+   "banks_array": "gs101_pin_gsactrl",
+   "banks": [
+    {
+     "name": "gps3",
+     "pins": 6,
+     "offset": "0x0"
+    }
+   ],
+   "label": "pinctrl_gsactrl",
+   "base": "0x17940000"
+  },
+  {
+   "banks_array": "gs101_pin_peric0",
+   "banks": [
+    {
+     "name": "gpp0",
+     "pins": 5,
+     "offset": "0x0"
+    },
+    {
+     "name": "gpp1",
+     "pins": 4,
+     "offset": "0x20"
+    },
+    {
+     "name": "gpp2",
+     "pins": 4,
+     "offset": "0x40"
+    },
+    {
+     "name": "gpp3",
+     "pins": 2,
+     "offset": "0x60"
+    },
+    {
+     "name": "gpp4",
+     "pins": 4,
+     "offset": "0x80"
+    },
+    {
+     "name": "gpp5",
+     "pins": 2,
+     "offset": "0xa0"
+    },
+    {
+     "name": "gpp6",
+     "pins": 4,
+     "offset": "0xc0"
+    },
+    {
+     "name": "gpp7",
+     "pins": 2,
+     "offset": "0xe0"
+    },
+    {
+     "name": "gpp8",
+     "pins": 4,
+     "offset": "0x100"
+    },
+    {
+     "name": "gpp9",
+     "pins": 2,
+     "offset": "0x120"
+    },
+    {
+     "name": "gpp10",
+     "pins": 4,
+     "offset": "0x140"
+    },
+    {
+     "name": "gpp11",
+     "pins": 2,
+     "offset": "0x160"
+    },
+    {
+     "name": "gpp12",
+     "pins": 4,
+     "offset": "0x180"
+    },
+    {
+     "name": "gpp13",
+     "pins": 2,
+     "offset": "0x1a0"
+    },
+    {
+     "name": "gpp14",
+     "pins": 4,
+     "offset": "0x1c0"
+    },
+    {
+     "name": "gpp15",
+     "pins": 2,
+     "offset": "0x1e0"
+    },
+    {
+     "name": "gpp16",
+     "pins": 4,
+     "offset": "0x200"
+    },
+    {
+     "name": "gpp17",
+     "pins": 2,
+     "offset": "0x220"
+    },
+    {
+     "name": "gpp18",
+     "pins": 4,
+     "offset": "0x240"
+    },
+    {
+     "name": "gpp19",
+     "pins": 4,
+     "offset": "0x260"
+    }
+   ],
+   "label": "pinctrl_peric0",
+   "base": "0x10840000"
+  },
+  {
+   "banks_array": "gs101_pin_peric1",
+   "banks": [
+    {
+     "name": "gpp20",
+     "pins": 8,
+     "offset": "0x0"
+    },
+    {
+     "name": "gpp21",
+     "pins": 4,
+     "offset": "0x20"
+    },
+    {
+     "name": "gpp22",
+     "pins": 2,
+     "offset": "0x40"
+    },
+    {
+     "name": "gpp23",
+     "pins": 8,
+     "offset": "0x60"
+    },
+    {
+     "name": "gpp24",
+     "pins": 4,
+     "offset": "0x80"
+    },
+    {
+     "name": "gpp25",
+     "pins": 4,
+     "offset": "0xa0"
+    },
+    {
+     "name": "gpp26",
+     "pins": 5,
+     "offset": "0xc0"
+    },
+    {
+     "name": "gpp27",
+     "pins": 4,
+     "offset": "0xe0"
+    }
+   ],
+   "label": "pinctrl_peric1",
+   "base": "0x10c40000"
+  },
+  {
+   "banks_array": "gs101_pin_hsi1",
+   "banks": [
+    {
+     "name": "gph0",
+     "pins": 6,
+     "offset": "0x0"
+    },
+    {
+     "name": "gph1",
+     "pins": 7,
+     "offset": "0x20"
+    }
+   ],
+   "label": "pinctrl_hsi1",
+   "base": "0x11840000"
+  },
+  {
+   "banks_array": "gs101_pin_hsi2",
+   "banks": [
+    {
+     "name": "gph2",
+     "pins": 6,
+     "offset": "0x0"
+    },
+    {
+     "name": "gph3",
+     "pins": 2,
+     "offset": "0x20"
+    },
+    {
+     "name": "gph4",
+     "pins": 6,
+     "offset": "0x40"
+    }
+   ],
+   "label": "pinctrl_hsi2",
+   "base": "0x14440000"
+  }
+ ],
+ "_note": "controller i = DT alias pinctrl<i> (the driver matches them in this order). "
+}

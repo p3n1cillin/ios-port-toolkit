@@ -1,0 +1,2085 @@
+{
+ "soc": "sdm670",
+ "vendor": "qcom",
+ "_generated_by": "toolkit/tools/qcom_socdata.py",
+ "_sources": {
+  "pinctrl": "pinctrl-sdm670.c",
+  "gcc": "gcc-sdm670.c",
+  "bindings": "qcom,sdm670-gcc.h",
+  "dtsi": "sdm670.dtsi"
+ },
+ "gpio_stride": "0x1000",
+ "gic": {
+  "dist": "0x17a00000",
+  "redist": "0x17a60000"
+ },
+ "tlmm": {
+  "tiles": null,
+  "bases": {
+   "north": "0x3900000",
+   "south": "0x3d00000",
+   "west": "0x3500000",
+   "_source": "sdm670.dtsi tlmm reg + pinctrl-sdm670.c tile offsets"
+  },
+  "pins": {
+   "0": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "qup0",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "1": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "qup0",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "2": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "qup0",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "3": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "qup0",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "4": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qup9",
+     "qdss_cti",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "5": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qup9",
+     "qdss_cti",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "6": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qup9",
+     null,
+     "ddr_pxi0",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "7": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qup9",
+     "ddr_bist",
+     null,
+     "atest_tsens2",
+     "vsense_trigger",
+     "atest_usb1",
+     "ddr_pxi0",
+     null,
+     null
+    ]
+   },
+   "8": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "qup_l4",
+     "gp_pdm1",
+     "ddr_bist",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "9": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "qup_l5",
+     "ddr_bist",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "10": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "mdp_vsync",
+     "qup_l6",
+     "ddr_bist",
+     "wlan2_adc1",
+     "atest_usb11",
+     "ddr_pxi2",
+     null,
+     null,
+     null
+    ]
+   },
+   "11": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "mdp_vsync",
+     "edp_lcd",
+     "dbg_out",
+     "wlan2_adc0",
+     "atest_usb10",
+     "ddr_pxi2",
+     null,
+     null,
+     null
+    ]
+   },
+   "12": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "mdp_vsync",
+     "m_voc",
+     "tsif1_sync",
+     "ddr_pxi3",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "13": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "cam_mclk",
+     "pll_bypassnl",
+     "qdss",
+     "ddr_pxi3",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "14": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "cam_mclk",
+     "pll_reset",
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "15": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "cam_mclk",
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "16": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "cam_mclk",
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "17": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "cci_i2c",
+     "qup1",
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "18": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "cci_i2c",
+     "qup1",
+     null,
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "19": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "cci_i2c",
+     "qup1",
+     null,
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "20": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "cci_i2c",
+     "qup1",
+     null,
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "21": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "cci_timer0",
+     "gcc_gp2",
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "22": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "cci_timer1",
+     "gcc_gp3",
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "23": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "cci_timer2",
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "24": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "cci_timer3",
+     "cci_async",
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "25": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "cci_timer4",
+     "cci_async",
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "26": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "cci_async",
+     "qdss",
+     "jitter_bist",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "27": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "qup2",
+     "qdss",
+     "pll_bist",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "28": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "qup2",
+     "qdss",
+     "agera_pll",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "29": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "qup2",
+     null,
+     "phase_flag",
+     "qdss",
+     "atest_tsens",
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "30": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "qup2",
+     "phase_flag",
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "31": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "qup11",
+     "qup14",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "32": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "qup11",
+     "qup14",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "33": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "qup11",
+     "qup14",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "34": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "qup11",
+     "qup14",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "35": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "pci_e0",
+     "qup_l4",
+     "jitter_bist",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "36": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "pci_e0",
+     "qup_l5",
+     "pll_bist",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "37": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qup_l6",
+     "agera_pll",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "38": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "usb_phy",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "39": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "lpass_slimbus",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "40": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "sd_write",
+     "tsif1_error",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "41": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "qup3",
+     null,
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "42": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "qup3",
+     null,
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "43": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "qup3",
+     null,
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "44": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "qup3",
+     null,
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "45": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "qup6",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "46": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "qup6",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "47": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "qup6",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "48": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "qup6",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "49": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qup12",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "50": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qup12",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "51": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qup12",
+     "qdss_cti",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "52": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qup12",
+     "phase_flag",
+     "qdss_cti",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "53": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qup10",
+     "phase_flag",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "54": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qup10",
+     "gp_pdm0",
+     "phase_flag",
+     null,
+     "wlan1_adc1",
+     "atest_usb13",
+     "ddr_pxi1",
+     null,
+     null
+    ]
+   },
+   "55": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qup10",
+     "phase_flag",
+     null,
+     "wlan1_adc0",
+     "atest_usb12",
+     "ddr_pxi1",
+     null,
+     null,
+     null
+    ]
+   },
+   "56": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qup10",
+     "phase_flag",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "57": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qua_mi2s",
+     "gcc_gp1",
+     "phase_flag",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "65": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "pri_mi2s",
+     "qup8",
+     "wsa_clk",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "66": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "pri_mi2s_ws",
+     "qup8",
+     "wsa_data",
+     "gp_pdm1",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "67": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "pri_mi2s",
+     "qup8",
+     null,
+     "atest_usb2",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "68": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "pri_mi2s",
+     "qup8",
+     null,
+     "atest_usb23",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "75": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "ter_mi2s",
+     "phase_flag",
+     "qdss",
+     "atest_usb22",
+     "qup_l4",
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "76": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "ter_mi2s",
+     "phase_flag",
+     "qdss",
+     "atest_usb21",
+     "qup_l5",
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "77": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "ter_mi2s",
+     "phase_flag",
+     "qdss",
+     "atest_usb20",
+     "qup_l6",
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "78": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "ter_mi2s",
+     "gcc_gp1",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "79": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "sec_mi2s",
+     "gp_pdm2",
+     null,
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "80": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "sec_mi2s",
+     null,
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "81": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "sec_mi2s",
+     "qup15",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "82": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "sec_mi2s",
+     "qup15",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "83": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "sec_mi2s",
+     "qup15",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "84": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qup15",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "85": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "qup5",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "86": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "qup5",
+     "copy_gp",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "87": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "qup5",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "88": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "qup5",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "89": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "tsif1_clk",
+     "qup4",
+     "tgu_ch3",
+     "phase_flag",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "90": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "tsif1_en",
+     "mdp_vsync0",
+     "qup4",
+     "mdp_vsync1",
+     "mdp_vsync2",
+     "mdp_vsync3",
+     "tgu_ch0",
+     "phase_flag",
+     "qdss_cti"
+    ]
+   },
+   "91": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "tsif1_data",
+     "sdc4_cmd",
+     "qup4",
+     "tgu_ch1",
+     null,
+     "qdss_cti",
+     null,
+     null,
+     null
+    ]
+   },
+   "92": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "tsif2_error",
+     "sdc4_data",
+     "qup4",
+     "vfr_1",
+     "tgu_ch2",
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "93": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "tsif2_clk",
+     "sdc4_clk",
+     "qup7",
+     null,
+     "qdss",
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "94": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "tsif2_en",
+     "sdc4_data",
+     "qup7",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "95": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "tsif2_data",
+     "sdc4_data",
+     "qup7",
+     "gp_pdm0",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "96": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "tsif2_sync",
+     "sdc4_data",
+     "qup7",
+     "phase_flag",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "97": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     "mdp_vsync",
+     "ldo_en",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "98": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     "mdp_vsync",
+     "ldo_update",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "99": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "phase_flag",
+     "prng_rosc",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "100": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "phase_flag",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "101": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     "phase_flag",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "102": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "pci_e1",
+     "prng_rosc",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "103": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "pci_e1",
+     "copy_phase",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "105": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "uim2_data",
+     "qup13",
+     "qup_l4",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "106": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "uim2_clk",
+     "qup13",
+     "qup_l5",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "107": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "uim2_reset",
+     "qup13",
+     "qup_l6",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "108": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "uim2_present",
+     "qup13",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "109": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "uim1_data",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "110": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "uim1_clk",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "111": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "uim1_reset",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "112": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "uim1_present",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "113": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "uim_batt",
+     "edp_hot",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "114": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     "nav_pps",
+     "nav_pps",
+     "gps_tx",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "115": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     "nav_pps",
+     "nav_pps",
+     "gps_tx",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "116": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "117": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     null,
+     "qdss",
+     "atest_char",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "118": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "adsp_ext",
+     null,
+     "qdss",
+     "atest_char",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "119": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     null,
+     "qdss",
+     "atest_char",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "120": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     null,
+     "qdss",
+     "atest_char",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "121": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     null,
+     "qdss",
+     "atest_char",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "122": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     null,
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "123": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qup_l4",
+     null,
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "124": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qup_l5",
+     null,
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "125": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qup_l6",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "126": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "127": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "128": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "nav_pps",
+     "nav_pps",
+     "gps_tx",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "129": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "nav_pps",
+     "nav_pps",
+     "gps_tx",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "130": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "qlink_request",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "131": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "qlink_enable",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "132": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "133": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "134": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "135": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     "pa_indicator",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "136": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "137": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     "phase_flag",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "138": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     "phase_flag",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "139": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     "phase_flag",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "140": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     "phase_flag",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "141": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     "phase_flag",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "142": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     "phase_flag",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "143": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     "nav_pps",
+     "nav_pps",
+     "gps_tx",
+     "phase_flag",
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "144": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "mss_lte",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "145": {
+    "tile": "south",
+    "functions": [
+     "gpio",
+     "mss_lte",
+     "gps_tx",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "146": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "147": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "148": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "149": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   }
+  }
+ },
+ "qup_se_clocks": {
+  "0x880000": "GCC_QUPV3_WRAP0_S0_CLK",
+  "0x884000": "GCC_QUPV3_WRAP0_S1_CLK",
+  "0x888000": "GCC_QUPV3_WRAP0_S2_CLK",
+  "0x88c000": "GCC_QUPV3_WRAP0_S3_CLK",
+  "0x890000": "GCC_QUPV3_WRAP0_S4_CLK",
+  "0x894000": "GCC_QUPV3_WRAP0_S5_CLK",
+  "0x898000": "GCC_QUPV3_WRAP0_S6_CLK",
+  "0x89c000": "GCC_QUPV3_WRAP0_S7_CLK",
+  "0xa80000": "GCC_QUPV3_WRAP1_S0_CLK",
+  "0xa84000": "GCC_QUPV3_WRAP1_S1_CLK",
+  "0xa88000": "GCC_QUPV3_WRAP1_S2_CLK",
+  "0xa8c000": "GCC_QUPV3_WRAP1_S3_CLK",
+  "0xa90000": "GCC_QUPV3_WRAP1_S4_CLK",
+  "0xa94000": "GCC_QUPV3_WRAP1_S5_CLK",
+  "0xa98000": "GCC_QUPV3_WRAP1_S6_CLK",
+  "0xa9c000": "GCC_QUPV3_WRAP1_S7_CLK"
+ }
+}

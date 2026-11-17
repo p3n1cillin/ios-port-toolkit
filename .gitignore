@@ -1,0 +1,26 @@
+__pycache__/
+*.pyc
+# build outputs, firmware and images never go in
+build/
+cycles/
+*.img
+*.img.lz4
+*.bin
+*.mbn
+*.mdt
+*.b[0-9][0-9]
+*.elf
+*.efi
+*.fd
+*.macho
+*.apfs
+*.tar
+*.tar.md5
+*.zip
+*.dtb
+*.dts
+# per-device private data
+devices/*.local.json
+PHONE-STATE.json
+backups/
+downloads/

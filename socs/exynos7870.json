@@ -1,0 +1,260 @@
+{
+ "soc": "exynos7870",
+ "vendor": "samsung-exynos",
+ "_generated_by": "toolkit/tools/soc_other.py",
+ "_sources": {
+  "banks": "pinctrl-exynos-arm64.c",
+  "dtsi": "exynos7870.dtsi"
+ },
+ "pin_state": "samsung,pins = \"bank-N\"; samsung,pin-function = <F>",
+ "bank_registers": {
+  "con": "0x0 (4 bits a pin)",
+  "dat": "0x4",
+  "pud": "0x8",
+  "drv": "0xC"
+ },
+ "gic": {
+  "dist": "0x104e1000",
+  "redist": "0x104e2000"
+ },
+ "i2c": [],
+ "controllers": [
+  {
+   "banks_array": "exynos7870_pin_banks0",
+   "banks": [
+    {
+     "name": "etc0",
+     "pins": 6,
+     "offset": "0x000"
+    },
+    {
+     "name": "etc1",
+     "pins": 3,
+     "offset": "0x020"
+    },
+    {
+     "name": "gpa0",
+     "pins": 8,
+     "offset": "0x040"
+    },
+    {
+     "name": "gpa1",
+     "pins": 8,
+     "offset": "0x060"
+    },
+    {
+     "name": "gpa2",
+     "pins": 8,
+     "offset": "0x080"
+    },
+    {
+     "name": "gpq0",
+     "pins": 2,
+     "offset": "0x0c0"
+    }
+   ],
+   "label": "pinctrl_alive",
+   "base": "0x139f0000"
+  },
+  {
+   "banks_array": "exynos7870_pin_banks1",
+   "banks": [
+    {
+     "name": "gpz0",
+     "pins": 4,
+     "offset": "0x000"
+    },
+    {
+     "name": "gpz1",
+     "pins": 6,
+     "offset": "0x020"
+    },
+    {
+     "name": "gpz2",
+     "pins": 4,
+     "offset": "0x040"
+    }
+   ],
+   "label": "pinctrl_dispaud",
+   "base": "0x148c0000"
+  },
+  {
+   "banks_array": "exynos7870_pin_banks2",
+   "banks": [
+    {
+     "name": "gpc7",
+     "pins": 5,
+     "offset": "0x000"
+    }
+   ],
+   "label": "pinctrl_ese",
+   "base": "0x139e0000"
+  },
+  {
+   "banks_array": "exynos7870_pin_banks3",
+   "banks": [
+    {
+     "name": "gpr0",
+     "pins": 3,
+     "offset": "0x000"
+    },
+    {
+     "name": "gpr1",
+     "pins": 8,
+     "offset": "0x020"
+    },
+    {
+     "name": "gpr2",
+     "pins": 2,
+     "offset": "0x040"
+    },
+    {
+     "name": "gpr3",
+     "pins": 4,
+     "offset": "0x060"
+    },
+    {
+     "name": "gpr4",
+     "pins": 6,
+     "offset": "0x080"
+    }
+   ],
+   "label": "pinctrl_fsys",
+   "base": "0x13750000"
+  },
+  {
+   "banks_array": "exynos7870_pin_banks4",
+   "banks": [
+    {
+     "name": "gpm0",
+     "pins": 2,
+     "offset": "0x000"
+    }
+   ],
+   "label": "pinctrl_mif",
+   "base": "0x10530000"
+  },
+  {
+   "banks_array": "exynos7870_pin_banks5",
+   "banks": [
+    {
+     "name": "gpc2",
+     "pins": 4,
+     "offset": "0x000"
+    }
+   ],
+   "label": "pinctrl_nfc",
+   "base": "0x139c0000"
+  },
+  {
+   "banks_array": "exynos7870_pin_banks6",
+   "banks": [
+    {
+     "name": "gpb0",
+     "pins": 4,
+     "offset": "0x000"
+    },
+    {
+     "name": "gpc0",
+     "pins": 3,
+     "offset": "0x020"
+    },
+    {
+     "name": "gpc1",
+     "pins": 4,
+     "offset": "0x040"
+    },
+    {
+     "name": "gpc4",
+     "pins": 4,
+     "offset": "0x060"
+    },
+    {
+     "name": "gpc5",
+     "pins": 2,
+     "offset": "0x080"
+    },
+    {
+     "name": "gpc6",
+     "pins": 4,
+     "offset": "0x0a0"
+    },
+    {
+     "name": "gpc8",
+     "pins": 2,
+     "offset": "0x0c0"
+    },
+    {
+     "name": "gpc9",
+     "pins": 2,
+     "offset": "0x0e0"
+    },
+    {
+     "name": "gpd1",
+     "pins": 7,
+     "offset": "0x100"
+    },
+    {
+     "name": "gpd2",
+     "pins": 6,
+     "offset": "0x120"
+    },
+    {
+     "name": "gpd3",
+     "pins": 8,
+     "offset": "0x140"
+    },
+    {
+     "name": "gpd4",
+     "pins": 7,
+     "offset": "0x160"
+    },
+    {
+     "name": "gpe0",
+     "pins": 3,
+     "offset": "0x1a0"
+    },
+    {
+     "name": "gpf0",
+     "pins": 4,
+     "offset": "0x1c0"
+    },
+    {
+     "name": "gpf1",
+     "pins": 2,
+     "offset": "0x1e0"
+    },
+    {
+     "name": "gpf2",
+     "pins": 2,
+     "offset": "0x200"
+    },
+    {
+     "name": "gpf3",
+     "pins": 4,
+     "offset": "0x220"
+    },
+    {
+     "name": "gpf4",
+     "pins": 5,
+     "offset": "0x240"
+    }
+   ],
+   "label": "pinctrl_top",
+   "base": "0x139b0000"
+  },
+  {
+   "banks_array": "exynos7870_pin_banks7",
+   "banks": [
+    {
+     "name": "gpc3",
+     "pins": 3,
+     "offset": "0x000"
+    }
+   ],
+   "label": "pinctrl_touch",
+   "base": "0x139d0000"
+  }
+ ],
+ "_note": "controller i = DT alias pinctrl<i> (the driver matches them in this order). "
+}

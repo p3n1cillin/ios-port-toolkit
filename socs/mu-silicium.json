@@ -1,0 +1,1224 @@
+{
+ "_generated_by": "toolkit/tools/mu_silicium_index.py",
+ "_about": "which SoCs/devices have a Mu-Silicium UEFI",
+ "silicon": {
+  "MT6768Pkg": {
+   "vendor": "MediaTek",
+   "soc_guess": "mt6768",
+   "mentions": [
+    [
+     "MT6768",
+     1
+    ],
+    [
+     "MT6769T",
+     1
+    ]
+   ]
+  },
+  "MT6789Pkg": {
+   "vendor": "MediaTek",
+   "soc_guess": "mt6789",
+   "mentions": [
+    [
+     "MT6789",
+     1
+    ]
+   ]
+  },
+  "EristaPkg": {
+   "vendor": "Nvidia",
+   "soc_guess": null,
+   "mentions": []
+  },
+  "MarikoPkg": {
+   "vendor": "Nvidia",
+   "soc_guess": null,
+   "mentions": []
+  },
+  "BlackboltPkg": {
+   "vendor": "Qualcomm",
+   "soc_guess": "sdm636",
+   "mentions": [
+    [
+     "SDM636",
+     1
+    ]
+   ]
+  },
+  "BonitoPkg": {
+   "vendor": "Qualcomm",
+   "soc_guess": "sm8735",
+   "mentions": [
+    [
+     "SM8735",
+     1
+    ]
+   ]
+  },
+  "CedrosPkg": {
+   "vendor": "Qualcomm",
+   "soc_guess": "sm7350",
+   "mentions": [
+    [
+     "SM7350",
+     1
+    ]
+   ]
+  },
+  "DivarPkg": {
+   "vendor": "Qualcomm",
+   "soc_guess": "sm6225",
+   "mentions": [
+    [
+     "SM6225",
+     2
+    ]
+   ]
+  },
+  "HanaPkg": {
+   "vendor": "Qualcomm",
+   "soc_guess": "sm8150",
+   "mentions": [
+    [
+     "SM8150",
+     3
+    ]
+   ]
+  },
+  "KaanapaliPkg": {
+   "vendor": "Qualcomm",
+   "soc_guess": "sm8850",
+   "mentions": [
+    [
+     "SM8850",
+     3
+    ]
+   ]
+  },
+  "KailuaPkg": {
+   "vendor": "Qualcomm",
+   "soc_guess": "sm8550",
+   "mentions": [
+    [
+     "SM8550",
+     2
+    ]
+   ]
+  },
+  "KamortaPkg": {
+   "vendor": "Qualcomm",
+   "soc_guess": "sm6115",
+   "mentions": [
+    [
+     "SM6115",
+     1
+    ]
+   ]
+  },
+  "KodiakPkg": {
+   "vendor": "Qualcomm",
+   "soc_guess": "sm7325",
+   "mentions": [
+    [
+     "SM7325",
+     3
+    ]
+   ]
+  },
+  "KonaPkg": {
+   "vendor": "Qualcomm",
+   "soc_guess": "sm8250",
+   "mentions": [
+    [
+     "SM8250",
+     3
+    ]
+   ]
+  },
+  "LahainaPkg": {
+   "vendor": "Qualcomm",
+   "soc_guess": "sm8350",
+   "mentions": [
+    [
+     "SM8350",
+     3
+    ]
+   ]
+  },
+  "LanaiPkg": {
+   "vendor": "Qualcomm",
+   "soc_guess": "sm8650",
+   "mentions": [
+    [
+     "SM8650",
+     5
+    ]
+   ]
+  },
+  "MolokaiPkg": {
+   "vendor": "Qualcomm",
+   "soc_guess": "sm8845",
+   "mentions": [
+    [
+     "SM8845",
+     1
+    ]
+   ]
+  },
+  "MooreaPkg": {
+   "vendor": "Qualcomm",
+   "soc_guess": "sm7150",
+   "mentions": [
+    [
+     "SM7150",
+     3
+    ]
+   ]
+  },
+  "NapaliPkg": {
+   "vendor": "Qualcomm",
+   "soc_guess": "sdm845",
+   "mentions": [
+    [
+     "SDM845",
+     1
+    ]
+   ]
+  },
+  "NazgulPkg": {
+   "vendor": "Qualcomm",
+   "soc_guess": "msm8998",
+   "mentions": [
+    [
+     "MSM8998",
+     1
+    ]
+   ]
+  },
+  "NetraniPkg": {
+   "vendor": "Qualcomm",
+   "soc_guess": "sm7435",
+   "mentions": [
+    [
+     "SM7435",
+     1
+    ],
+    [
+     "SM6450",
+     1
+    ]
+   ]
+  },
+  "NicobarPkg": {
+   "vendor": "Qualcomm",
+   "soc_guess": "sm6125",
+   "mentions": [
+    [
+     "SM6125",
+     1
+    ]
+   ]
+  },
+  "PakalaPkg": {
+   "vendor": "Qualcomm",
+   "soc_guess": "sm8750",
+   "mentions": [
+    [
+     "SM8750",
+     3
+    ]
+   ]
+  },
+  "PalawanPkg": {
+   "vendor": "Qualcomm",
+   "soc_guess": "sm8635",
+   "mentions": [
+    [
+     "SM8635",
+     1
+    ],
+    [
+     "SM7675",
+     1
+    ]
+   ]
+  },
+  "PalimaPkg": {
+   "vendor": "Qualcomm",
+   "soc_guess": "sm8475",
+   "mentions": [
+    [
+     "SM8475",
+     1
+    ],
+    [
+     "SM7475",
+     1
+    ]
+   ]
+  },
+  "RennellPkg": {
+   "vendor": "Qualcomm",
+   "soc_guess": "sm7125",
+   "mentions": [
+    [
+     "SM7125",
+     1
+    ]
+   ]
+  },
+  "StarlordPkg": {
+   "vendor": "Qualcomm",
+   "soc_guess": "sdm660",
+   "mentions": [
+    [
+     "SDM660",
+     1
+    ]
+   ]
+  },
+  "StraitPkg": {
+   "vendor": "Qualcomm",
+   "soc_guess": "sm6375",
+   "mentions": [
+    [
+     "SM6375",
+     1
+    ]
+   ]
+  },
+  "WaipioPkg": {
+   "vendor": "Qualcomm",
+   "soc_guess": "sm8450",
+   "mentions": [
+    [
+     "SM8450",
+     1
+    ]
+   ]
+  },
+  "S5E7870Pkg": {
+   "vendor": "Samsung",
+   "soc_guess": "s5e7870",
+   "mentions": [
+    [
+     "S5E7870",
+     1
+    ]
+   ]
+  },
+  "S5E7885Pkg": {
+   "vendor": "Samsung",
+   "soc_guess": "s5e7885",
+   "mentions": [
+    [
+     "S5E7885",
+     1
+    ]
+   ]
+  },
+  "S5E9810Pkg": {
+   "vendor": "Samsung",
+   "soc_guess": "s5e9810",
+   "mentions": [
+    [
+     "S5E9810",
+     1
+    ]
+   ]
+  },
+  "S5E9820Pkg": {
+   "vendor": "Samsung",
+   "soc_guess": "s5e9820",
+   "mentions": [
+    [
+     "S5E9820",
+     1
+    ]
+   ]
+  },
+  "S5E9830Pkg": {
+   "vendor": "Samsung",
+   "soc_guess": "s5e9830",
+   "mentions": [
+    [
+     "S5E9830",
+     1
+    ]
+   ]
+  },
+  "S5E9945Pkg": {
+   "vendor": "Samsung",
+   "soc_guess": "s5e9945",
+   "mentions": [
+    [
+     "S5E9945",
+     1
+    ]
+   ]
+  }
+ },
+ "devices": [
+  {
+   "brand": "Asus",
+   "device": "i005d",
+   "silicon": [
+    "LahainaPkg"
+   ],
+   "soc": "sm8350"
+  },
+  {
+   "brand": "LG",
+   "device": "caymanslm",
+   "silicon": [
+    "NapaliPkg"
+   ],
+   "soc": "sdm845"
+  },
+  {
+   "brand": "LG",
+   "device": "mh2",
+   "silicon": [
+    "HanaPkg"
+   ],
+   "soc": "sm8150"
+  },
+  {
+   "brand": "Lenovo",
+   "device": "9707f",
+   "silicon": [
+    "KonaPkg"
+   ],
+   "soc": "sm8250"
+  },
+  {
+   "brand": "Lenovo",
+   "device": "j706f",
+   "silicon": [
+    "MooreaPkg"
+   ],
+   "soc": "sm7150"
+  },
+  {
+   "brand": "Motorola",
+   "device": "caprip",
+   "silicon": [
+    "KamortaPkg"
+   ],
+   "soc": "sm6115"
+  },
+  {
+   "brand": "Motorola",
+   "device": "cebu",
+   "silicon": [
+    "KamortaPkg"
+   ],
+   "soc": "sm6115"
+  },
+  {
+   "brand": "Nintendo",
+   "device": "nx",
+   "silicon": [
+    "EristaPkg",
+    "MarikoPkg"
+   ],
+   "soc": null
+  },
+  {
+   "brand": "Nothing",
+   "device": "pong",
+   "silicon": [
+    "PalimaPkg"
+   ],
+   "soc": "sm8475"
+  },
+  {
+   "brand": "Nothing",
+   "device": "spacewar",
+   "silicon": [
+    "KodiakPkg"
+   ],
+   "soc": "sm7325"
+  },
+  {
+   "brand": "OnePlus",
+   "device": "aston",
+   "silicon": [
+    "KailuaPkg"
+   ],
+   "soc": "sm8550"
+  },
+  {
+   "brand": "OnePlus",
+   "device": "cheeseburger",
+   "silicon": [
+    "NazgulPkg"
+   ],
+   "soc": "msm8998"
+  },
+  {
+   "brand": "OnePlus",
+   "device": "dodge",
+   "silicon": [
+    "PakalaPkg"
+   ],
+   "soc": "sm8750"
+  },
+  {
+   "brand": "OnePlus",
+   "device": "enchilada",
+   "silicon": [
+    "NapaliPkg"
+   ],
+   "soc": "sdm845"
+  },
+  {
+   "brand": "OnePlus",
+   "device": "giulia",
+   "silicon": [
+    "LanaiPkg"
+   ],
+   "soc": "sm8650"
+  },
+  {
+   "brand": "OnePlus",
+   "device": "infiniti",
+   "silicon": [
+    "KaanapaliPkg"
+   ],
+   "soc": "sm8850"
+  },
+  {
+   "brand": "OnePlus",
+   "device": "kebab",
+   "silicon": [
+    "KonaPkg"
+   ],
+   "soc": "sm8250"
+  },
+  {
+   "brand": "OnePlus",
+   "device": "lemonade",
+   "silicon": [
+    "LahainaPkg"
+   ],
+   "soc": "sm8350"
+  },
+  {
+   "brand": "OnePlus",
+   "device": "macan",
+   "silicon": [
+    "MolokaiPkg"
+   ],
+   "soc": "sm8845"
+  },
+  {
+   "brand": "OnePlus",
+   "device": "pagani",
+   "silicon": [
+    "PakalaPkg"
+   ],
+   "soc": "sm8750"
+  },
+  {
+   "brand": "OnePlus",
+   "device": "salami",
+   "silicon": [
+    "KailuaPkg"
+   ],
+   "soc": "sm8550"
+  },
+  {
+   "brand": "Qualcomm",
+   "device": "qrd8550",
+   "silicon": [
+    "KailuaPkg"
+   ],
+   "soc": "sm8550"
+  },
+  {
+   "brand": "Realme",
+   "device": "bale_b",
+   "silicon": [
+    "PalawanPkg"
+   ],
+   "soc": "sm8635"
+  },
+  {
+   "brand": "Realme",
+   "device": "bitra",
+   "silicon": [
+    "KonaPkg"
+   ],
+   "soc": "sm8250"
+  },
+  {
+   "brand": "Realme",
+   "device": "senna_a",
+   "silicon": [
+    "PalimaPkg"
+   ],
+   "soc": "sm8475"
+  },
+  {
+   "brand": "Realme",
+   "device": "senna_bc",
+   "silicon": [
+    "PalimaPkg"
+   ],
+   "soc": "sm8475"
+  },
+  {
+   "brand": "Samsung",
+   "device": "a10",
+   "silicon": [
+    "S5E7885Pkg"
+   ],
+   "soc": "s5e7885"
+  },
+  {
+   "brand": "Samsung",
+   "device": "a52q",
+   "silicon": [
+    "RennellPkg"
+   ],
+   "soc": "sm7125"
+  },
+  {
+   "brand": "Samsung",
+   "device": "a52sxq",
+   "silicon": [
+    "KodiakPkg"
+   ],
+   "soc": "sm7325"
+  },
+  {
+   "brand": "Samsung",
+   "device": "a7",
+   "silicon": [
+    "S5E7885Pkg"
+   ],
+   "soc": "s5e7885"
+  },
+  {
+   "brand": "Samsung",
+   "device": "b4q",
+   "silicon": [
+    "PalimaPkg"
+   ],
+   "soc": "sm8475"
+  },
+  {
+   "brand": "Samsung",
+   "device": "b5q",
+   "silicon": [
+    "KailuaPkg"
+   ],
+   "soc": "sm8550"
+  },
+  {
+   "brand": "Samsung",
+   "device": "beyond1lte",
+   "silicon": [
+    "S5E9820Pkg"
+   ],
+   "soc": "s5e9820"
+  },
+  {
+   "brand": "Samsung",
+   "device": "c1s",
+   "silicon": [
+    "S5E9830Pkg"
+   ],
+   "soc": "s5e9830"
+  },
+  {
+   "brand": "Samsung",
+   "device": "dm2q",
+   "silicon": [
+    "KailuaPkg"
+   ],
+   "soc": "sm8550"
+  },
+  {
+   "brand": "Samsung",
+   "device": "e1s",
+   "silicon": [
+    "S5E9945Pkg"
+   ],
+   "soc": "s5e9945"
+  },
+  {
+   "brand": "Samsung",
+   "device": "gta4l",
+   "silicon": [
+    "KamortaPkg"
+   ],
+   "soc": "sm6115"
+  },
+  {
+   "brand": "Samsung",
+   "device": "gta9pwifi",
+   "silicon": [
+    "StraitPkg"
+   ],
+   "soc": "sm6375"
+  },
+  {
+   "brand": "Samsung",
+   "device": "gtaxllte",
+   "silicon": [
+    "S5E7870Pkg"
+   ],
+   "soc": "s5e7870"
+  },
+  {
+   "brand": "Samsung",
+   "device": "gts8p",
+   "silicon": [
+    "WaipioPkg"
+   ],
+   "soc": "sm8450"
+  },
+  {
+   "brand": "Samsung",
+   "device": "gts9wifi",
+   "silicon": [
+    "KailuaPkg"
+   ],
+   "soc": "sm8550"
+  },
+  {
+   "brand": "Samsung",
+   "device": "q2q",
+   "silicon": [
+    "LahainaPkg"
+   ],
+   "soc": "sm8350"
+  },
+  {
+   "brand": "Samsung",
+   "device": "r0q",
+   "silicon": [
+    "WaipioPkg"
+   ],
+   "soc": "sm8450"
+  },
+  {
+   "brand": "Samsung",
+   "device": "r5q",
+   "silicon": [
+    "HanaPkg"
+   ],
+   "soc": "sm8150"
+  },
+  {
+   "brand": "Samsung",
+   "device": "r5qfull",
+   "silicon": [
+    "HanaPkg"
+   ],
+   "soc": "sm8150"
+  },
+  {
+   "brand": "Samsung",
+   "device": "r5qtest",
+   "silicon": [
+    "HanaPkg"
+   ],
+   "soc": "sm8150"
+  },
+  {
+   "brand": "Samsung",
+   "device": "r8q",
+   "silicon": [
+    "KonaPkg"
+   ],
+   "soc": "sm8250"
+  },
+  {
+   "brand": "Samsung",
+   "device": "r8s",
+   "silicon": [
+    "S5E9830Pkg"
+   ],
+   "soc": "s5e9830"
+  },
+  {
+   "brand": "Samsung",
+   "device": "r9qb2",
+   "silicon": [
+    "LahainaPkg"
+   ],
+   "soc": "sm8350"
+  },
+  {
+   "brand": "Samsung",
+   "device": "starlte",
+   "silicon": [
+    "S5E9810Pkg"
+   ],
+   "soc": "s5e9810"
+  },
+  {
+   "brand": "Samsung",
+   "device": "starqltechn",
+   "silicon": [
+    "NapaliPkg"
+   ],
+   "soc": "sdm845"
+  },
+  {
+   "brand": "Samsung",
+   "device": "x1s",
+   "silicon": [
+    "S5E9830Pkg"
+   ],
+   "soc": "s5e9830"
+  },
+  {
+   "brand": "Xiaomi",
+   "device": "alioth",
+   "silicon": [
+    "KonaPkg"
+   ],
+   "soc": "sm8250"
+  },
+  {
+   "brand": "Xiaomi",
+   "device": "cepheus",
+   "silicon": [
+    "HanaPkg"
+   ],
+   "soc": "sm8150"
+  },
+  {
+   "brand": "Xiaomi",
+   "device": "citrus",
+   "silicon": [
+    "KamortaPkg"
+   ],
+   "soc": "sm6115"
+  },
+  {
+   "brand": "Xiaomi",
+   "device": "equuleus",
+   "silicon": [
+    "NapaliPkg"
+   ],
+   "soc": "sdm845"
+  },
+  {
+   "brand": "Xiaomi",
+   "device": "fog",
+   "silicon": [
+    "DivarPkg"
+   ],
+   "soc": "sm6225"
+  },
+  {
+   "brand": "Xiaomi",
+   "device": "garnet",
+   "silicon": [
+    "NetraniPkg"
+   ],
+   "soc": "sm7435"
+  },
+  {
+   "brand": "Xiaomi",
+   "device": "ginkgo",
+   "silicon": [
+    "NicobarPkg"
+   ],
+   "soc": "sm6125"
+  },
+  {
+   "brand": "Xiaomi",
+   "device": "ingres",
+   "silicon": [
+    "WaipioPkg"
+   ],
+   "soc": "sm8450"
+  },
+  {
+   "brand": "Xiaomi",
+   "device": "lancelot",
+   "silicon": [
+    "MT6768Pkg"
+   ],
+   "soc": "mt6768"
+  },
+  {
+   "brand": "Xiaomi",
+   "device": "laurel_sprout",
+   "silicon": [
+    "NicobarPkg"
+   ],
+   "soc": "sm6125"
+  },
+  {
+   "brand": "Xiaomi",
+   "device": "lavender",
+   "silicon": [
+    "StarlordPkg"
+   ],
+   "soc": "sdm660"
+  },
+  {
+   "brand": "Xiaomi",
+   "device": "lime",
+   "silicon": [
+    "KamortaPkg"
+   ],
+   "soc": "sm6115"
+  },
+  {
+   "brand": "Xiaomi",
+   "device": "lisa",
+   "silicon": [
+    "KodiakPkg"
+   ],
+   "soc": "sm7325"
+  },
+  {
+   "brand": "Xiaomi",
+   "device": "marble",
+   "silicon": [
+    "PalimaPkg"
+   ],
+   "soc": "sm8475"
+  },
+  {
+   "brand": "Xiaomi",
+   "device": "miatoll",
+   "silicon": [
+    "RennellPkg"
+   ],
+   "soc": "sm7125"
+  },
+  {
+   "brand": "Xiaomi",
+   "device": "muyu",
+   "silicon": [
+    "PalawanPkg"
+   ],
+   "soc": "sm8635"
+  },
+  {
+   "brand": "Xiaomi",
+   "device": "nabu",
+   "silicon": [
+    "HanaPkg"
+   ],
+   "soc": "sm8150"
+  },
+  {
+   "brand": "Xiaomi",
+   "device": "nitrogen",
+   "silicon": [
+    "BlackboltPkg"
+   ],
+   "soc": "sdm636"
+  },
+  {
+   "brand": "Xiaomi",
+   "device": "nuwa",
+   "silicon": [
+    "KailuaPkg"
+   ],
+   "soc": "sm8550"
+  },
+  {
+   "brand": "Xiaomi",
+   "device": "onyx",
+   "silicon": [
+    "BonitoPkg"
+   ],
+   "soc": "sm8735"
+  },
+  {
+   "brand": "Xiaomi",
+   "device": "peridot",
+   "silicon": [
+    "PalawanPkg"
+   ],
+   "soc": "sm8635"
+  },
+  {
+   "brand": "Xiaomi",
+   "device": "phoenix",
+   "silicon": [
+    "MooreaPkg"
+   ],
+   "soc": "sm7150"
+  },
+  {
+   "brand": "Xiaomi",
+   "device": "pipa",
+   "silicon": [
+    "KonaPkg"
+   ],
+   "soc": "sm8250"
+  },
+  {
+   "brand": "Xiaomi",
+   "device": "polaris",
+   "silicon": [
+    "NapaliPkg"
+   ],
+   "soc": "sdm845"
+  },
+  {
+   "brand": "Xiaomi",
+   "device": "renoir",
+   "silicon": [
+    "CedrosPkg"
+   ],
+   "soc": "sm7350"
+  },
+  {
+   "brand": "Xiaomi",
+   "device": "spes",
+   "silicon": [
+    "DivarPkg"
+   ],
+   "soc": "sm6225"
+  },
+  {
+   "brand": "Xiaomi",
+   "device": "stone",
+   "silicon": [
+    "MT6789Pkg"
+   ],
+   "soc": "mt6789"
+  },
+  {
+   "brand": "Xiaomi",
+   "device": "surya",
+   "silicon": [
+    "MooreaPkg"
+   ],
+   "soc": "sm7150"
+  },
+  {
+   "brand": "Xiaomi",
+   "device": "sweet_k6a",
+   "silicon": [
+    "MooreaPkg"
+   ],
+   "soc": "sm7150"
+  },
+  {
+   "brand": "Xiaomi",
+   "device": "tapas",
+   "silicon": [
+    "DivarPkg"
+   ],
+   "soc": "sm6225"
+  },
+  {
+   "brand": "Xiaomi",
+   "device": "vayu",
+   "silicon": [
+    "HanaPkg"
+   ],
+   "soc": "sm8150"
+  },
+  {
+   "brand": "Xiaomi",
+   "device": "venus",
+   "silicon": [
+    "LahainaPkg"
+   ],
+   "soc": "sm8350"
+  },
+  {
+   "brand": "Xiaomi",
+   "device": "veux",
+   "silicon": [
+    "StraitPkg"
+   ],
+   "soc": "sm6375"
+  },
+  {
+   "brand": "Xiaomi",
+   "device": "vili",
+   "silicon": [
+    "LahainaPkg"
+   ],
+   "soc": "sm8350"
+  },
+  {
+   "brand": "Xiaomi",
+   "device": "willow",
+   "silicon": [
+    "NicobarPkg"
+   ],
+   "soc": "sm6125"
+  },
+  {
+   "brand": "ZTE",
+   "device": "nx729j",
+   "silicon": [
+    "KailuaPkg"
+   ],
+   "soc": "sm8550"
+  }
+ ],
+ "devices_by_soc": {
+  "msm8998": [
+   "OnePlus/cheeseburger"
+  ],
+  "mt6768": [
+   "Xiaomi/lancelot"
+  ],
+  "mt6789": [
+   "Xiaomi/stone"
+  ],
+  "s5e7870": [
+   "Samsung/gtaxllte"
+  ],
+  "s5e7885": [
+   "Samsung/a10",
+   "Samsung/a7"
+  ],
+  "s5e9810": [
+   "Samsung/starlte"
+  ],
+  "s5e9820": [
+   "Samsung/beyond1lte"
+  ],
+  "s5e9830": [
+   "Samsung/c1s",
+   "Samsung/r8s",
+   "Samsung/x1s"
+  ],
+  "s5e9945": [
+   "Samsung/e1s"
+  ],
+  "sdm636": [
+   "Xiaomi/nitrogen"
+  ],
+  "sdm660": [
+   "Xiaomi/lavender"
+  ],
+  "sdm845": [
+   "LG/caymanslm",
+   "OnePlus/enchilada",
+   "Samsung/starqltechn",
+   "Xiaomi/equuleus",
+   "Xiaomi/polaris"
+  ],
+  "sm6115": [
+   "Motorola/caprip",
+   "Motorola/cebu",
+   "Samsung/gta4l",
+   "Xiaomi/citrus",
+   "Xiaomi/lime"
+  ],
+  "sm6125": [
+   "Xiaomi/ginkgo",
+   "Xiaomi/laurel_sprout",
+   "Xiaomi/willow"
+  ],
+  "sm6225": [
+   "Xiaomi/fog",
+   "Xiaomi/spes",
+   "Xiaomi/tapas"
+  ],
+  "sm6375": [
+   "Samsung/gta9pwifi",
+   "Xiaomi/veux"
+  ],
+  "sm7125": [
+   "Samsung/a52q",
+   "Xiaomi/miatoll"
+  ],
+  "sm7150": [
+   "Lenovo/j706f",
+   "Xiaomi/phoenix",
+   "Xiaomi/surya",
+   "Xiaomi/sweet_k6a"
+  ],
+  "sm7325": [
+   "Nothing/spacewar",
+   "Samsung/a52sxq",
+   "Xiaomi/lisa"
+  ],
+  "sm7350": [
+   "Xiaomi/renoir"
+  ],
+  "sm7435": [
+   "Xiaomi/garnet"
+  ],
+  "sm8150": [
+   "LG/mh2",
+   "Samsung/r5q",
+   "Samsung/r5qfull",
+   "Samsung/r5qtest",
+   "Xiaomi/cepheus",
+   "Xiaomi/nabu",
+   "Xiaomi/vayu"
+  ],
+  "sm8250": [
+   "Lenovo/9707f",
+   "OnePlus/kebab",
+   "Realme/bitra",
+   "Samsung/r8q",
+   "Xiaomi/alioth",
+   "Xiaomi/pipa"
+  ],
+  "sm8350": [
+   "Asus/i005d",
+   "OnePlus/lemonade",
+   "Samsung/q2q",
+   "Samsung/r9qb2",
+   "Xiaomi/venus",
+   "Xiaomi/vili"
+  ],
+  "sm8450": [
+   "Samsung/gts8p",
+   "Samsung/r0q",
+   "Xiaomi/ingres"
+  ],
+  "sm8475": [
+   "Nothing/pong",
+   "Realme/senna_a",
+   "Realme/senna_bc",
+   "Samsung/b4q",
+   "Xiaomi/marble"
+  ],
+  "sm8550": [
+   "OnePlus/aston",
+   "OnePlus/salami",
+   "Qualcomm/qrd8550",
+   "Samsung/b5q",
+   "Samsung/dm2q",
+   "Samsung/gts9wifi",
+   "Xiaomi/nuwa",
+   "ZTE/nx729j"
+  ],
+  "sm8635": [
+   "Realme/bale_b",
+   "Xiaomi/muyu",
+   "Xiaomi/peridot"
+  ],
+  "sm8650": [
+   "OnePlus/giulia"
+  ],
+  "sm8735": [
+   "Xiaomi/onyx"
+  ],
+  "sm8750": [
+   "OnePlus/dodge",
+   "OnePlus/pagani"
+  ],
+  "sm8845": [
+   "OnePlus/macan"
+  ],
+  "sm8850": [
+   "OnePlus/infiniti"
+  ]
+ }
+}

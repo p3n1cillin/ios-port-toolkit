@@ -1,0 +1,2543 @@
+{
+ "soc": "msm8998",
+ "vendor": "qcom",
+ "_generated_by": "toolkit/tools/qcom_socdata.py",
+ "_sources": {
+  "pinctrl": "pinctrl-msm8998.c",
+  "gcc": "gcc-msm8998.c",
+  "bindings": "qcom,gcc-msm8998.h",
+  "dtsi": "msm8998.dtsi"
+ },
+ "gpio_stride": "0x1000",
+ "gic": {
+  "dist": "0x17a00000",
+  "redist": "0x17b00000"
+ },
+ "tlmm": {
+  "tiles": null,
+  "bases": {
+   "north": "0x3900000",
+   "west": "0x3500000",
+   "east": "0x3d00000",
+   "_source": "msm8998.dtsi tlmm reg + pinctrl-msm8998.c tile offsets"
+  },
+  "pins": {
+   "0": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "blsp_spi1",
+     "blsp_uart1_a",
+     "blsp_uim1_a",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "1": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "blsp_spi1",
+     "blsp_uart1_a",
+     "blsp_uim1_a",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "2": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "blsp_spi1",
+     "blsp_uart1_a",
+     "blsp_i2c1",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "3": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "blsp_spi1",
+     "blsp_uart1_a",
+     "blsp_i2c1",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "4": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "blsp_spi8",
+     "blsp_uart8_a",
+     "blsp_uim8_a",
+     null,
+     "qdss_cti0_b",
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "5": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "blsp_spi8",
+     "blsp_uart8_a",
+     "blsp_uim8_a",
+     null,
+     "qdss_cti0_b",
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "6": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "blsp_spi8",
+     "blsp_uart8_a",
+     "blsp_i2c8",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "7": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "blsp_spi8",
+     "blsp_uart8_a",
+     "blsp_i2c8",
+     "ddr_bist",
+     null,
+     "atest_tsens2",
+     "atest_usb1",
+     null,
+     null
+    ]
+   },
+   "8": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "blsp_spi4",
+     "blsp_uart1_b",
+     "blsp_uim1_b",
+     null,
+     "ddr_bist",
+     null,
+     "wlan1_adc1",
+     "atest_usb13",
+     "bimc_dte1"
+    ]
+   },
+   "9": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "blsp_spi4",
+     "blsp_uart1_b",
+     "blsp_uim1_b",
+     "tsif0",
+     "ddr_bist",
+     null,
+     "wlan1_adc0",
+     "atest_usb12",
+     "bimc_dte0"
+    ]
+   },
+   "10": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "mdp_vsync_a",
+     "blsp_spi4",
+     "blsp_uart1_b",
+     "blsp_i2c4",
+     "ddr_bist",
+     "atest_gpsadc1",
+     "wlan2_adc1",
+     "atest_usb11",
+     "bimc_dte1"
+    ]
+   },
+   "11": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "mdp_vsync_a",
+     "edp_lcd",
+     "blsp_spi4",
+     "blsp_uart1_b",
+     "blsp_i2c4",
+     "dbg_out",
+     "atest_gpsadc0",
+     "wlan2_adc0",
+     "atest_usb10"
+    ]
+   },
+   "12": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "mdp_vsync",
+     "m_voc",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "13": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "cam_mclk",
+     "pll_bypassnl",
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "14": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "cam_mclk",
+     "pll_reset",
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "15": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "cam_mclk",
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "16": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "cam_mclk",
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "17": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "cci_i2c",
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "18": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "cci_i2c",
+     "phase_flag",
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "19": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "cci_i2c",
+     "phase_flag",
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "20": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "cci_i2c",
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "21": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "cci_timer0",
+     null,
+     "qdss",
+     "vsense_data0",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "22": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "cci_timer1",
+     null,
+     "qdss",
+     "vsense_data1",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "23": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "cci_timer2",
+     "blsp1_spi_b",
+     "qdss",
+     "vsense_mode",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "24": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "cci_timer3",
+     "cci_async",
+     "blsp1_spi_a",
+     null,
+     "qdss",
+     "vsense_clkout",
+     null,
+     null,
+     null
+    ]
+   },
+   "25": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "cci_timer4",
+     "cci_async",
+     "blsp2_spi",
+     null,
+     "qdss",
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "26": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "cci_async",
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "27": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "blsp1_spi_a",
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "28": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "blsp1_spi_b",
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "29": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "blsp2_spi",
+     null,
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "30": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "hdmi_rcv",
+     "blsp2_spi",
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "31": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "hdmi_cec",
+     "blsp_spi2",
+     "blsp_uart2_a",
+     "blsp_uim2_a",
+     "pwr_modem",
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "32": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "hdmi_ddc",
+     "blsp_spi2",
+     "blsp_uart2_a",
+     "blsp_i2c2",
+     "pwr_nav",
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "33": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "hdmi_ddc",
+     "blsp_spi2",
+     "blsp_uart2_a",
+     "blsp_i2c2",
+     "pwr_crypto",
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "34": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "hdmi_hot",
+     "edp_hot",
+     "blsp_spi2",
+     "blsp_uart2_a",
+     "blsp_uim2_a",
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "35": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "pci_e0",
+     "jitter_bist",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "36": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "pci_e0",
+     "agera_pll",
+     null,
+     "atest_tsens",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "37": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "agera_pll",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "38": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "usb_phy",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "39": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "lpass_slimbus",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "40": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "sd_write",
+     "tsif0",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "41": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "blsp_spi6",
+     "blsp_uart3_b",
+     "blsp_uim3_b",
+     null,
+     "qdss",
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "42": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "blsp_spi6",
+     "blsp_uart3_b",
+     "blsp_uim3_b",
+     null,
+     "qdss",
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "43": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "blsp_spi6",
+     "blsp_uart3_b",
+     "blsp_i2c6",
+     null,
+     "qdss",
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "44": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "blsp_spi6",
+     "blsp_uart3_b",
+     "blsp_i2c6",
+     null,
+     "qdss",
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "45": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "blsp_spi3",
+     "blsp_uart3_a",
+     "blsp_uim3_a",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "46": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "blsp_spi3",
+     "blsp_uart3_a",
+     "blsp_uim3_a",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "47": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "blsp_spi3",
+     "blsp_uart3_a",
+     "blsp_i2c3",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "48": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "blsp_spi3",
+     "blsp_uart3_a",
+     "blsp_i2c3",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "49": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "blsp_spi9",
+     "blsp_uart9_a",
+     "blsp_uim9_a",
+     "blsp10_spi_b",
+     "qdss_cti0_a",
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "50": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "blsp_spi9",
+     "blsp_uart9_a",
+     "blsp_uim9_a",
+     "blsp10_spi_b",
+     "qdss_cti0_a",
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "51": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "blsp_spi9",
+     "blsp_uart9_a",
+     "blsp_i2c9",
+     "blsp10_spi_a",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "52": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "blsp_spi9",
+     "blsp_uart9_a",
+     "blsp_i2c9",
+     "blsp10_spi_a",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "53": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "blsp_spi7",
+     "blsp_uart7_a",
+     "blsp_uim7_a",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "54": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "blsp_spi7",
+     "blsp_uart7_a",
+     "blsp_uim7_a",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "55": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "blsp_spi7",
+     "blsp_uart7_a",
+     "blsp_i2c7",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "56": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "blsp_spi7",
+     "blsp_uart7_a",
+     "blsp_i2c7",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "57": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "qua_mi2s",
+     "blsp10_spi",
+     "gcc_gp1_a",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "58": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "qua_mi2s",
+     "blsp_spi11",
+     "blsp_uart8_b",
+     "blsp_uim8_b",
+     "gcc_gp2_a",
+     null,
+     "qdss_cti1_a",
+     null,
+     null
+    ]
+   },
+   "59": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "qua_mi2s",
+     "blsp_spi11",
+     "blsp_uart8_b",
+     "blsp_uim8_b",
+     "gcc_gp3_a",
+     null,
+     "qdss_cti1_a",
+     null,
+     null
+    ]
+   },
+   "60": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "qua_mi2s",
+     "blsp_spi11",
+     "blsp_uart8_b",
+     "blsp_i2c11",
+     "cri_trng0",
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "61": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "qua_mi2s",
+     "blsp_spi11",
+     "blsp_uart8_b",
+     "blsp_i2c11",
+     "cri_trng1",
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "62": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "qua_mi2s",
+     "cri_trng",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "63": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "qua_mi2s",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "64": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "pri_mi2s",
+     "sp_cmu",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "65": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "pri_mi2s",
+     "blsp_spi10",
+     "blsp_uart7_b",
+     "blsp_uim7_b",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "66": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "pri_mi2s_ws",
+     "blsp_spi10",
+     "blsp_uart7_b",
+     "blsp_uim7_b",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "67": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "pri_mi2s",
+     "blsp_spi10",
+     "blsp_uart7_b",
+     "blsp_i2c10",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "68": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "pri_mi2s",
+     "blsp_spi10",
+     "blsp_uart7_b",
+     "blsp_i2c10",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "69": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "spkr_i2s",
+     "audio_ref",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "70": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "lpass_slimbus",
+     "spkr_i2s",
+     "blsp9_spi",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "71": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "lpass_slimbus",
+     "spkr_i2s",
+     "blsp9_spi",
+     "tsense_pwm1",
+     "tsense_pwm2",
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "72": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "lpass_slimbus",
+     "spkr_i2s",
+     "blsp9_spi",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "73": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "btfm_slimbus",
+     "phase_flag",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "74": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "btfm_slimbus",
+     "ter_mi2s",
+     "phase_flag",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "75": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "ter_mi2s",
+     "phase_flag",
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "76": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "ter_mi2s",
+     "phase_flag",
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "77": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "ter_mi2s",
+     "phase_flag",
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "78": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "ter_mi2s",
+     "gcc_gp1_b",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "79": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "sec_mi2s",
+     null,
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "80": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "sec_mi2s",
+     null,
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "81": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "sec_mi2s",
+     "blsp_spi12",
+     "blsp_uart9_b",
+     "blsp_uim9_b",
+     "gcc_gp2_b",
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "82": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "sec_mi2s",
+     "blsp_spi12",
+     "blsp_uart9_b",
+     "blsp_uim9_b",
+     "gcc_gp3_b",
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "83": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "sec_mi2s",
+     "blsp_spi12",
+     "blsp_uart9_b",
+     "blsp_i2c12",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "84": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "blsp_spi12",
+     "blsp_uart9_b",
+     "blsp_i2c12",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "85": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "blsp_spi5",
+     "blsp_uart2_b",
+     "blsp_uim2_b",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "86": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "blsp_spi5",
+     "blsp_uart2_b",
+     "blsp_uim2_b",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "87": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "blsp_spi5",
+     "blsp_uart2_b",
+     "blsp_i2c5",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "88": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "blsp_spi5",
+     "blsp_uart2_b",
+     "blsp_i2c5",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "89": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "tsif0",
+     "phase_flag",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "90": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "tsif0",
+     "mdp_vsync0",
+     "mdp_vsync1",
+     "mdp_vsync2",
+     "mdp_vsync3",
+     "blsp1_spi",
+     "tgu_ch0",
+     "qdss_cti1_b",
+     null
+    ]
+   },
+   "91": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "tsif0",
+     "sdc4_cmd",
+     "tgu_ch1",
+     "phase_flag",
+     "qdss_cti1_b",
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "92": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "tsif1",
+     "sdc43",
+     "vfr_1",
+     "phase_flag",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "93": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "tsif1",
+     "sdc4_clk",
+     null,
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "94": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "tsif1",
+     "sdc42",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "95": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "tsif1",
+     "sdc41",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "96": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "tsif1",
+     "sdc40",
+     "phase_flag",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "97": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     "mdp_vsync_b",
+     "ldo_en",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "98": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     "mdp_vsync_b",
+     "ldo_update",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "99": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "100": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     "blsp_uart8",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "101": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     "blsp_uart8",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "102": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     "blsp11_i2c",
+     "prng_rosc",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "103": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     "blsp11_i2c",
+     "phase_flag",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "104": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "105": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "uim2_data",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "106": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "uim2_clk",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "107": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "uim2_reset",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "108": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "uim2_present",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "109": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "uim1_data",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "110": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "uim1_clk",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "111": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "uim1_reset",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "112": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "uim1_present",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "113": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "uim_batt",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "114": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     "phase_flag",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "115": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     "nav_dr",
+     "phase_flag",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "116": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "phase_flag",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "117": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "phase_flag",
+     "qdss",
+     "atest_char",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "118": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "adsp_ext",
+     "phase_flag",
+     "qdss",
+     "atest_char",
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "119": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "phase_flag",
+     "qdss",
+     "atest_char",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "120": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "phase_flag",
+     "qdss",
+     "atest_char",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "121": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "phase_flag",
+     "qdss",
+     "atest_char",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "122": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "phase_flag",
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "123": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "phase_flag",
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "124": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "phase_flag",
+     "qdss",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "125": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "phase_flag",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "126": {
+    "tile": "east",
+    "functions": [
+     "gpio",
+     "phase_flag",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "127": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "128": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "modem_tsync",
+     "nav_pps",
+     "phase_flag",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "129": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "phase_flag",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "130": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qlink_request",
+     "phase_flag",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "131": {
+    "tile": "north",
+    "functions": [
+     "gpio",
+     "qlink_enable",
+     "phase_flag",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "132": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     "phase_flag",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "133": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "phase_flag",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "134": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "phase_flag",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "135": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     "pa_indicator",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "136": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "137": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "138": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "139": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "140": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "141": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "142": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     "ssbi1",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "143": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "isense_dbg",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "144": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "mss_lte",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "145": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     "mss_lte",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "146": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "147": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "148": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   },
+   "149": {
+    "tile": "west",
+    "functions": [
+     "gpio",
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null,
+     null
+    ]
+   }
+  }
+ },
+ "gcc": {
+  "base": "0x100000",
+  "clocks": {
+   "109": {
+    "binding": "GCC_UFS_AXI_CLK",
+    "kind": "branch",
+    "halt_reg": "0x75008",
+    "enable_reg": "0x75008",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_ufs_axi_clk"
+   },
+   "110": {
+    "binding": "GCC_UFS_ICE_CORE_CLK",
+    "kind": "branch",
+    "halt_reg": "0x7600c",
+    "enable_reg": "0x7600c",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_ufs_ice_core_clk"
+   },
+   "111": {
+    "binding": "GCC_UFS_PHY_AUX_CLK",
+    "kind": "branch",
+    "halt_reg": "0x76040",
+    "enable_reg": "0x76040",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_ufs_phy_aux_clk"
+   },
+   "112": {
+    "binding": "GCC_UFS_RX_SYMBOL_0_CLK",
+    "kind": "branch",
+    "halt_reg": "0x75014",
+    "enable_reg": "0x75014",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT_SKIP",
+    "name": "gcc_ufs_rx_symbol_0_clk"
+   },
+   "113": {
+    "binding": "GCC_UFS_RX_SYMBOL_1_CLK",
+    "kind": "branch",
+    "halt_reg": "0x7605c",
+    "enable_reg": "0x7605c",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT_SKIP",
+    "name": "gcc_ufs_rx_symbol_1_clk"
+   },
+   "114": {
+    "binding": "GCC_UFS_TX_SYMBOL_0_CLK",
+    "kind": "branch",
+    "halt_reg": "0x75010",
+    "enable_reg": "0x75010",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT_SKIP",
+    "name": "gcc_ufs_tx_symbol_0_clk"
+   },
+   "115": {
+    "binding": "GCC_UFS_UNIPRO_CORE_CLK",
+    "kind": "branch",
+    "halt_reg": "0x76008",
+    "enable_reg": "0x76008",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_ufs_unipro_core_clk"
+   },
+   "116": {
+    "binding": "GCC_USB30_MASTER_CLK",
+    "kind": "branch",
+    "halt_reg": "0xf008",
+    "enable_reg": "0xf008",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_usb30_master_clk"
+   },
+   "117": {
+    "binding": "GCC_USB30_MOCK_UTMI_CLK",
+    "kind": "branch",
+    "halt_reg": "0xf010",
+    "enable_reg": "0xf010",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_usb30_mock_utmi_clk"
+   },
+   "118": {
+    "binding": "GCC_USB30_SLEEP_CLK",
+    "kind": "branch",
+    "halt_reg": "0xf00c",
+    "enable_reg": "0xf00c",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_usb30_sleep_clk"
+   },
+   "119": {
+    "binding": "GCC_USB3_PHY_AUX_CLK",
+    "kind": "branch",
+    "halt_reg": "0x50000",
+    "enable_reg": "0x50000",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_usb3_phy_aux_clk"
+   },
+   "120": {
+    "binding": "GCC_USB3_PHY_PIPE_CLK",
+    "kind": "branch",
+    "halt_reg": "0x50004",
+    "enable_reg": "0x50004",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT_SKIP",
+    "name": "gcc_usb3_phy_pipe_clk"
+   },
+   "121": {
+    "binding": "GCC_USB_PHY_CFG_AHB2PHY_CLK",
+    "kind": "branch",
+    "halt_reg": "0x6a004",
+    "enable_reg": "0x6a004",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_usb_phy_cfg_ahb2phy_clk"
+   },
+   "166": {
+    "binding": "GCC_USB3_CLKREF_CLK",
+    "kind": "branch",
+    "halt_reg": "0x88008",
+    "enable_reg": "0x88008",
+    "enable_bit": 0,
+    "name": "gcc_usb3_clkref_clk"
+   },
+   "167": {
+    "binding": "GCC_HDMI_CLKREF_CLK",
+    "kind": "branch",
+    "halt_reg": "0x88000",
+    "enable_reg": "0x88000",
+    "enable_bit": 0,
+    "name": "gcc_hdmi_clkref_clk"
+   },
+   "168": {
+    "binding": "GCC_UFS_CLKREF_CLK",
+    "kind": "branch",
+    "halt_reg": "0x88004",
+    "enable_reg": "0x88004",
+    "enable_bit": 0,
+    "name": "gcc_ufs_clkref_clk"
+   },
+   "169": {
+    "binding": "GCC_PCIE_CLKREF_CLK",
+    "kind": "branch",
+    "halt_reg": "0x8800c",
+    "enable_reg": "0x8800c",
+    "enable_bit": 0,
+    "name": "gcc_pcie_clkref_clk"
+   },
+   "170": {
+    "binding": "GCC_RX1_USB2_CLKREF_CLK",
+    "kind": "branch",
+    "halt_reg": "0x88014",
+    "enable_reg": "0x88014",
+    "enable_bit": 0,
+    "name": "gcc_rx1_usb2_clkref_clk"
+   },
+   "171": {
+    "binding": "GCC_MSS_CFG_AHB_CLK",
+    "kind": "branch",
+    "halt_reg": "0x8a000",
+    "enable_reg": "0x8a000",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_mss_cfg_ahb_clk"
+   },
+   "172": {
+    "binding": "GCC_BOOT_ROM_AHB_CLK",
+    "kind": "branch",
+    "halt_reg": "0x38004",
+    "enable_reg": "0x52004",
+    "hwcg_reg": "0x38004",
+    "enable_bit": 10,
+    "halt_check": "BRANCH_HALT_VOTED",
+    "name": "gcc_boot_rom_ahb_clk"
+   },
+   "173": {
+    "binding": "GCC_MSS_GPLL0_DIV_CLK_SRC",
+    "kind": "branch",
+    "enable_reg": "0x5200c",
+    "enable_bit": 2,
+    "halt_check": "BRANCH_HALT_DELAY",
+    "name": "gcc_mss_gpll0_div_clk_src"
+   },
+   "174": {
+    "binding": "GCC_MSS_SNOC_AXI_CLK",
+    "kind": "branch",
+    "halt_reg": "0x8a03c",
+    "enable_reg": "0x8a03c",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_mss_snoc_axi_clk"
+   },
+   "175": {
+    "binding": "GCC_MSS_MNOC_BIMC_AXI_CLK",
+    "kind": "branch",
+    "halt_reg": "0x8a004",
+    "enable_reg": "0x8a004",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_mss_mnoc_bimc_axi_clk"
+   },
+   "176": {
+    "binding": "GCC_BIMC_GFX_CLK",
+    "kind": "branch",
+    "halt_reg": "0x46040",
+    "enable_reg": "0x46040",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT_SKIP",
+    "name": "gcc_bimc_gfx_clk"
+   },
+   "178": {
+    "binding": "GCC_MMSS_GPLL0_CLK",
+    "kind": "branch",
+    "enable_reg": "0x5200c",
+    "enable_bit": 1,
+    "halt_check": "BRANCH_HALT_DELAY",
+    "name": "gcc_mmss_gpll0_clk"
+   },
+   "180": {
+    "binding": "GCC_IM_SLEEP",
+    "kind": "branch",
+    "halt_reg": "0x4300c",
+    "enable_reg": "0x4300c",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT",
+    "name": "gcc_im_sleep_clk"
+   },
+   "184": {
+    "binding": "GCC_MMSS_GPLL0_DIV_CLK",
+    "kind": "branch",
+    "enable_reg": "0x5200c",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT_DELAY",
+    "name": "gcc_mmss_gpll0_div_clk"
+   },
+   "185": {
+    "binding": "GCC_GPU_GPLL0_DIV_CLK",
+    "kind": "branch",
+    "enable_reg": "0x5200c",
+    "enable_bit": 3,
+    "halt_check": "BRANCH_HALT_DELAY",
+    "name": "gcc_gpu_gpll0_div_clk"
+   },
+   "186": {
+    "binding": "GCC_GPU_GPLL0_CLK",
+    "kind": "branch",
+    "enable_reg": "0x5200c",
+    "enable_bit": 4,
+    "halt_check": "BRANCH_HALT_DELAY",
+    "name": "gcc_gpu_gpll0_clk"
+   },
+   "189": {
+    "binding": "GCC_MSS_Q6_BIMC_AXI_CLK",
+    "kind": "branch",
+    "halt_reg": "0x8a040",
+    "enable_reg": "0x8a040",
+    "enable_bit": 0,
+    "name": "gcc_mss_q6_bimc_axi_clk"
+   }
+  }
+ },
+ "qup_se_clocks": {}
+}

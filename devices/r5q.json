@@ -1,0 +1,251 @@
+{
+ "schema": "iosport-device/1",
+ "_about": "Samsung Galaxy S10 Lite (SM-G770F, r5q, SM8150). Every value below is what the working port (work/ios-r5q, Tests 1-68) uses; _sources says where each group was measured. Private values (serial, absolute paths) live in r5q.local.json.",
+ "_status": "iOS 16.5 boots to a usable home screen (Test 63+); touch (64), 8 cores (65), cpufreq + PC time (66), flip/fbscale (67), battery + buttons + 900 s run (68, built).",
+
+ "device": {
+  "codename": "r5q",
+  "brand": "samsung",
+  "model": "SM-G770F",
+  "name": "Samsung Galaxy S10 Lite",
+  "soc": "sm8150",
+  "soc_name": "Snapdragon 855 (msmnile)",
+  "android_build": "G770FXXS9HXA1 (Android 13)",
+  "ram_bytes": 8517582848,
+  "loader_platform": "r5q",
+  "prefix": "r5q"
+ },
+
+ "donor": {
+  "_about": "The donor's own profile variables (linux-source common/devices/_template.conf). tools/conf_bridge.py export writes devices/r5q.conf from this file: KIND=phone-recovery, BOOT_VIA=recovery-test, and a guard so ./xl and common/run.sh refuse this phone (their phone paths use fastboot or write boot from TWRP).",
+  "kind": "phone",
+  "soc": "Qualcomm Snapdragon 855 (SM8150)",
+  "boot_via": "recovery-test",
+  "uefi_target": "r5qfull",
+  "uefi_fd": "work/ios-r5q/port/build/r5q-fulldbg23-uefi.fd",
+  "dtb": "",
+  "wifi_ath11k": 0,
+  "bootargs": "touchscreen=1 touch_log=1 cpus=8 cpufreq=1 fbscale=2",
+  "default_secs": 900,
+  "userland_vars": "",
+  "firmware": ""
+ },
+
+ "flash": {
+  "_sources": "Manage-Test9.ps1 preflight (live readlink/blockdev), SESSION.md 'Phone recovered after Test 18'",
+  "method": "recovery",
+  "test_partition": "recovery",
+  "recovery_block_device": "/dev/block/sda21",
+  "recovery_bytes": 82726912,
+  "never_write": ["boot", "vbmeta", "vbmeta_samsung", "dtbo", "xbl", "xbl_config", "abl", "aop", "tz", "hyp", "keymaster", "param", "misc", "efs", "sec_efs", "persist", "userdata", "super"],
+  "enter_test": "reboot-recovery helper: reboot(2) LINUX_REBOOT_CMD_RESTART2 \"recovery\" (no BCB/misc write; the operator refuses if misc has a pending command)",
+  "download_mode": {"usb_id": "04E8:685D", "tool": "samloader 2.1.0 (flash -p RECOVERY recovery-original.img, vcom, no repartition)", "partition": "RECOVERY", "partition_id": "0x15", "only_image": "the original recovery (sha256 = baseline.recovery_sha256)"},
+  "requires_root": true,
+  "min_battery_percent": 30
+ },
+
+ "baseline": {
+  "_sources": "work/ios-r5q/baseline.json, outputs/.../test9/manifest.json",
+  "recovery_sha256": "332e1dd4a1c87bcd929696c5e1aa4f6730795c5de440acface1572ae3ba383cd",
+  "boot_sha256": "381e6aa72b0fee42a04c4f7be51d0c63bccaaed26e54f9ac30d3de6255e1bc1a",
+  "vbmeta_sha256": "6e614ba7ab223c23548dc65734358f4786d4f4008107695dd9e8b1494791790c",
+  "dtbo_sha256": "c358f5a4227dea07ecb3261e1240200b123498cc4aa16cfb7dccaafacd258c47",
+  "xbl_sha256": "e607176588608584e3727f989e9c2276737beca131c8add9ee73712c7f400620",
+  "reboot_helper_sha256": "951c9a6519415e1a739e2c992b5247aefe332d1cc88dc85babd9ace0e6291a0a"
+ },
+
+ "bootimg": {
+  "_sources": "stock recovery.img header; package_test68.py",
+  "header_version": 2,
+  "page_size": 4096,
+  "kernel_load_pa": "0x80080000",
+  "avb_footer": true,
+  "seandroid_trailer": true
+ },
+
+ "memory": {
+  "_sources": "XBL uefiplat.cfg (work/ios-r5q/r5q-uefiplat.cfg), live DT reserved-memory, Tests 31/44/51 probes",
+  "dram_base": "0x80000000",
+  "uefi_fd": {"base": "0x9FC00000", "size": "0x300000"},
+  "payload": {"base": "0xF0000000", "max": "0x04000000"},
+  "display_reserved": {"base": "0x9C400000", "size": "0x02000000"},
+  "bootshim_info": "0x9E300000",
+  "dsi_command_page": "0x9E200000",
+  "log_ring": {"base": "0xC1600000", "size": "0x200000", "magic": "0x4D474F4C", "_note": "Samsung sec_log ring = /proc/last_kmsg (sec_debug_region 0xC1400000 + 0x200000); uncached 'SEC Debug' in the UEFI map; survives warm resets only"},
+  "smem": {"base": "0x86000000", "size": "0x200000"},
+  "loader_pe_base": "0x99000000",
+  "loader_window_check": {"base": "0xE0000000", "size": "0x10000000"},
+  "xnu_window": {"base": "0xF4000000", "size": "0x180000000"},
+  "resident_image": {"base": "0xFC000000"},
+  "usb_ramdisk": {"base": "0x1A0000000", "size": "0xC0000000"},
+  "dxe_heap2": {"base": "0xD8000000", "size": "0x03C00000", "_note": "Test 39: the Qualcomm DXEs need ~60 MiB; r5q's DXE Heap is 28 MiB"},
+  "secure_no_map": [
+   {"name": "Hyp Mem", "base": "0x85700000", "size": "0x5F0000"},
+   {"name": "XBL AOP", "base": "0x85E00000", "size": "0x120000"},
+   {"name": "Removed Regions", "base": "0x86200000", "size": "0x5500000"},
+   {"name": "PIL Video tail", "base": "0x9C000000", "size": "0x400000"},
+   {"name": "CDSP Sec", "base": "0xA4C11000", "size": "0x13EF000"},
+   {"name": "QSEECOM", "base": "0xA6000000", "size": "0x2400000"},
+   {"name": "Modem Shared tail", "base": "0xB9400000", "size": "0x500000"},
+   {"name": "SS PLog", "base": "0xC1100000", "size": "0x200000"},
+   {"name": "SEC Debug Autocomment", "base": "0xC1C00000", "size": "0x1000"}
+  ]
+ },
+
+ "log_slot": {
+  "_sources": "package_test68.py, run_native_test.py --log-slot",
+  "offset": "0x4000000",
+  "blocks": 513,
+  "magic": "R5QLOGSLOT/V1"
+ },
+
+ "cpu": {
+  "_sources": "live DT /cpus, loader log (Test 31)",
+  "cores": 8,
+  "mpidr_core_shift": 8,
+  "small_cores": "0x0F",
+  "midr": "0x51DF805E",
+  "cntfrq": 19200000,
+  "enable_method": "psci"
+ },
+ "gic": {"dist": "0x17A00000", "redist": "0x17A60000", "vtimer_intid": 19, "uefi_tick_ppi": 18, "_sources": "live DT; Tests 35/36 (timer), 49/50 (GIC restore)"},
+ "soc_io": {"base": "0x00400000", "size": "0x3FC00000"},
+ "pshold": "0x0C264000",
+
+ "kernel": {
+  "overlay_dir": "work/ios-r5q/kernel-build/r5q-overlay",
+  "overlay_files": {
+   "osfmk/arm64/gic_v3_irq.c": "virtual timer INTID from gic_vtimer= (19 on SM8150)",
+   "bsd/dev/redwood_sec_ts.c": "touch (r5q table) + the S2MU106 fuel-gauge read (I2C 0x3b, GPIO57/58)",
+   "bsd/dev/redwood_buttons.c": "r5q keys: PM8150 PON 0x008 (KPDPWR/RESIN), PM8150L GPIO12 0x4cb (volume up)",
+   "bsd/dev/redwood_cpufreq.c": "OSM per cluster (cpufreq=1)",
+   "iokit/Kernel/MiniIOMobileFramebuffer.cpp": "flip buffers 0x9C400000/0x9CE00000/0x9D800000, HW_CTL disp_ahb reading, fbscale",
+   "bsd/dev/redwood_wifi.c": "wifi_survey: read-only SMEM survey at 0x86000000 (work/ios-r5q/wifi/WIFI-PLAN.md)"
+  },
+  "base_boot_args": "debug=0x8 gic_vtimer=19",
+  "feature_boot_args": {"touch": "touchscreen=1 touch_log=1", "cores": "cpus=8", "cpufreq": "cpufreq=1", "fbscale": "fbscale=2", "buttons_battery": "(with touchscreen=1 on r5q: the touch thread polls the gauge; buttons by platform)"},
+  "test68_kernel": "port/build/xnu-r5q-big.macho"
+ },
+ "loader": {
+  "flag_prefix": "R5Q_",
+  "profile_flags": ["R5Q_XNU_TEST=1", "R5Q_LAB_TRACE=1", "R5Q_COHERENT_TRACE=1", "R5Q_ABL_SEQUENCE=1", "R5Q_SKIP_MAP_CLEAN=1", "R5Q_QCOM_VTIMER=19", "R5Q_XNU_CHECKPOINT=0", "R5Q_LAB_TIMED=<secs>", "R5Q_LAB_USERLAND=1", "R5Q_GIC_RESTORE=1", "R5Q_GIC_REENABLE=1", "R5Q_LAB_SMP=1"],
+  "platform_struct": {"name": "r5q", "io_base": "0x00400000", "io_size": "0x3FC00000", "gic_dist": "0x17A00000", "gic_redist": "0x17A60000", "uart": 0, "log_other_cpu": 1, "cores": 8, "core_shift": 8, "small_cores": "0x0f", "fb_base": "0x9C400000", "darwin_first": 0, "darwin_last": 0}
+ },
+
+ "firmware": {
+  "package": "Platforms/Samsung/r5qfullPkg (every Qualcomm DXE) + Test 12 FirstBootManager/MemoryMapLib",
+  "reference_package": "Mu-Silicium SM8150: Xiaomi nabu / LG mh2 (r5q itself is not upstream)",
+  "mu_silicium_commit": "e51cd877e31c8fbb322032dc4cb6715e83d25ad3",
+  "uefiplat_cfg": "work/ios-r5q/r5q-uefiplat.cfg",
+  "usb_msd_label": "R5QRAM",
+  "usb_controller_init_event": "1C0CFFCE-FC8D-4E44-8C78-9C9E5B530D36",
+  "pmic_pshold_reset_type": {"pon_ps_hold_reset_ctl": "0x85A", "value_warm": "0x01", "ctl2": "0x85B", "note": "full firmware leaves a COLD PS_HOLD reset (wipes the ring): the log slot saves the ring instead"},
+  "current_fd": "fulldbg22 (r5q-fulldbg22-uefi.fd)"
+ },
+
+ "display": {
+  "_sources": "Tests 52-61 MDSS/DSI dumps (port/r5qfull/R5qPanelSync.c, R5qScanout.c), kernel overlay MiniIOMobileFramebuffer.cpp",
+  "width": 1080,
+  "height": 2400,
+  "stride": 4320,
+  "format": "0x237FF (ARGB8888 as UEFI's GOP)",
+  "mdss_base": "0x0AE00000",
+  "dsi0_offset": "0x94000",
+  "dsi_reg_shift": 4,
+  "dsi_reset_reg": "0x118",
+  "intf_offset": "0x6B800",
+  "ctl": 0,
+  "source_pipe": "vig0 (CTL0 layer 0x1000005)",
+  "pipe_offsets": ["0x05000", "0x07000", "0x09000", "0x0B000", "0x25000", "0x27000", "0x29000", "0x2B000"],
+  "te_gpio": 8,
+  "te_function": 1,
+  "panel_window_dcs": {"13": "", "2A": "00 00 04 37", "2B": "00 00 09 5F"},
+  "abl_command_buffer": "0xFF30A000",
+  "autorefresh": "0x80000002",
+  "flip_buffers": ["0x9C400000", "0x9CE00000", "0x9D800000"],
+  "reserved_end": "0x9E200000",
+  "gcc_disp_ahb_cbcr": "0x0010B00C",
+  "dispcc_base": "0x0AF00000",
+  "ios_points": [375, 812]
+ },
+
+ "tlmm": {"base": "0x03000000", "tiles": {"west": "0x03100000", "east": "0x03500000", "north": "0x03900000", "south": "0x03D00000"}},
+
+ "touch": {
+  "_sources": "live DT i2c@0xc80000/touchscreen@48; kernel overlay redwood_sec_ts.c (r5q table); Test 64",
+  "compatible": "sec,sec_ts",
+  "driver": "redwood_sec_ts.c (r5q table)",
+  "i2c_address": "0x48",
+  "se_base": "0x00C80000",
+  "sda_gpio": 55,
+  "scl_gpio": 56,
+  "pin_function": 1,
+  "bus_tile": "south",
+  "irq_gpio": 87,
+  "irq_tile": "east",
+  "supplies": [
+   {"name": "tsp_ldo_avdd", "kind": "gpio", "gpio": 131, "microvolts": 3300000, "active_high": true, "tile": "south"},
+   {"name": "tsp_ldo_dvdd", "kind": "gpio", "gpio": 140, "microvolts": 1800000, "active_high": true, "tile": "south"}
+  ],
+  "gcc": {"vote_reg": "0x52014", "vote_bits": {"core": 0, "s_ahb": 1, "m_ahb": 2, "core2x": 3, "se": 4}, "se_cbcr": "0x1E144", "se_rcg": "0x1E148", "m_ahb_cbcr": "0x1E004", "s_ahb_cbcr": "0x1E008", "core_cbcr": null, "core2x_cbcr": null},
+  "transport": "bitbang (100 kHz; the engine's FIFO interface is disabled: GSI DMA only)",
+  "chip_id": "ac 37 71",
+  "max_coords": [4096, 4096],
+  "firmware": "tsp_sec/y771_r5.bin"
+ },
+
+ "battery": {
+  "_sources": "live DT i2c@0xc88000/s2mu106-fuelgauge@3B; redwood_sec_ts.c gauge section (Test 68)",
+  "gauge": "s2mu106",
+  "compatible": "samsung,s2mu106-fuelgauge",
+  "i2c_address": "0x3B",
+  "se_base": "0x00C88000",
+  "sda_gpio": 57,
+  "scl_gpio": 58,
+  "pin_function": 2,
+  "transport": "bitbang from the touch thread, every 5 s while no finger is down",
+  "registers": {"rsoc": "0x08 (2's complement, 1<<14 = 100.00 %)", "rvbat": "0x04 (mV = v*1000>>13)", "rcur_cc": "0x06 (negative = charging; mA = |v|*1000>>12)", "writes": "none"},
+  "capacity_max": 990
+ },
+
+ "buttons": {
+  "_sources": "live DT spmi@c440000, pm8150@0/power-on@800, gpio_keys; redwood_buttons.c keys_table r5q",
+  "spmi": {"core": "0x0C440000", "chnls": "0x0C600000", "obsrvr": "0x0E600000", "intr": "0x0E700000", "cnfg": "0x0C40A000", "arb_version": 5},
+  "pon": {"pmic": "pm8150", "sid": 0, "base": "0x800", "peripheral_id": "0x008", "subtype_from": 4, "subtype_to": 5, "kpdpwr_bit": "0x01", "resin_bit": "0x02"},
+  "volume_up": {"pmic": "pm8150l", "sid": 4, "gpio": 12, "peripheral_id": "0x4CB", "active_low": true},
+  "volume_down": "resin",
+  "power": "kpdpwr",
+  "access": "read-only through the observer channel; nothing is written to any PMIC"
+ },
+
+ "cpufreq": {
+  "_sources": "live DT /soc/cpucc qcom,clk-cpu-osm; redwood_cpufreq.c r5q (Test 66)",
+  "kind": "osm",
+  "domains": [{"cores": "0-3", "base": "0x18323000"}, {"cores": "4-6", "base": "0x18325800"}, {"cores": "7", "base": "0x18327800"}],
+  "table_offset": "0x110",
+  "row_bytes": 32,
+  "perf_state": "0x920",
+  "ddr_vote": "none on r5q (redwood's RPMh BCM vote does not apply)"
+ },
+
+ "wifi": {
+  "kind": "icnss",
+  "nodes": [{"node": "/soc/icnss@18800000", "compatible": "qcom,icnss", "membase": "0x18800000"}, {"node": "/soc/cnss-qca6390@a0000000", "compatible": "qcom,cnss-qca6390"}],
+  "status": "in progress: plan work/ios-r5q/wifi/WIFI-PLAN.md (icnss WCN399x; both PCIe controllers disabled in the DT; modem PIL + GLINK edge mpss over SMEM 0x86000000; APCS IPC doorbell 0x17C0000C); first stage = read-only survey (redwood_wifi.c wifi_survey)",
+  "smem": "0x86000000",
+  "plan": "work/ios-r5q/wifi/WIFI-PLAN.md"
+ },
+
+ "storage": {"userdata_block_device": "/dev/block/sda32", "ufs_luns": ["31218688 x 4 KiB", "2048 x 4 KiB", "2048 x 4 KiB", "15360 x 4 KiB"]},
+
+ "userland": {
+  "system_image": "port/build/test51-system.apfs",
+  "system_image_bytes": 2492203008,
+  "system_image_crc32": "cdc272da",
+  "root_image": "port/build/test<N>-root.apfs (redwood root.apfs, md1)",
+  "build_vars": "REST=1 (the donor's phone recipe; common/build.sh sets it for userland/build.sh)",
+  "system_sources": ["usb-ramdisk", "sdcard"],
+  "usb_rate_mib_s": 10,
+  "sdcard": "firmware fulldbg23+ (Test 69+, R5qFileSystemLoad): SYSTEM.APF + SYSTEM.CRC on a FAT32 microSD card (exFAT is not read), written once by work/ios-r5q/prepare_sdcard.py"
+ }
+}

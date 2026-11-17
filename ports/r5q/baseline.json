@@ -1,0 +1,29 @@
+{
+  "model": "SM-G770F",
+  "codename": "r5q",
+  "soc": "SM8150",
+  "donor_linux_commit": "946de0fed8e583606ca0470506c9e847f45e926f",
+  "donor_flame_commit": "745c4341af86089efb0df851fa8a27fb8face624",
+  "backup_hashes": [
+    {
+      "name": "boot.img",
+      "sha256": "381e6aa72b0fee42a04c4f7be51d0c63bccaaed26e54f9ac30d3de6255e1bc1a"
+    },
+    {
+      "name": "dtbo.img",
+      "sha256": "c358f5a4227dea07ecb3261e1240200b123498cc4aa16cfb7dccaafacd258c47"
+    },
+    {
+      "name": "recovery.img",
+      "sha256": "332e1dd4a1c87bcd929696c5e1aa4f6730795c5de440acface1572ae3ba383cd"
+    },
+    {
+      "name": "vbmeta.img",
+      "sha256": "6e614ba7ab223c23548dc65734358f4786d4f4008107695dd9e8b1494791790c"
+    },
+    {
+      "name": "xbl.img",
+      "sha256": "e607176588608584e3727f989e9c2276737beca131c8add9ee73712c7f400620"
+    }
+  ]
+}

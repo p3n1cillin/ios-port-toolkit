@@ -1,0 +1,56 @@
+{
+ "_about": "Test 68 on the S10 Lite, as a spec: everything that made Test 68 differ from Test 67, plus what it inherited. gen_test.py + devices/r5q.json turn it into the same files gen68.py produced by copy-and-edit. Placeholders in {braces} (markers, cmdline, loader flags) are filled from the profile and this spec: {N} {timed} {panel_last_row} {system_bytes} {system_hex} {resident_hex}.",
+ "number": 68,
+ "previous": 67,
+ "template": "qcom-userland",
+ "mode": "diagnostic",
+ "firmware_number": 68,
+ "timed": 900,
+
+ "artefacts": {
+  "_note": "what stage_test<N>.py copies into the work tree before the build (gen68.py did these by hand)",
+  "firmware_fd": "port/build/r5q-fulldbg22-uefi.fd",
+  "kernel": "port/build/xnu-r5q-big.macho",
+  "root": "port/build/test{previous}-root.apfs",
+  "port_dir_from": "port/test{previous}",
+  "port_dir_refresh": ["port/r5qfull/R5qUsbRamDisk.c", "port/r5qfull/test_ramdisk_host.c"]
+ },
+
+ "payload": {
+  "ramdisk": {"file": "test{N}-root.apfs", "comment": "iOS 16.5 redwood volume: md1 (the resident system image is md0)"},
+  "resident_system_image": true,
+  "checkpoint": 0,
+  "cmdline": "loader_return_after={timed} epoch=%d touchscreen=1 touch_log=1 cpus=8 cpufreq=1 fbscale=2",
+  "trailing_zero_bytes": 24
+ },
+
+ "loader": {
+  "comment": [
+   "# Test 66: Test 65 loader unchanged (the kernel adds cpufreq; the firmware patches epoch=).",
+   "# per-region map clean, gic_vtimer=19, timed return with the kernel log in the RAM ring) with R5Q_LAB_USERLAND:",
+   "# window = largest free block (0xF4000000, 6 GiB) instead of the lab's 256 MiB, the payload's ramdisk (root.apfs)",
+   "# as the root, 90 s timed return without -v (the verbose console scrolls 10 MB per line)."
+  ],
+  "flags": ["XNU_TEST=1", "LAB_TRACE=1", "COHERENT_TRACE=1", "ABL_SEQUENCE=1", "SKIP_MAP_CLEAN=1",
+            "QCOM_VTIMER={vtimer}", "XNU_CHECKPOINT=0", "LAB_TIMED={timed}", "LAB_USERLAND=1", "GIC_RESTORE=1",
+            "GIC_REENABLE=1", "LAB_SMP=1", "LAB_CMDLINE=\"loader_return_after={timed}\"", "TEST_LABEL=\"TEST{N}\""]
+ },
+
+ "notes": "Test 67 (user): picture small in the top left, old screen around it, touch offset (taps on the blue open apps); the two main home pages smooth, the outer ones slower. Log: pipes 0x1 (vig0, ctl0), scaler 0x1004 set up (750 -> 1080), but at the first frame panelAlive() read GCC disp_ahb 0x80000003 (HW_CTL, idle-gated: CLK_OFF) as lost and gave up the flip; frames 0.73 ms each in the driver; no memory under 4 GB for a third buffer. Test 68 (one big test, user: get as much working as possible): kernel = flip with HW_CTL branches not counted as lost and the third buffer in Display Reserved (0x9C400000/0x9CE00000/0x9D800000); fbscale=2; battery: S2MU106 fuel gauge read (never written) by the touch thread on GPIO57/58 every 5 s -> iOS power source; buttons: r5q keys (PM8150 PON KPDPWR/RESIN, PM8150L GPIO12 volume up), reads only; run 900 s (loader R5Q_LAB_TIMED=900; five fingers held 1.5 s end it sooner).",
+ "start_blocked_reason": "Built and checked host-side. A hardware run needs the user to authorize it explicitly (one run per authorization). Run after Test 67 (2026-11-16 22:45)...........",
+
+ "runner": {
+  "comment": "the big one: flip fixed (HW_CTL clock, third buffer), fbscale=2, battery gauge, buttons, 900 s run",
+  "usb_system_image": true,
+  "timeout": 1800,
+  "log_slot": true,
+  "anchor_index": 2,
+  "markers": [
+   ["[TEST17] BootShim entry", "[TEST17] BootShim: entering SEC", "[PANEL] 2B rows 0-{panel_last_row}: sent"],
+   ["[MSD] StartDevice 0x0", "[MSD] SYSTEM.APF: {system_bytes} bytes", ": MATCH", "[TIME] epoch boot-arg set"],
+   ["TEST{N} REAL XNU USERLAND RUN {timed} S", "cores for the kernel", "resident image at pa {resident_hex} size {system_hex}"],
+   ["== KERNEL LOG ==", "$ exec /sbin/launchd.ios", "== END OF LOG =="],
+   ["TEST{N} REAL XNU TIMED RUN RETURNED", "[TEST12] Resetting via PSHOLD", "[SLOT] saving the RAM log to recovery (final"]
+  ]
+ }
+}

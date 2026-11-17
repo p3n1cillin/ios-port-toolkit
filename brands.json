@@ -1,0 +1,66 @@
+{
+ "_about": "How each brand's phones enter a test and come back. General knowledge as of 2026, NOT verified per model by this project: check your exact model (unlockability differs by region/carrier and changes with firmware). Used by tools/assess_device.py and BRANDS.md. Unlocking a bootloader wipes the phone's data on nearly every brand: that is the owner's step and decision (SAFETY.md R7).",
+ "samsung": {
+  "entry_method": "recovery",
+  "fastboot_boot": false,
+  "unlock": "OEM unlocking in Developer options, then the Download Mode unlock prompt (international/Exynos and most non-US Snapdragon models). US/Canada carrier Snapdragon models are generally not unlockable.",
+  "unlock_wipes_data": true,
+  "restore": "Download Mode (Odin protocol: samloader/Odin/Heimdall). This toolkit flashes ONLY the original recovery there.",
+  "caveats": "Knox warranty bit is set permanently by a custom boot; Samsung Pay/Secure Folder stop working. Images need the AVB footer + SEANDROIDENFORCE trailer. Proven here: S10 Lite (r5q)."
+ },
+ "xiaomi": {
+  "entry_method": "fastboot-boot",
+  "fastboot_boot": true,
+  "unlock": "Mi Unlock tool with a Xiaomi account and a waiting period (newer HyperOS devices may require community approval).",
+  "unlock_wipes_data": true,
+  "restore": "fastboot ROM with MiFlash (never with the lock option); EDL needs an authorized account.",
+  "caveats": "Anti-rollback: never flash an older ROM. POCO and Redmi are Xiaomi. Proven by the donor: POCO X5 Pro (redwood)."
+ },
+ "google": {
+  "entry_method": "fastboot-boot",
+  "fastboot_boot": true,
+  "unlock": "OEM unlocking in Developer options, then fastboot flashing unlock (carrier models may block it).",
+  "unlock_wipes_data": true,
+  "restore": "factory images (flash.android.com).",
+  "caveats": "Pixel 6 and later use Google Tensor (Exynos-derived, not Qualcomm): no Mu-Silicium UEFI for it, so the boot chain needs a UEFI port first. Pixel 3-5 are Qualcomm (SDM845/SM7150/SM7250)."
+ },
+ "oneplus": {
+  "entry_method": "fastboot-boot",
+  "fastboot_boot": true,
+  "unlock": "fastboot oem unlock (older) / fastboot flashing unlock.",
+  "unlock_wipes_data": true,
+  "restore": "MSM Download Tool (EDL) for most models; fastboot ROMs for many.",
+  "caveats": "Many OnePlus SoCs have Mu-Silicium ports (sm8250 kebab, sm8350 lemonade, sm8550 aston/salami, ...)."
+ },
+ "motorola": {
+  "entry_method": "fastboot-boot",
+  "fastboot_boot": true,
+  "unlock": "unlock code from Motorola's site (not for carrier-locked models).",
+  "unlock_wipes_data": true,
+  "restore": "stock firmware with fastboot (Rescue and Smart Assistant).",
+  "caveats": ""
+ },
+ "nothing": {
+  "entry_method": "fastboot-boot",
+  "fastboot_boot": true,
+  "unlock": "fastboot flashing unlock.",
+  "unlock_wipes_data": true,
+  "restore": "fastboot images; EDL for a hard brick.",
+  "caveats": "Phone (1) spacewar is SM7325 like redwood; Phone (2) pong is SM8475: both have Mu-Silicium ports."
+ },
+ "sony": {
+  "entry_method": "fastboot-boot",
+  "fastboot_boot": true,
+  "unlock": "unlock code from Sony's developer site.",
+  "unlock_wipes_data": true,
+  "restore": "Xperia Companion / Emma / newflasher.",
+  "caveats": "Unlocking erases the DRM (TA) keys permanently: camera quality and some features are lost for good."
+ },
+ "oppo": {"entry_method": "fastboot-boot", "fastboot_boot": "varies", "unlock": "deep-testing app on some models only; many cannot be unlocked.", "unlock_wipes_data": true, "restore": "MSM Download Tool (EDL, often needs an authorized account)", "caveats": "realme and OnePlus share much of this; check the exact model."},
+ "realme": {"entry_method": "fastboot-boot", "fastboot_boot": "varies", "unlock": "deep-testing app on some models only.", "unlock_wipes_data": true, "restore": "realme flash tool / EDL", "caveats": "bitra (sm8250), senna (sm8475), bale (sm8635) have Mu-Silicium ports."},
+ "asus": {"entry_method": "fastboot-boot", "fastboot_boot": true, "unlock": "the official unlock app, on models where Asus provides it.", "unlock_wipes_data": true, "restore": "raw firmware via fastboot/EDL", "caveats": "ROG Phone 5 (i005d, sm8350) has a Mu-Silicium port."},
+ "lenovo": {"entry_method": "fastboot-boot", "fastboot_boot": true, "unlock": "fastboot flashing unlock (tablets; varies).", "unlock_wipes_data": true, "restore": "Lenovo Rescue and Smart Assistant", "caveats": "tablets j706f (sm7150), 9707f (sm8250) have Mu-Silicium ports."},
+ "lg": {"entry_method": "fastboot-boot", "fastboot_boot": "varies", "unlock": "LG's unlock program ended with its phone business; few models unlockable.", "unlock_wipes_data": true, "restore": "LGUP/KDZ", "caveats": "G8x (mh2, sm8150) and V35 (caymanslm, sdm845) have Mu-Silicium ports."},
+ "huawei": {"entry_method": "blocked", "fastboot_boot": false, "unlock": "no official bootloader unlock since 2018.", "unlock_wipes_data": true, "restore": "", "caveats": "Kirin SoCs; treat as not portable."},
+ "honor": {"entry_method": "blocked", "fastboot_boot": false, "unlock": "no official bootloader unlock.", "unlock_wipes_data": true, "restore": "", "caveats": ""}
+}

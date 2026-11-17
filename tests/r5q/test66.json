@@ -1,0 +1,49 @@
+{
+ "_about": "Test 66 on the S10 Lite as a delta on Test 68 (regenerates the real Test 66 files byte for byte).",
+ "extends": "test68.json",
+ "number": 66,
+ "previous": 65,
+ "firmware_number": 66,
+ "timed": 240,
+ "artefacts": {
+  "kernel": "port/build/xnu-r5q-cpufreq.macho"
+ },
+ "payload": {
+  "cmdline": "loader_return_after={timed} epoch=%d touchscreen=1 touch_log=1 cpus=8 cpufreq=1"
+ },
+ "notes": "Test 65 (user): still laggy but better, Wi-Fi in Settings looks stuck (no WLAN driver yet), battery shows near zero (no fuel gauge driver yet), the time is wrong (the epoch boot-arg was the bundle time). Test 66 = Test 65 + the CPU clock (kernel redwood_cpufreq ported to the SM8150 OSM blocks 0x18323000/0x18325800/0x18327800: each cluster to its top LUT row; boot-arg cpufreq=1; no DDR vote on r5q) + the time (the PC writes EPOCH.TXT before DONE.TXT; firmware fulldbg22 overwrites the 10 epoch digits in the payload cmdline with the PC clock plus the seconds since, just before the loader).",
+ "start_blocked_reason": "Built and checked host-side. A hardware run needs the user to authorize it explicitly (one run per authorization). Run after Test 65 (2026-11-16 22:50)...........",
+ "runner": {
+  "comment": "Test 65 + cpufreq kernel (OSM, cpufreq=1) + epoch from the PC (EPOCH.TXT, firmware fulldbg22)",
+  "timeout": 1200,
+  "markers": [
+   [
+    "[TEST17] BootShim entry",
+    "[TEST17] BootShim: entering SEC",
+    "[PANEL] 2B rows 0-{panel_last_row}: sent"
+   ],
+   [
+    "[MSD] StartDevice 0x0",
+    "[MSD] SYSTEM.APF: {system_bytes} bytes",
+    ": MATCH",
+    "[TIME] epoch boot-arg set"
+   ],
+   [
+    "TEST{N} REAL XNU USERLAND RUN {timed} S",
+    "cores for the kernel",
+    "resident image at pa {resident_hex} size {system_hex}"
+   ],
+   [
+    "== KERNEL LOG ==",
+    "touch: step 1:",
+    "$ exec /sbin/launchd.ios",
+    "== END OF LOG =="
+   ],
+   [
+    "TEST{N} REAL XNU TIMED RUN RETURNED",
+    "[TEST12] Resetting via PSHOLD",
+    "[SLOT] saving the RAM log to recovery (final"
+   ]
+  ]
+ }
+}

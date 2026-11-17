@@ -1,0 +1,5 @@
+#!/bin/bash
+R=@@WORK_WSL@@
+cd /tmp
+python3 -I $R/build_loader_linux.py $R/port/xnuloader $R/port/build/@@PREFIX@@-test@@N@@-loader.efi --test@@N@@ | tail -1
+cd $R && python3 -I build_test@@N@@_shim.py $R/port && python3 run_test@@N@@_checks.py $R 2>&1 | grep -E '"test"|"result"|"case"|Error|assert'

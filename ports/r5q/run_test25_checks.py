@@ -1,0 +1,3 @@
+import sys
+from run_binary_checks import run_checks
+run_checks(sys.argv[1], ["test_test25_shim.py", "test_test25_roundtrip.py"])

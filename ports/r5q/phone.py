@@ -1,0 +1,435 @@
+"""Talk to the installed Galaxy S10 Lite in maintenance mode (Test 74+ loader). Run a command here first, then start the
+phone (or plug it in) with the cable in this PC: in its first seconds the loader listens, and the first fastboot command
+keeps it in maintenance mode instead of starting iOS (a volume key held at the start does the same).
+
+  python phone.py logs [OUT]        everything: the live firmware ring, the three saved logs in USERDATA (the boot
+                                    manager's two slots and the early driver-stage slot), the loader's log; as text
+  python phone.py read PART OFF LEN [FILE]   any partition range (hex offsets; whole 4 KiB blocks; at most 80 MiB)
+  python phone.py flash-boot IMAGE  a new BOOT image (written, read back and compared on the phone)
+  python phone.py continue          start iOS
+  python phone.py poweroff | reboot
+  python phone.py cycle IMAGE [SECS [ARGS...]]  the whole test cycle (ARGS: new extra boot-args for it), no hands: end the run, catch the restart, flash BOOT,
+                                    verify, restart, follow the new run's log for SECS (default 120)
+  python phone.py args [ARGS... | --clear | --show]  extra kernel boot-args kept on the phone for every start
+                                    (key=value replaces the image's; -key removes it); iOS restarts with them
+  python phone.py smem [FILE]        the shared memory while iOS runs, decoded (the modem's state and crash reason)
+  python phone.py charger           the charger's state (PM8150B registers, reads only), also while iOS runs
+  python phone.py settime           the phone's clock from this PC (kept for later starts without a PC)
+  python phone.py restart [SECS]    the same without the flash: end the run, restart, follow the new run
+  python phone.py live [SECONDS]    while iOS runs (live mode): its kernel log as it is written
+  python phone.py stop              end the iOS run now (it returns to the loader as at its time limit)
+  python phone.py screenshot [PNG]  the phone's screen
+  python phone.py raw ARGS...       any fastboot command (e.g. raw oem part userdata)
+
+Writes on the phone are only what flash-boot (BOOT) and the loader's own allowlist (boot, userdata) permit.
+"""
+import pathlib
+import shutil
+import struct
+import subprocess
+import sys
+import tempfile
+import time
+
+FASTBOOT = shutil.which('fastboot') or str(pathlib.Path.home() / 'AppData/Local/Microsoft/WinGet/Packages/'
+                                           'Google.PlatformTools_Microsoft.Winget.Source_8wekyb3d8bbwe/platform-tools/fastboot.exe')
+RING = 0x200000
+SLOT_BYTES = 4096 + RING                       # a header block + the ring
+LOG_AREA = (4 << 30) + (256 * 4096)            # in USERDATA: 1 MiB past the iOS install record at 4 GiB
+SLOTS = {'boot-manager-0': LOG_AREA, 'boot-manager-1': LOG_AREA + 1024 * 4096,
+         'early-driver-stage-a': LOG_AREA + 2048 * 4096, 'early-driver-stage-b': LOG_AREA + 3072 * 4096}
+
+
+def fb(*args, check=True):
+    r = subprocess.run([FASTBOOT, *args], capture_output=True, text=True, timeout=600)
+    out = (r.stdout + r.stderr).strip()
+    if check and r.returncode:
+        raise SystemExit(f'fastboot {" ".join(args)}: {out}')
+    return out
+
+
+SMEM_BASE, SMEM_SIZE = 0x86000000, 0x200000
+SMP2P_BITS = {0: 'err-fatal', 1: 'err-ready', 2: 'proxy-unvote', 3: 'stop-ack', 7: 'shutdown-ack'}
+
+
+MPSS_BASE, MPSS_SIZE = 0x8d800000, 0xa000000
+
+
+def modemdump(out=None):
+    """(Test 97 loader) stop the crashed modem through TrustZone (oem modemstop: PAS shutdown, as Linux before its crash
+    dump), then read its 160 MB of memory in 2 MiB peeks into one file"""
+    out = pathlib.Path(out or (pathlib.Path(tempfile.gettempdir()) / 'r5q-modem.bin'))
+    piece = pathlib.Path(tempfile.gettempdir()) / 'r5q-modem-piece.bin'
+    print(fb('oem', 'modemstop'))
+    with open(out, 'wb') as f:
+        for off in range(0, MPSS_SIZE, 0x200000):
+            fb('oem', 'peek', f'{MPSS_BASE + off:x}', '200000')
+            fb('get_staged', str(piece))
+            f.write(piece.read_bytes()[:0x200000])
+            if off % 0x1000000 == 0:
+                print(f'  {off >> 20} MB', flush=True)
+    print(f'modem memory: {out}')
+
+
+def smem(save=None):
+    """the shared memory between the processors, read while iOS runs (Test 84+ loader: oem peek, reads only), decoded:
+    partitions, items, the modem's SMP2P entries (item 435: modem -> us) and its crash reason (item 421)"""
+    raw = pathlib.Path(save or (pathlib.Path(tempfile.gettempdir()) / 'r5q-smem.bin'))
+    piece = pathlib.Path(tempfile.gettempdir()) / 'r5q-smem-piece.bin'
+    m = bytearray(SMEM_SIZE)
+
+    def peek(off, size):
+        # (only the TOC and the partitions the AP is one end of: the others are protected, and a read of one hangs the
+        # loader -- Test 84; the Test 85 loader refuses them itself)
+        fb('oem', 'peek', f'{SMEM_BASE + off:x}', f'{size:x}')
+        fb('get_staged', str(piece))
+        m[off:off + size] = piece.read_bytes()[:size]
+    toc = SMEM_SIZE - 0x1000
+    peek(toc, 0x1000)
+    if m[toc:toc + 4] != b'$TOC':
+        raise SystemExit('no SMEM table of contents')
+    count = struct.unpack_from('<I', m, toc + 8)[0]
+    items = {}
+    for i in range(count):
+        e = toc + 32 + i * 48
+        off, size, flags, h0, h1 = struct.unpack_from('<IIIHH', m, e)
+        if not (h0 == 0 or h1 == 0 or h0 == 0xfffe) or off == 0 or off + size > SMEM_SIZE:
+            continue
+        peek(off, size)
+        if m[off:off + 4] != b'$PRT':
+            continue
+        name = 'global' if h0 == 0xfffe else f'{h0}-{h1}'
+        free = struct.unpack_from('<I', m, off + 12)[0]
+        at, found = off + 32, []
+        while at < off + free:
+            canary, item, isize, pdata, phdr = struct.unpack_from('<HHIHH', m, at)
+            if canary != 0xa5a5:
+                found.append('(broken canary)')
+                break
+            data = at + 16 + phdr
+            found.append(item)
+            items.setdefault(item, (name, data, isize - pdata))
+            at = data + isize
+        if found:
+            print(f'partition {name}: items {found}')
+    if 435 in items:
+        _, d, n = items[435]
+        magic, ver, lpid, rpid, total, valid, flags = struct.unpack_from('<4sIHHHHI', m, d)
+        print(f'modem SMP2P (item 435): {magic!r} version {ver & 0xff}, pid {lpid}->{rpid}, {valid}/{total} entries, flags {flags:#x}')
+        for k in range(valid):
+            nm, val = struct.unpack_from('<16sI', m, d + 20 + 20 * k)
+            bits = [b for i, b in SMP2P_BITS.items() if val >> i & 1] if nm.startswith(b'slave-kernel') else []
+            print(f'    {nm.split(bytes(1))[0].decode(errors="replace"):16s} {val:#010x} {" ".join(bits)}')
+    for item in (421, 428):
+        if item in items:
+            _, d, n = items[item]
+            body = m[d:d + n]
+            print(f'item {item} ({n} bytes): ' + (body.split(bytes(1))[0].decode(errors='replace') if item == 421 else body[:32].hex()))
+        else:
+            print(f'item {item}: not there')
+    for item in sorted(set(items) - {421, 428, 435, 478, 479, 480}):
+        _, d, n = items[item]
+        body = bytes(m[d:d + min(n, 96)])
+        text = ''.join(chr(c) if 32 <= c < 127 else '.' for c in body)
+        print(f'item {item} ({n} bytes): {body[:48].hex()}  |{text}|')
+        if item == 611:     # the modem's error report (err_smem): text, all of it
+            full = bytes(m[d:d + n]).rstrip(bytes(1))
+            print('    ' + ''.join(chr(c) if 32 <= c < 127 or c == 10 else ('\n' if c == 0 else '.') for c in full).replace('\n\n', '\n'))
+    raw.write_bytes(bytes(m))
+    print(f'(raw copy: {raw})')
+
+
+CHG_STATE = ['trickle', 'pre-charge', 'FAST', 'full-on', 'taper', 'TERMINATED', 'INHIBITED', 'DISABLED']
+APSD = {0: 'SDP (a PC port)', 1: 'OCP', 2: 'CDP (a charging PC port)', 3: 'DCP (a wall charger)', 4: 'float', 5: 'QC2', 6: 'QC3'}
+
+
+def charger():
+    """the PM8150B charger's registers (Test 86+ loader: oem charger, reads only; works while iOS runs), decoded"""
+    tmp = pathlib.Path(tempfile.gettempdir()) / 'r5q-charger.txt'
+    fb('oem', 'charger')
+    fb('get_staged', str(tmp))
+    text = tmp.read_text(errors='replace')
+    print(text.rstrip())
+    regs = {}
+    for line in text.splitlines():
+        name, _, vals = line.partition(' = ') if ' = ' in line else (line.split(' =')[0], '', line.split(' =')[-1])
+        try:
+            regs[line.split(' ')[0] + ' ' + line.split(' ')[1]] = [int(v, 16) for v in line.split('=')[1].split()]
+        except ValueError:
+            pass
+    st = regs.get('chgr status_1..2')
+    if st:
+        print(f'=> charger state: {CHG_STATE[st[0] & 7]}')
+    ap = regs.get('usbin apsd_status,result')
+    if ap:
+        kinds = [v for b, v in APSD.items() if ap[1] >> b & 1]
+        print(f'=> port detected (APSD done={ap[0] & 1}): {", ".join(kinds) or "none"}')
+    icl = regs.get('misc icl_status')
+    cfg = regs.get('usbin icl_cfg')
+    if icl and cfg:
+        print(f'=> input current limit: in force {icl[0] * 50} mA, configured {cfg[0] * 50} mA')
+    fcc = regs.get('chgr fcc_cfg')
+    if fcc:
+        print(f'=> fast charge current setting: {fcc[0] * 50} mA')
+    en = regs.get('chgr enable_cmd')
+    if en:
+        print(f'=> charging enable command bit: {en[0] & 1}')
+    il = regs.get('usbin cmd_il')
+    if il:
+        print(f'=> USB input suspended: {il[0] & 1}')
+
+
+def settime():
+    """the phone's clock from this PC's (Test 81+ loader): kept in USERDATA with the PM8150 RTC's count, so later
+    starts without a PC know the time too"""
+    out = fb('oem', 'settime', str(int(time.time())), check=False)
+    print('    clock: ' + (out.splitlines()[0] if out else '?'), flush=True)
+
+
+def args(rest):
+    """extra kernel boot-args kept on the phone (Test 82+ loader), put in at every start after the BOOT image's own:
+    a key given here replaces the image's, '-key' takes it away. No new BOOT image needed."""
+    if 'FAIL' in fb('oem', 'args', 'show', check=False):
+        # iOS is running (live mode): only the listening window before iOS takes these; end the run and catch it
+        print('ending the iOS run to reach the listening window ...', flush=True)
+        fb('oem', 'stop', check=False)
+        if not gone(45):
+            fb('reboot', check=False)
+            gone(30)
+        wait_for_phone()
+    if not rest or rest == ['--show']:
+        pass
+    elif rest == ['--clear']:
+        print(fb('oem', 'args', 'clear'))
+    else:
+        text = ' '.join(rest).encode()
+        if len(text) > 400:
+            raise SystemExit('at most 400 bytes of arguments')
+        tmp = pathlib.Path(tempfile.gettempdir()) / 'r5q-args.txt'
+        tmp.write_bytes(text)
+        fb('stage', str(tmp))
+        print(fb('oem', 'args', 'set'))
+    shown = pathlib.Path(tempfile.gettempdir()) / 'r5q-args-now.txt'
+    fb('oem', 'args', 'show')
+    fb('get_staged', str(shown))
+    print('extra boot-args now: ' + (shown.read_text().strip() or '(none)'))
+    settime()
+    print('starting iOS with them: ' + fb('oem', 'continue', check=False).splitlines()[0])
+
+
+def wait_for_phone(seconds=3600):
+    """fastboot keeps asking until the phone shows up; its first command, the moment the loader listens (the first
+    15 s of every start with the cable in a PC), puts the phone into maintenance mode."""
+    print('waiting for the phone: start it (or plug it in) now ...', flush=True)
+    r = subprocess.run([FASTBOOT, 'getvar', 'product'], capture_output=True, text=True, timeout=seconds)
+    if 'xnuloader' not in r.stdout + r.stderr:
+        raise SystemExit('no phone in maintenance mode: ' + (r.stdout + r.stderr).strip())
+    print('phone in maintenance mode')
+
+
+def staged(command, dest):
+    fb('oem', *command.split())
+    fb('get_staged', str(dest))
+    return pathlib.Path(dest).read_bytes()
+
+
+def unroll(ring):
+    if len(ring) < 16 or ring[4:8] != b'LOGM':
+        return b''
+    widx = struct.unpack_from('<I', ring, 8)[0]
+    data, cap = ring[16:RING], RING - 16
+    return data[:widx] if widx <= cap else data[widx % cap:] + data[:widx % cap]
+
+
+def logs(out):
+    out = pathlib.Path(out) / time.strftime('maint-logs-%Y%m%d-%H%M%S')
+    out.mkdir(parents=True)
+    ring = staged('fwlog', out / 'firmware-ring-now.bin')
+    (out / 'firmware-now.txt').write_bytes(unroll(ring))
+    print(f'live firmware log: {len(unroll(ring))} bytes')
+    for name, off in SLOTS.items():
+        raw = staged(f'readpart userdata {off:x} {SLOT_BYTES:x}', out / f'{name}.bin')
+        header = raw[:104]
+        kind = header[:16].split(b'\0')[0].decode(errors='replace')
+        why = header[32:96].split(b'\0')[0].decode(errors='replace')
+        if kind.startswith('R5QEARLYLOG'):
+            start, state = struct.unpack_from('<II', header, 96)
+            why += f' | start {start}, ' + {1: 'DIED IN THE DRIVER STAGE', 2: 'got through the driver stage'}.get(state, f'state {state}')
+        text = unroll(raw[4096:])
+        (out / f'{name}.txt').write_bytes(text)
+        print(f'{name}: {kind or "(empty)"}; {why!r}; {len(text)} bytes of log')
+    # (the loader's own "oem log" upload wedged the USB link on 2026-11-17: left out until fixed)
+    print(f'all in {out}')
+
+
+def main():
+    if len(sys.argv) < 2:
+        raise SystemExit(__doc__)
+    cmd, rest = sys.argv[1], sys.argv[2:]
+    wait_for_phone()
+    if cmd == 'logs':
+        logs(rest[0] if rest else pathlib.Path(__file__).parent / 'port/build/phone-logs')
+    elif cmd == 'read':
+        part, off, length = rest[0], int(rest[1], 16), int(rest[2], 16)
+        dest = rest[3] if len(rest) > 3 else f'{part}-{off:x}-{length:x}.bin'
+        staged(f'readpart {part} {off:x} {length:x}', dest)
+        print(f'{dest}: {length} bytes')
+    elif cmd == 'flash-boot':
+        image = pathlib.Path(rest[0])
+        if image.stat().st_size != 64 << 20 or image.read_bytes()[:8] != b'ANDROID!':
+            raise SystemExit('not a 64 MiB Android boot image')
+        print(fb('flash', 'boot', str(image)))
+    elif cmd == 'continue':
+        print(fb('oem', 'continue'))
+    elif cmd in ('poweroff', 'reboot'):
+        print(fb('oem', 'poweroff') if cmd == 'poweroff' else fb('reboot'))
+    elif cmd == 'live':
+        live(float(rest[0]) if rest else 2.0)
+    elif cmd == 'cycle':
+        cycle(pathlib.Path(rest[0]), int(rest[1]) if len(rest) > 1 else 120, rest[2:] or None)
+    elif cmd == 'args':
+        args(rest)
+    elif cmd == 'charger':
+        charger()
+    elif cmd == 'smem':
+        smem(rest[0] if rest else None)
+    elif cmd == 'modemdump':
+        modemdump(rest[0] if rest else None)
+    elif cmd == 'settime':
+        settime()
+    elif cmd == 'restart':
+        cycle(None, int(rest[0]) if rest else 120)
+    elif cmd == 'stop':
+        print(fb('oem', 'stop'))
+    elif cmd == 'screenshot':
+        screenshot(rest[0] if rest else time.strftime('screen-%Y%m%d-%H%M%S.png'))
+    elif cmd == 'raw':
+        print(fb(*rest, check=False))
+    else:
+        raise SystemExit(__doc__)
+
+
+def live(interval):
+    """iOS's kernel log as it is written (live mode, Test 79+: iOS on core 7, the loader on core 0 serving USB)."""
+    seen = 0
+    tmp = pathlib.Path(tempfile.gettempdir()) / 'r5q-live-log.txt'
+    # caught in the listening window before iOS: start it (during a run the loader refuses this, harmlessly)
+    fb('oem', 'continue', check=False)
+    time.sleep(3)
+    print('following the kernel log (Ctrl+C to stop following; iOS keeps running)', flush=True)
+    while True:
+        fb('oem', 'log', check=False)
+        if 'OKAY' in fb('get_staged', str(tmp), check=False) or tmp.exists():
+            text = tmp.read_bytes().decode(errors='replace')
+            mark = text.find('== KERNEL LOG (the kernel is still running) ==')
+            body = text[mark:] if mark >= 0 else text
+            if len(body) < seen:
+                seen = 0            # (the ring wrapped or a new run)
+            sys.stdout.write(body[seen:])
+            sys.stdout.flush()
+            seen = len(body)
+        time.sleep(interval)
+
+
+def gone(seconds):
+    """True once the phone has left USB (it is restarting), within `seconds`."""
+    for _ in range(seconds):
+        if 'fastboot' not in fb('devices', check=False):
+            return True
+        time.sleep(1)
+    return False
+
+
+def set_args(words):
+    """(in the listening window) the extra boot-args kept on the phone"""
+    tmp = pathlib.Path(tempfile.gettempdir()) / 'r5q-args.txt'
+    tmp.write_bytes(' '.join(words).encode())
+    fb('stage', str(tmp))
+    print('    args: ' + ' '.join(words) + ': ' + fb('oem', 'args', 'set').splitlines()[0])
+
+
+def cycle(image, follow, new_args=None):
+    """The whole test cycle from the PC, the cable left in: end the iOS run (or leave maintenance mode), catch the
+    phone in its listening window as it starts again, flash IMAGE to BOOT and read it back, restart, and follow the
+    new run's kernel log for `follow` seconds into OUT (port/build/cycles/)."""
+    import hashlib
+    if image is not None:
+        data = image.read_bytes()
+        if len(data) != 64 << 20 or data[:8] != b'ANDROID!':
+            raise SystemExit('not a 64 MiB Android boot image')
+        want = hashlib.sha256(data).hexdigest()
+    out = pathlib.Path(__file__).parent / 'port/build/cycles' / time.strftime(
+        f'%Y%m%d-%H%M%S-{image.stem if image is not None else "restart"}')
+    out.mkdir(parents=True)
+    print('1/5 ending the current run', flush=True)
+    fb('oem', 'stop', check=False)                      # (live mode: iOS returns, the firmware restarts the phone)
+    if not gone(45):
+        fb('reboot', check=False)                       # (maintenance mode: just restart)
+        gone(30)
+    print('2/5 catching the phone as it starts again', flush=True)
+    wait_for_phone()
+    if image is None:
+        print('3/5 (restart only: BOOT left as it is)', flush=True)
+        settime()
+        fb('oem', 'continue', check=False)
+        follow_run(out, follow)
+        return
+    print('3/5 flashing BOOT and reading it back', flush=True)
+    print(fb('flash', 'boot', str(image)))
+    back = out / 'boot-readback.bin'
+    staged(f'readpart boot 0 {64 << 20:x}', back)
+    got = hashlib.sha256(back.read_bytes()).hexdigest()
+    back.unlink()
+    if got != want:
+        raise SystemExit(f'BOOT read back as {got[:16]}, not {want[:16]}: not restarting into it')
+    print(f'    BOOT = {want[:16]} (verified)')
+    print('4/5 restarting into it', flush=True)
+    fb('reboot', check=False)
+    gone(30)
+    wait_for_phone()                                    # (caught in the new start's listening window)
+    if new_args:
+        set_args(new_args)
+    settime()
+    fb('oem', 'continue', check=False)
+    follow_run(out, follow)
+
+
+def follow_run(out, follow):
+    print(f'5/5 following the new run for {follow} s -> {out / "live.txt"}', flush=True)
+    deadline, text = time.time() + follow, ''
+    tmp = out / 'live.tmp'
+    time.sleep(5)
+    while time.time() < deadline:
+        fb('oem', 'log', check=False)
+        if 'FAIL' not in fb('get_staged', str(tmp), check=False) and tmp.exists():
+            text = tmp.read_bytes().decode(errors='replace')
+        time.sleep(3)
+    (out / 'live.txt').write_text(text, encoding='utf-8', errors='replace')
+    tmp.unlink(missing_ok=True)
+    for marker in ['clock: ', 'exec /sbin/launchd.ios', 'systemShellDidFinishLaunching', 'panic(', 'HUNG',
+                   'ufs: /dev/rufs_darwin takes writes', 'no write will be asked for', 'var_store']:
+        print(f'    {marker!r}: {"seen" if marker in text else "-"}')
+    for line in text.splitlines():
+        if line.startswith('clock: ') or ('boot-args = ' in line and ' epoch=' in line):
+            print('    ' + (line if line.startswith('clock') else 'boot-args: epoch=' + line.split(' epoch=')[1].split()[0]))
+    print(f'cycle done: {out}')
+
+
+def screenshot(dest):
+    geometry = fb('getvar', 'screen')
+    nums = [int(x) for x in geometry.split('screen:')[-1].split()[:3]] if 'screen:' in geometry else []
+    if len(nums) != 3:
+        raise SystemExit(f'no screen geometry: {geometry}')
+    width, height, stride = nums
+    raw = pathlib.Path(tempfile.gettempdir()) / 'r5q-screen.raw'
+    fb('oem', 'screenshot')
+    fb('get_staged', str(raw))
+    data = raw.read_bytes()
+    from PIL import Image          # (Pillow)
+    img = Image.frombuffer('RGBA', (width, height), data, 'raw', 'BGRA', stride, 1).convert('RGB')
+    img.save(dest)
+    print(f'{dest}: {width}x{height}')
+
+
+if __name__ == '__main__':
+    main()

@@ -1,0 +1,3159 @@
+{
+ "soc": "msm8996",
+ "vendor": "qcom",
+ "_generated_by": "toolkit/tools/qcom_socdata.py",
+ "_sources": {
+  "pinctrl": "pinctrl-msm8996.c",
+  "gcc": "gcc-msm8996.c",
+  "bindings": "qcom,gcc-msm8996.h",
+  "dtsi": "msm8996.dtsi"
+ },
+ "gpio_stride": "0x1000",
+ "gic": {
+  "dist": "0x9bc0000",
+  "redist": "0x9c00000"
+ },
+ "tlmm": {
+  "tiles": null,
+  "bases": {
+   "all": "0x1010000",
+   "_source": "msm8996.dtsi tlmm reg (one tile)"
+  },
+  "pins": {
+   "0": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "blsp_spi1",
+     "blsp_uart1",
+     "blsp_uim1",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "1": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "blsp_spi1",
+     "blsp_uart1",
+     "blsp_uim1",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "2": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "blsp_spi1",
+     "blsp_uart1",
+     "blsp_i2c1",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "3": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "blsp_spi1",
+     "blsp_uart1",
+     "blsp_i2c1",
+     "NA",
+     "atest_tsens",
+     "bimc_dte1",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "4": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "blsp_spi8",
+     "blsp_uart8",
+     "blsp_uim8",
+     "NA",
+     "qdss_cti_trig_out_b",
+     "dac_calib0",
+     "bimc_dte0",
+     "NA",
+     "NA"
+    ]
+   },
+   "5": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "blsp_spi8",
+     "blsp_uart8",
+     "blsp_uim8",
+     "NA",
+     "qdss_cti_trig_in_b",
+     "dac_calib1",
+     "bimc_dte1",
+     "NA",
+     "NA"
+    ]
+   },
+   "6": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "blsp_spi8",
+     "blsp_uart8",
+     "blsp_i2c8",
+     "NA",
+     "dac_calib2",
+     "bimc_dte0",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "7": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "blsp_spi8",
+     "blsp_uart8",
+     "blsp_i2c8",
+     "NA",
+     "atest_tsens2",
+     "atest_usb1",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "8": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "blsp_spi10",
+     "blsp_uart10",
+     "blsp_uim10",
+     "NA",
+     "atest_bbrx1",
+     "atest_usb13",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "9": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "blsp_spi10",
+     "blsp_uart10",
+     "blsp_uim10",
+     "atest_bbrx0",
+     "atest_usb12",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "10": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "mdp_vsync",
+     "blsp_spi10",
+     "blsp_uart10",
+     "blsp_i2c10",
+     "atest_gpsadc1",
+     "atest_usb11",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "11": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "mdp_vsync",
+     "blsp_spi10",
+     "blsp_uart10",
+     "blsp_i2c10",
+     "atest_gpsadc0",
+     "atest_usb10",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "12": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "mdp_vsync",
+     "m_voc",
+     "dac_gpio",
+     "atest_char",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "13": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "cam_mclk",
+     "pll_bypassnl",
+     "qdss_stm7",
+     "qdss_tracedata_b",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "14": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "cam_mclk",
+     "pll_reset",
+     "qdss_stm6",
+     "qdss_tracedata_b",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "15": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "cam_mclk",
+     "qdss_stm5",
+     "qdss_tracedata_b",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "16": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "cam_mclk",
+     "qdss_stm4",
+     "qdss_tracedata_b",
+     "NA",
+     "atest_usb2",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "17": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "cci_i2c",
+     "qdss_stm3",
+     "qdss_tracedata_b",
+     "dac_calib3",
+     "atest_usb23",
+     "atest_char3",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "18": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "cci_i2c",
+     "qdss_stm2",
+     "qdss_tracedata_b",
+     "dac_calib4",
+     "atest_usb22",
+     "atest_char2",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "19": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "cci_i2c",
+     "qdss_stm1",
+     "qdss_tracedata_b",
+     "dac_calib5",
+     "atest_usb21",
+     "atest_char1",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "20": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "cci_i2c",
+     "dbg_out",
+     "qdss_stm0",
+     "dac_calib6",
+     "atest_usb20",
+     "atest_char0",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "21": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "cci_timer0",
+     "qdss_stm13",
+     "qdss_tracedata_b",
+     "dac_calib7",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "22": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "cci_timer1",
+     "qdss_stm12",
+     "qdss_tracedata_b",
+     "dac_calib8",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "23": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "cci_timer2",
+     "blsp1_spi",
+     "qdss_stm11",
+     "qdss_tracedata_b",
+     "dac_calib9",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "24": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "cci_timer3",
+     "cci_async",
+     "blsp1_spi",
+     "qdss_stm10",
+     "qdss_cti_trig_in_a",
+     "dac_calib10",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "25": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "cci_timer4",
+     "cci_async",
+     "blsp_spi6",
+     "blsp_uart6",
+     "blsp_uim6",
+     "blsp2_spi",
+     "qdss_stm9",
+     "qdss_cti_trig_out_a",
+     "dac_calib11"
+    ]
+   },
+   "26": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "cci_async",
+     "blsp_spi6",
+     "blsp_uart6",
+     "blsp_uim6",
+     "qdss_stm8",
+     "qdss_tracedata_b",
+     "dac_calib12",
+     "NA",
+     "NA"
+    ]
+   },
+   "27": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "blsp_spi6",
+     "blsp_uart6",
+     "blsp_i2c6",
+     "blsp1_spi",
+     "qdss_tracectl_a",
+     "dac_calib13",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "28": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "blsp_spi6",
+     "blsp_uart6",
+     "blsp_i2c6",
+     "blsp1_spi",
+     "qdss_traceclk_a",
+     "dac_calib14",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "29": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "blsp2_spi",
+     "NA",
+     "qdss_tracedata_b",
+     "dac_calib15",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "30": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "hdmi_rcv",
+     "blsp2_spi",
+     "dac_calib16",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "31": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "hdmi_cec",
+     "pwr_modem",
+     "dac_calib17",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "32": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "hdmi_ddc",
+     "pwr_nav",
+     "NA",
+     "dac_calib18",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "33": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "hdmi_ddc",
+     "pwr_crypto",
+     "NA",
+     "dac_calib19",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "34": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "hdmi_hot",
+     "NA",
+     "dac_calib20",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "35": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "pci_e0",
+     "NA",
+     "dac_calib21",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "36": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "pci_e0",
+     "NA",
+     "dac_calib22",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "37": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "NA",
+     "dac_calib23",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "38": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "NA",
+     "dac_calib24",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "39": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "tsif1_sync",
+     "NA",
+     "dac_calib25",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "40": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "sd_write",
+     "tsif1_error",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "41": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "blsp_spi2",
+     "blsp_uart2",
+     "blsp_uim2",
+     "NA",
+     "qdss_cti",
+     "dac_calib0",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "42": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "blsp_spi2",
+     "blsp_uart2",
+     "blsp_uim2",
+     "NA",
+     "qdss_cti",
+     "dac_calib1",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "43": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "blsp_spi2",
+     "blsp_uart2",
+     "blsp_i2c2",
+     "NA",
+     "dac_calib2",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "44": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "blsp_spi2",
+     "blsp_uart2",
+     "blsp_i2c2",
+     "NA",
+     "dac_calib3",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "45": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "blsp_spi3",
+     "blsp_uart3",
+     "blsp_uim3",
+     "NA",
+     "dac_calib4",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "46": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "blsp_spi3",
+     "blsp_uart3",
+     "blsp_uim3",
+     "NA",
+     "dac_calib5",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "47": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "blsp_spi3",
+     "blsp_uart3",
+     "blsp_i2c3",
+     "dac_calib6",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "48": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "blsp_spi3",
+     "blsp_uart3",
+     "blsp_i2c3",
+     "dac_calib7",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "49": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "uim3",
+     "blsp_spi9",
+     "blsp_uart9",
+     "blsp_uim9",
+     "blsp10_spi",
+     "dac_calib8",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "50": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "uim3",
+     "blsp_spi9",
+     "blsp_uart9",
+     "blsp_uim9",
+     "blsp10_spi",
+     "dac_calib9",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "51": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "uim3",
+     "blsp_spi9",
+     "blsp_uart9",
+     "blsp_i2c9",
+     "blsp10_spi",
+     "dac_calib10",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "52": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "uim3",
+     "blsp_spi9",
+     "blsp_uart9",
+     "blsp_i2c9",
+     "blsp10_spi",
+     "dac_calib11",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "53": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "blsp_spi7",
+     "blsp_uart7",
+     "blsp_uim7",
+     "NA",
+     "qdss_tracedata_a",
+     "dac_calib12",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "54": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "blsp_spi7",
+     "blsp_uart7",
+     "blsp_uim7",
+     "NA",
+     "NA",
+     "qdss_tracedata_a",
+     "dac_calib13",
+     "NA",
+     "NA"
+    ]
+   },
+   "55": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "blsp_spi7",
+     "blsp_uart7",
+     "blsp_i2c7",
+     "NA",
+     "dac_calib14",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "56": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "blsp_spi7",
+     "blsp_uart7",
+     "blsp_i2c7",
+     "NA",
+     "dac_calib15",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "57": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "qua_mi2s",
+     "gcc_gp1_clk_a",
+     "NA",
+     "qdss_tracedata_b",
+     "dac_calib16",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "58": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "qua_mi2s",
+     "uim4",
+     "blsp_spi11",
+     "blsp_uart11",
+     "blsp_uim11",
+     "gcc_gp2_clk_a",
+     "NA",
+     "qdss_tracedata_b",
+     "dac_calib17"
+    ]
+   },
+   "59": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "qua_mi2s",
+     "uim4",
+     "blsp_spi11",
+     "blsp_uart11",
+     "blsp_uim11",
+     "gcc_gp3_clk_a",
+     "NA",
+     "dac_calib18",
+     "NA"
+    ]
+   },
+   "60": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "qua_mi2s",
+     "uim4",
+     "blsp_spi11",
+     "blsp_uart11",
+     "blsp_i2c11",
+     "cri_trng0",
+     "NA",
+     "dac_calib19",
+     "NA"
+    ]
+   },
+   "61": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "qua_mi2s",
+     "uim4",
+     "blsp_spi11",
+     "blsp_uart11",
+     "blsp_i2c11",
+     "cri_trng1",
+     "NA",
+     "dac_calib20",
+     "NA"
+    ]
+   },
+   "62": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "qua_mi2s",
+     "cri_trng",
+     "NA",
+     "dac_calib21",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "63": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "qua_mi2s",
+     "NA",
+     "NA",
+     "qdss_stm18",
+     "qdss_tracedata_a",
+     "dac_calib22",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "64": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "pri_mi2s",
+     "NA",
+     "qdss_stm17",
+     "qdss_tracedata_a",
+     "dac_calib23",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "65": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "pri_mi2s",
+     "blsp_spi4",
+     "blsp_uart4",
+     "blsp_uim4",
+     "NA",
+     "qdss_stm16",
+     "qdss_tracedata_a",
+     "dac_calib24",
+     "NA"
+    ]
+   },
+   "66": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "pri_mi2s",
+     "blsp_spi4",
+     "blsp_uart4",
+     "blsp_uim4",
+     "NA",
+     "qdss_stm15",
+     "qdss_tracedata_a",
+     "dac_calib25",
+     "NA"
+    ]
+   },
+   "67": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "pri_mi2s",
+     "blsp_spi4",
+     "blsp_uart4",
+     "blsp_i2c4",
+     "qdss_stm14",
+     "qdss_tracedata_a",
+     "dac_calib26",
+     "NA",
+     "NA"
+    ]
+   },
+   "68": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "pri_mi2s",
+     "blsp_spi4",
+     "blsp_uart4",
+     "blsp_i2c4",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "69": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "spkr_i2s",
+     "audio_ref",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "70": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "lpass_slimbus",
+     "spkr_i2s",
+     "isense_dbg",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "71": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "lpass_slimbus",
+     "spkr_i2s",
+     "tsense_pwm1",
+     "tsense_pwm2",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "72": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "lpass_slimbus",
+     "spkr_i2s",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "73": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "btfm_slimbus",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "74": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "btfm_slimbus",
+     "ter_mi2s",
+     "qdss_stm22",
+     "qdss_tracedata_a",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "75": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "ter_mi2s",
+     "qdss_stm21",
+     "qdss_tracedata_a",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "76": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "ter_mi2s",
+     "qdss_stm20",
+     "qdss_tracedata_a",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "77": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "ter_mi2s",
+     "qdss_stm19",
+     "qdss_tracedata_a",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "78": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "ter_mi2s",
+     "gcc_gp1_clk_b",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "79": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "sec_mi2s",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "80": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "sec_mi2s",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "81": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "sec_mi2s",
+     "blsp_spi5",
+     "blsp_uart5",
+     "blsp_uim5",
+     "gcc_gp2_clk_b",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "82": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "sec_mi2s",
+     "blsp_spi5",
+     "blsp_uart5",
+     "blsp_uim5",
+     "gcc_gp3_clk_b",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "83": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "sec_mi2s",
+     "blsp_spi5",
+     "blsp_uart5",
+     "blsp_i2c5",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "84": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "blsp_spi5",
+     "blsp_uart5",
+     "blsp_i2c5",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "85": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "blsp_spi12",
+     "blsp_uart12",
+     "blsp_uim12",
+     "NA",
+     "qdss_stm25",
+     "qdss_tracedata_a",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "86": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "blsp_spi12",
+     "blsp_uart12",
+     "blsp_uim12",
+     "NA",
+     "NA",
+     "qdss_stm31",
+     "qdss_tracedata_a",
+     "NA",
+     "NA"
+    ]
+   },
+   "87": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "blsp_spi12",
+     "blsp_uart12",
+     "blsp_i2c12",
+     "NA",
+     "qdss_stm30",
+     "qdss_tracedata_a",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "88": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "blsp_spi12",
+     "blsp_uart12",
+     "blsp_i2c12",
+     "blsp10_spi",
+     "NA",
+     "qdss_stm29",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "89": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "tsif1_clk",
+     "qdss_stm28",
+     "qdss_tracedata_a",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "90": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "tsif1_en",
+     "blsp1_spi",
+     "qdss_tracedata_a",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "91": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "tsif1_data",
+     "sdc4_cmd",
+     "qdss_stm27",
+     "qdss_traceclk_b",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "92": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "tsif2_error",
+     "sdc43",
+     "vfr_1",
+     "qdss_stm26",
+     "qdss_tracedata_b",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "93": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "tsif2_clk",
+     "sdc4_clk",
+     "NA",
+     "qdss_stm24",
+     "qdss_tracedata_b",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "94": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "tsif2_en",
+     "sdc42",
+     "NA",
+     "qdss_stm23",
+     "qdss_tracectl_b",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "95": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "tsif2_data",
+     "sdc41",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "96": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "tsif2_sync",
+     "sdc40",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "97": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "NA",
+     "NA",
+     "mdp_vsync_p_b",
+     "ldo_en",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "98": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "NA",
+     "NA",
+     "mdp_vsync_s_b",
+     "ldo_update",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "99": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "100": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "NA",
+     "NA",
+     "blsp11_uart_tx_b",
+     "qdss_cti",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "101": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "NA",
+     "blsp11_uart_rx_b",
+     "qdss_cti",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "102": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "NA",
+     "blsp11_i2c_sda_b",
+     "prng_rosc",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "103": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "NA",
+     "blsp11_i2c_scl_b",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "104": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "105": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "uim2",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "106": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "uim2",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "107": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "uim2",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "108": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "uim2",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "109": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "uim1",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "110": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "uim1",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "111": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "uim1",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "112": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "uim1",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "113": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "uim_batt",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "114": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "NA",
+     "pci_e2",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "115": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "NA",
+     "pci_e2",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "116": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "NA",
+     "pa_indicator",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "117": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "118": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "adsp_ext",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "119": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "120": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "121": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "ddr_bist",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "122": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "ddr_bist",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "123": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "ddr_bist",
+     "qdss_tracedata_11",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "124": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "ddr_bist",
+     "qdss_tracedata_12",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "125": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "126": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "127": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "128": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "NA",
+     "modem_tsync",
+     "nav_dr",
+     "nav_pps",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "129": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "130": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "pci_e1",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "131": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "pci_e1",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "132": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "133": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "134": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "gsm_tx",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "135": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "gsm_tx",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "136": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "137": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "138": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "NA",
+     "qspi_cs",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "139": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "NA",
+     "ssbi2",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "140": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "NA",
+     "ssbi1",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "141": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "NA",
+     "qspi_cs",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "142": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "143": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "144": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "mss_lte",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "145": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "mss_lte",
+     "qspi_clk",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "146": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "NA",
+     "qspi0",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "147": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "NA",
+     "qspi1",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "148": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "NA",
+     "qspi2",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   },
+   "149": {
+    "tile": null,
+    "functions": [
+     "gpio",
+     "NA",
+     "qspi3",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA",
+     "NA"
+    ]
+   }
+  }
+ },
+ "gcc": {
+  "base": "0x300000",
+  "clocks": {
+   "106": {
+    "binding": "GCC_SDCC3_AHB_CLK",
+    "kind": "branch",
+    "halt_reg": "0x15008",
+    "enable_reg": "0x15008",
+    "enable_bit": 0,
+    "name": "gcc_sdcc3_ahb_clk"
+   },
+   "107": {
+    "binding": "GCC_SDCC4_APPS_CLK",
+    "kind": "branch",
+    "halt_reg": "0x16004",
+    "enable_reg": "0x16004",
+    "enable_bit": 0,
+    "name": "gcc_sdcc4_apps_clk"
+   },
+   "108": {
+    "binding": "GCC_SDCC4_AHB_CLK",
+    "kind": "branch",
+    "halt_reg": "0x16008",
+    "enable_reg": "0x16008",
+    "enable_bit": 0,
+    "name": "gcc_sdcc4_ahb_clk"
+   },
+   "109": {
+    "binding": "GCC_BLSP1_AHB_CLK",
+    "kind": "branch",
+    "halt_reg": "0x17004",
+    "enable_reg": "0x52004",
+    "enable_bit": 17,
+    "halt_check": "BRANCH_HALT_VOTED",
+    "name": "gcc_blsp1_ahb_clk"
+   },
+   "110": {
+    "binding": "GCC_BLSP1_SLEEP_CLK",
+    "kind": "branch",
+    "halt_reg": "0x17008",
+    "enable_reg": "0x52004",
+    "enable_bit": 16,
+    "halt_check": "BRANCH_HALT_VOTED",
+    "name": "gcc_blsp1_sleep_clk"
+   },
+   "111": {
+    "binding": "GCC_BLSP1_QUP1_SPI_APPS_CLK",
+    "kind": "branch",
+    "halt_reg": "0x19004",
+    "enable_reg": "0x19004",
+    "enable_bit": 0,
+    "name": "gcc_blsp1_qup1_spi_apps_clk"
+   },
+   "112": {
+    "binding": "GCC_BLSP1_QUP1_I2C_APPS_CLK",
+    "kind": "branch",
+    "halt_reg": "0x19008",
+    "enable_reg": "0x19008",
+    "enable_bit": 0,
+    "name": "gcc_blsp1_qup1_i2c_apps_clk"
+   },
+   "113": {
+    "binding": "GCC_BLSP1_UART1_APPS_CLK",
+    "kind": "branch",
+    "halt_reg": "0x1a004",
+    "enable_reg": "0x1a004",
+    "enable_bit": 0,
+    "name": "gcc_blsp1_uart1_apps_clk"
+   },
+   "114": {
+    "binding": "GCC_BLSP1_QUP2_SPI_APPS_CLK",
+    "kind": "branch",
+    "halt_reg": "0x1b004",
+    "enable_reg": "0x1b004",
+    "enable_bit": 0,
+    "name": "gcc_blsp1_qup2_spi_apps_clk"
+   },
+   "115": {
+    "binding": "GCC_BLSP1_QUP2_I2C_APPS_CLK",
+    "kind": "branch",
+    "halt_reg": "0x1b008",
+    "enable_reg": "0x1b008",
+    "enable_bit": 0,
+    "name": "gcc_blsp1_qup2_i2c_apps_clk"
+   },
+   "116": {
+    "binding": "GCC_BLSP1_UART2_APPS_CLK",
+    "kind": "branch",
+    "halt_reg": "0x1c004",
+    "enable_reg": "0x1c004",
+    "enable_bit": 0,
+    "name": "gcc_blsp1_uart2_apps_clk"
+   },
+   "117": {
+    "binding": "GCC_BLSP1_QUP3_SPI_APPS_CLK",
+    "kind": "branch",
+    "halt_reg": "0x1d004",
+    "enable_reg": "0x1d004",
+    "enable_bit": 0,
+    "name": "gcc_blsp1_qup3_spi_apps_clk"
+   },
+   "118": {
+    "binding": "GCC_BLSP1_QUP3_I2C_APPS_CLK",
+    "kind": "branch",
+    "halt_reg": "0x1d008",
+    "enable_reg": "0x1d008",
+    "enable_bit": 0,
+    "name": "gcc_blsp1_qup3_i2c_apps_clk"
+   },
+   "119": {
+    "binding": "GCC_BLSP1_UART3_APPS_CLK",
+    "kind": "branch",
+    "halt_reg": "0x1e004",
+    "enable_reg": "0x1e004",
+    "enable_bit": 0,
+    "name": "gcc_blsp1_uart3_apps_clk"
+   },
+   "120": {
+    "binding": "GCC_BLSP1_QUP4_SPI_APPS_CLK",
+    "kind": "branch",
+    "halt_reg": "0x1f004",
+    "enable_reg": "0x1f004",
+    "enable_bit": 0,
+    "name": "gcc_blsp1_qup4_spi_apps_clk"
+   },
+   "121": {
+    "binding": "GCC_BLSP1_QUP4_I2C_APPS_CLK",
+    "kind": "branch",
+    "halt_reg": "0x1f008",
+    "enable_reg": "0x1f008",
+    "enable_bit": 0,
+    "name": "gcc_blsp1_qup4_i2c_apps_clk"
+   },
+   "122": {
+    "binding": "GCC_BLSP1_UART4_APPS_CLK",
+    "kind": "branch",
+    "halt_reg": "0x20004",
+    "enable_reg": "0x20004",
+    "enable_bit": 0,
+    "name": "gcc_blsp1_uart4_apps_clk"
+   },
+   "123": {
+    "binding": "GCC_BLSP1_QUP5_SPI_APPS_CLK",
+    "kind": "branch",
+    "halt_reg": "0x21004",
+    "enable_reg": "0x21004",
+    "enable_bit": 0,
+    "name": "gcc_blsp1_qup5_spi_apps_clk"
+   },
+   "124": {
+    "binding": "GCC_BLSP1_QUP5_I2C_APPS_CLK",
+    "kind": "branch",
+    "halt_reg": "0x21008",
+    "enable_reg": "0x21008",
+    "enable_bit": 0,
+    "name": "gcc_blsp1_qup5_i2c_apps_clk"
+   },
+   "125": {
+    "binding": "GCC_BLSP1_UART5_APPS_CLK",
+    "kind": "branch",
+    "halt_reg": "0x22004",
+    "enable_reg": "0x22004",
+    "enable_bit": 0,
+    "name": "gcc_blsp1_uart5_apps_clk"
+   },
+   "126": {
+    "binding": "GCC_BLSP1_QUP6_SPI_APPS_CLK",
+    "kind": "branch",
+    "halt_reg": "0x23004",
+    "enable_reg": "0x23004",
+    "enable_bit": 0,
+    "name": "gcc_blsp1_qup6_spi_apps_clk"
+   },
+   "127": {
+    "binding": "GCC_BLSP1_QUP6_I2C_APPS_CLK",
+    "kind": "branch",
+    "halt_reg": "0x23008",
+    "enable_reg": "0x23008",
+    "enable_bit": 0,
+    "name": "gcc_blsp1_qup6_i2c_apps_clk"
+   },
+   "128": {
+    "binding": "GCC_BLSP1_UART6_APPS_CLK",
+    "kind": "branch",
+    "halt_reg": "0x24004",
+    "enable_reg": "0x24004",
+    "enable_bit": 0,
+    "name": "gcc_blsp1_uart6_apps_clk"
+   },
+   "129": {
+    "binding": "GCC_BLSP2_AHB_CLK",
+    "kind": "branch",
+    "halt_reg": "0x25004",
+    "enable_reg": "0x52004",
+    "enable_bit": 15,
+    "halt_check": "BRANCH_HALT_VOTED",
+    "name": "gcc_blsp2_ahb_clk"
+   },
+   "130": {
+    "binding": "GCC_BLSP2_SLEEP_CLK",
+    "kind": "branch",
+    "halt_reg": "0x25008",
+    "enable_reg": "0x52004",
+    "enable_bit": 14,
+    "halt_check": "BRANCH_HALT_VOTED",
+    "name": "gcc_blsp2_sleep_clk"
+   },
+   "131": {
+    "binding": "GCC_BLSP2_QUP1_SPI_APPS_CLK",
+    "kind": "branch",
+    "halt_reg": "0x26004",
+    "enable_reg": "0x26004",
+    "enable_bit": 0,
+    "name": "gcc_blsp2_qup1_spi_apps_clk"
+   },
+   "132": {
+    "binding": "GCC_BLSP2_QUP1_I2C_APPS_CLK",
+    "kind": "branch",
+    "halt_reg": "0x26008",
+    "enable_reg": "0x26008",
+    "enable_bit": 0,
+    "name": "gcc_blsp2_qup1_i2c_apps_clk"
+   },
+   "133": {
+    "binding": "GCC_BLSP2_UART1_APPS_CLK",
+    "kind": "branch",
+    "halt_reg": "0x27004",
+    "enable_reg": "0x27004",
+    "enable_bit": 0,
+    "name": "gcc_blsp2_uart1_apps_clk"
+   },
+   "134": {
+    "binding": "GCC_BLSP2_QUP2_SPI_APPS_CLK",
+    "kind": "branch",
+    "halt_reg": "0x28004",
+    "enable_reg": "0x28004",
+    "enable_bit": 0,
+    "name": "gcc_blsp2_qup2_spi_apps_clk"
+   },
+   "135": {
+    "binding": "GCC_BLSP2_QUP2_I2C_APPS_CLK",
+    "kind": "branch",
+    "halt_reg": "0x28008",
+    "enable_reg": "0x28008",
+    "enable_bit": 0,
+    "name": "gcc_blsp2_qup2_i2c_apps_clk"
+   },
+   "136": {
+    "binding": "GCC_BLSP2_UART2_APPS_CLK",
+    "kind": "branch",
+    "halt_reg": "0x29004",
+    "enable_reg": "0x29004",
+    "enable_bit": 0,
+    "name": "gcc_blsp2_uart2_apps_clk"
+   },
+   "137": {
+    "binding": "GCC_BLSP2_QUP3_SPI_APPS_CLK",
+    "kind": "branch",
+    "halt_reg": "0x2a004",
+    "enable_reg": "0x2a004",
+    "enable_bit": 0,
+    "name": "gcc_blsp2_qup3_spi_apps_clk"
+   },
+   "138": {
+    "binding": "GCC_BLSP2_QUP3_I2C_APPS_CLK",
+    "kind": "branch",
+    "halt_reg": "0x2a008",
+    "enable_reg": "0x2a008",
+    "enable_bit": 0,
+    "name": "gcc_blsp2_qup3_i2c_apps_clk"
+   },
+   "139": {
+    "binding": "GCC_BLSP2_UART3_APPS_CLK",
+    "kind": "branch",
+    "halt_reg": "0x2b004",
+    "enable_reg": "0x2b004",
+    "enable_bit": 0,
+    "name": "gcc_blsp2_uart3_apps_clk"
+   },
+   "140": {
+    "binding": "GCC_BLSP2_QUP4_SPI_APPS_CLK",
+    "kind": "branch",
+    "halt_reg": "0x2c004",
+    "enable_reg": "0x2c004",
+    "enable_bit": 0,
+    "name": "gcc_blsp2_qup4_spi_apps_clk"
+   },
+   "141": {
+    "binding": "GCC_BLSP2_QUP4_I2C_APPS_CLK",
+    "kind": "branch",
+    "halt_reg": "0x2c008",
+    "enable_reg": "0x2c008",
+    "enable_bit": 0,
+    "name": "gcc_blsp2_qup4_i2c_apps_clk"
+   },
+   "142": {
+    "binding": "GCC_BLSP2_UART4_APPS_CLK",
+    "kind": "branch",
+    "halt_reg": "0x2d004",
+    "enable_reg": "0x2d004",
+    "enable_bit": 0,
+    "name": "gcc_blsp2_uart4_apps_clk"
+   },
+   "143": {
+    "binding": "GCC_BLSP2_QUP5_SPI_APPS_CLK",
+    "kind": "branch",
+    "halt_reg": "0x2e004",
+    "enable_reg": "0x2e004",
+    "enable_bit": 0,
+    "name": "gcc_blsp2_qup5_spi_apps_clk"
+   },
+   "144": {
+    "binding": "GCC_BLSP2_QUP5_I2C_APPS_CLK",
+    "kind": "branch",
+    "halt_reg": "0x2e008",
+    "enable_reg": "0x2e008",
+    "enable_bit": 0,
+    "name": "gcc_blsp2_qup5_i2c_apps_clk"
+   },
+   "145": {
+    "binding": "GCC_BLSP2_UART5_APPS_CLK",
+    "kind": "branch",
+    "halt_reg": "0x2f004",
+    "enable_reg": "0x2f004",
+    "enable_bit": 0,
+    "name": "gcc_blsp2_uart5_apps_clk"
+   },
+   "146": {
+    "binding": "GCC_BLSP2_QUP6_SPI_APPS_CLK",
+    "kind": "branch",
+    "halt_reg": "0x30004",
+    "enable_reg": "0x30004",
+    "enable_bit": 0,
+    "name": "gcc_blsp2_qup6_spi_apps_clk"
+   },
+   "147": {
+    "binding": "GCC_BLSP2_QUP6_I2C_APPS_CLK",
+    "kind": "branch",
+    "halt_reg": "0x30008",
+    "enable_reg": "0x30008",
+    "enable_bit": 0,
+    "name": "gcc_blsp2_qup6_i2c_apps_clk"
+   },
+   "148": {
+    "binding": "GCC_BLSP2_UART6_APPS_CLK",
+    "kind": "branch",
+    "halt_reg": "0x31004",
+    "enable_reg": "0x31004",
+    "enable_bit": 0,
+    "name": "gcc_blsp2_uart6_apps_clk"
+   },
+   "149": {
+    "binding": "GCC_PDM_AHB_CLK",
+    "kind": "branch",
+    "halt_reg": "0x33004",
+    "enable_reg": "0x33004",
+    "enable_bit": 0,
+    "name": "gcc_pdm_ahb_clk"
+   },
+   "151": {
+    "binding": "GCC_PDM2_CLK",
+    "kind": "branch",
+    "halt_reg": "0x3300c",
+    "enable_reg": "0x3300c",
+    "enable_bit": 0,
+    "name": "gcc_pdm2_clk"
+   },
+   "152": {
+    "binding": "GCC_PRNG_AHB_CLK",
+    "kind": "branch",
+    "halt_reg": "0x34004",
+    "enable_reg": "0x52004",
+    "enable_bit": 13,
+    "halt_check": "BRANCH_HALT_VOTED",
+    "name": "gcc_prng_ahb_clk"
+   },
+   "153": {
+    "binding": "GCC_TSIF_AHB_CLK",
+    "kind": "branch",
+    "halt_reg": "0x36004",
+    "enable_reg": "0x36004",
+    "enable_bit": 0,
+    "name": "gcc_tsif_ahb_clk"
+   },
+   "154": {
+    "binding": "GCC_TSIF_REF_CLK",
+    "kind": "branch",
+    "halt_reg": "0x36008",
+    "enable_reg": "0x36008",
+    "enable_bit": 0,
+    "name": "gcc_tsif_ref_clk"
+   },
+   "155": {
+    "binding": "GCC_TSIF_INACTIVITY_TIMERS_CLK",
+    "kind": "branch",
+    "halt_reg": "0x3600c",
+    "enable_reg": "0x3600c",
+    "enable_bit": 0,
+    "name": "gcc_tsif_inactivity_timers_clk"
+   },
+   "157": {
+    "binding": "GCC_BOOT_ROM_AHB_CLK",
+    "kind": "branch",
+    "halt_reg": "0x38004",
+    "enable_reg": "0x52004",
+    "enable_bit": 10,
+    "halt_check": "BRANCH_HALT_VOTED",
+    "name": "gcc_boot_rom_ahb_clk"
+   },
+   "168": {
+    "binding": "GCC_BIMC_GFX_CLK",
+    "kind": "branch",
+    "halt_reg": "0x46018",
+    "enable_reg": "0x46018",
+    "enable_bit": 0,
+    "name": "gcc_bimc_gfx_clk"
+   },
+   "172": {
+    "binding": "GCC_HMSS_RBCPR_CLK",
+    "kind": "branch",
+    "halt_reg": "0x4800c",
+    "enable_reg": "0x4800c",
+    "enable_bit": 0,
+    "name": "gcc_hmss_rbcpr_clk"
+   },
+   "173": {
+    "binding": "GCC_GP1_CLK",
+    "kind": "branch",
+    "halt_reg": "0x64000",
+    "enable_reg": "0x64000",
+    "enable_bit": 0,
+    "name": "gcc_gp1_clk"
+   },
+   "174": {
+    "binding": "GCC_GP2_CLK",
+    "kind": "branch",
+    "halt_reg": "0x65000",
+    "enable_reg": "0x65000",
+    "enable_bit": 0,
+    "name": "gcc_gp2_clk"
+   },
+   "175": {
+    "binding": "GCC_GP3_CLK",
+    "kind": "branch",
+    "halt_reg": "0x66000",
+    "enable_reg": "0x66000",
+    "enable_bit": 0,
+    "name": "gcc_gp3_clk"
+   },
+   "176": {
+    "binding": "GCC_PCIE_0_SLV_AXI_CLK",
+    "kind": "branch",
+    "halt_reg": "0x6b008",
+    "enable_reg": "0x6b008",
+    "enable_bit": 0,
+    "name": "gcc_pcie_0_slv_axi_clk"
+   },
+   "177": {
+    "binding": "GCC_PCIE_0_MSTR_AXI_CLK",
+    "kind": "branch",
+    "halt_reg": "0x6b00c",
+    "enable_reg": "0x6b00c",
+    "enable_bit": 0,
+    "name": "gcc_pcie_0_mstr_axi_clk"
+   },
+   "178": {
+    "binding": "GCC_PCIE_0_CFG_AHB_CLK",
+    "kind": "branch",
+    "halt_reg": "0x6b010",
+    "enable_reg": "0x6b010",
+    "enable_bit": 0,
+    "name": "gcc_pcie_0_cfg_ahb_clk"
+   },
+   "179": {
+    "binding": "GCC_PCIE_0_AUX_CLK",
+    "kind": "branch",
+    "halt_reg": "0x6b014",
+    "enable_reg": "0x6b014",
+    "enable_bit": 0,
+    "name": "gcc_pcie_0_aux_clk"
+   },
+   "180": {
+    "binding": "GCC_PCIE_0_PIPE_CLK",
+    "kind": "branch",
+    "halt_reg": "0x6b018",
+    "enable_reg": "0x6b018",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT_SKIP",
+    "name": "gcc_pcie_0_pipe_clk"
+   },
+   "181": {
+    "binding": "GCC_PCIE_1_SLV_AXI_CLK",
+    "kind": "branch",
+    "halt_reg": "0x6d008",
+    "enable_reg": "0x6d008",
+    "enable_bit": 0,
+    "name": "gcc_pcie_1_slv_axi_clk"
+   },
+   "182": {
+    "binding": "GCC_PCIE_1_MSTR_AXI_CLK",
+    "kind": "branch",
+    "halt_reg": "0x6d00c",
+    "enable_reg": "0x6d00c",
+    "enable_bit": 0,
+    "name": "gcc_pcie_1_mstr_axi_clk"
+   },
+   "183": {
+    "binding": "GCC_PCIE_1_CFG_AHB_CLK",
+    "kind": "branch",
+    "halt_reg": "0x6d010",
+    "enable_reg": "0x6d010",
+    "enable_bit": 0,
+    "name": "gcc_pcie_1_cfg_ahb_clk"
+   },
+   "184": {
+    "binding": "GCC_PCIE_1_AUX_CLK",
+    "kind": "branch",
+    "halt_reg": "0x6d014",
+    "enable_reg": "0x6d014",
+    "enable_bit": 0,
+    "name": "gcc_pcie_1_aux_clk"
+   },
+   "185": {
+    "binding": "GCC_PCIE_1_PIPE_CLK",
+    "kind": "branch",
+    "halt_reg": "0x6d018",
+    "enable_reg": "0x6d018",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT_SKIP",
+    "name": "gcc_pcie_1_pipe_clk"
+   },
+   "186": {
+    "binding": "GCC_PCIE_2_SLV_AXI_CLK",
+    "kind": "branch",
+    "halt_reg": "0x6e008",
+    "enable_reg": "0x6e008",
+    "enable_bit": 0,
+    "name": "gcc_pcie_2_slv_axi_clk"
+   },
+   "187": {
+    "binding": "GCC_PCIE_2_MSTR_AXI_CLK",
+    "kind": "branch",
+    "halt_reg": "0x6e00c",
+    "enable_reg": "0x6e00c",
+    "enable_bit": 0,
+    "name": "gcc_pcie_2_mstr_axi_clk"
+   },
+   "188": {
+    "binding": "GCC_PCIE_2_CFG_AHB_CLK",
+    "kind": "branch",
+    "halt_reg": "0x6e010",
+    "enable_reg": "0x6e010",
+    "enable_bit": 0,
+    "name": "gcc_pcie_2_cfg_ahb_clk"
+   },
+   "189": {
+    "binding": "GCC_PCIE_2_AUX_CLK",
+    "kind": "branch",
+    "halt_reg": "0x6e014",
+    "enable_reg": "0x6e014",
+    "enable_bit": 0,
+    "name": "gcc_pcie_2_aux_clk"
+   },
+   "190": {
+    "binding": "GCC_PCIE_2_PIPE_CLK",
+    "kind": "branch",
+    "halt_reg": "0x6e018",
+    "enable_reg": "0x6e018",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT_SKIP",
+    "name": "gcc_pcie_2_pipe_clk"
+   },
+   "191": {
+    "binding": "GCC_PCIE_PHY_CFG_AHB_CLK",
+    "kind": "branch",
+    "halt_reg": "0x6f004",
+    "enable_reg": "0x6f004",
+    "enable_bit": 0,
+    "name": "gcc_pcie_phy_cfg_ahb_clk"
+   },
+   "192": {
+    "binding": "GCC_PCIE_PHY_AUX_CLK",
+    "kind": "branch",
+    "halt_reg": "0x6f008",
+    "enable_reg": "0x6f008",
+    "enable_bit": 0,
+    "name": "gcc_pcie_phy_aux_clk"
+   },
+   "193": {
+    "binding": "GCC_UFS_AXI_CLK",
+    "kind": "branch",
+    "halt_reg": "0x75008",
+    "enable_reg": "0x75008",
+    "enable_bit": 0,
+    "name": "gcc_ufs_axi_clk"
+   },
+   "194": {
+    "binding": "GCC_UFS_AHB_CLK",
+    "kind": "branch",
+    "halt_reg": "0x7500c",
+    "enable_reg": "0x7500c",
+    "enable_bit": 0,
+    "name": "gcc_ufs_ahb_clk"
+   },
+   "195": {
+    "binding": "GCC_UFS_TX_CFG_CLK",
+    "kind": "branch",
+    "halt_reg": "0x75010",
+    "enable_reg": "0x75010",
+    "enable_bit": 0,
+    "name": "gcc_ufs_tx_cfg_clk"
+   },
+   "196": {
+    "binding": "GCC_UFS_RX_CFG_CLK",
+    "kind": "branch",
+    "halt_reg": "0x75014",
+    "enable_reg": "0x75014",
+    "enable_bit": 0,
+    "name": "gcc_ufs_rx_cfg_clk"
+   },
+   "197": {
+    "binding": "GCC_UFS_TX_SYMBOL_0_CLK",
+    "kind": "branch",
+    "halt_reg": "0x75018",
+    "enable_reg": "0x75018",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT_SKIP",
+    "name": "gcc_ufs_tx_symbol_0_clk"
+   },
+   "198": {
+    "binding": "GCC_UFS_RX_SYMBOL_0_CLK",
+    "kind": "branch",
+    "halt_reg": "0x7501c",
+    "enable_reg": "0x7501c",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT_SKIP",
+    "name": "gcc_ufs_rx_symbol_0_clk"
+   },
+   "199": {
+    "binding": "GCC_UFS_RX_SYMBOL_1_CLK",
+    "kind": "branch",
+    "halt_reg": "0x75020",
+    "enable_reg": "0x75020",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT_SKIP",
+    "name": "gcc_ufs_rx_symbol_1_clk"
+   },
+   "200": {
+    "binding": "GCC_UFS_UNIPRO_CORE_CLK",
+    "kind": "branch",
+    "halt_reg": "0x7600c",
+    "enable_reg": "0x7600c",
+    "enable_bit": 0,
+    "name": "gcc_ufs_unipro_core_clk"
+   },
+   "201": {
+    "binding": "GCC_UFS_ICE_CORE_CLK",
+    "kind": "branch",
+    "halt_reg": "0x76010",
+    "enable_reg": "0x76010",
+    "enable_bit": 0,
+    "name": "gcc_ufs_ice_core_clk"
+   },
+   "202": {
+    "binding": "GCC_UFS_SYS_CLK_CORE_CLK",
+    "kind": "branch",
+    "enable_reg": "0x76030",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT_DELAY",
+    "name": "gcc_ufs_sys_clk_core_clk"
+   },
+   "203": {
+    "binding": "GCC_UFS_TX_SYMBOL_CLK_CORE_CLK",
+    "kind": "branch",
+    "enable_reg": "0x76034",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT_DELAY",
+    "name": "gcc_ufs_tx_symbol_clk_core_clk"
+   },
+   "204": {
+    "binding": "GCC_AGGRE0_SNOC_AXI_CLK",
+    "kind": "branch",
+    "halt_reg": "0x81008",
+    "enable_reg": "0x81008",
+    "enable_bit": 0,
+    "name": "gcc_aggre0_snoc_axi_clk"
+   },
+   "205": {
+    "binding": "GCC_AGGRE0_CNOC_AHB_CLK",
+    "kind": "branch",
+    "halt_reg": "0x8100c",
+    "enable_reg": "0x8100c",
+    "enable_bit": 0,
+    "name": "gcc_aggre0_cnoc_ahb_clk"
+   },
+   "206": {
+    "binding": "GCC_SMMU_AGGRE0_AXI_CLK",
+    "kind": "branch",
+    "halt_reg": "0x81014",
+    "enable_reg": "0x81014",
+    "enable_bit": 0,
+    "name": "gcc_smmu_aggre0_axi_clk"
+   },
+   "207": {
+    "binding": "GCC_SMMU_AGGRE0_AHB_CLK",
+    "kind": "branch",
+    "halt_reg": "0x81018",
+    "enable_reg": "0x81018",
+    "enable_bit": 0,
+    "name": "gcc_smmu_aggre0_ahb_clk"
+   },
+   "209": {
+    "binding": "GCC_AGGRE2_UFS_AXI_CLK",
+    "kind": "branch",
+    "halt_reg": "0x83014",
+    "enable_reg": "0x83014",
+    "enable_bit": 0,
+    "name": "gcc_aggre2_ufs_axi_clk"
+   },
+   "210": {
+    "binding": "GCC_AGGRE2_USB3_AXI_CLK",
+    "kind": "branch",
+    "halt_reg": "0x83018",
+    "enable_reg": "0x83018",
+    "enable_bit": 0,
+    "name": "gcc_aggre2_usb3_axi_clk"
+   },
+   "211": {
+    "binding": "GCC_QSPI_AHB_CLK",
+    "kind": "branch",
+    "halt_reg": "0x8b004",
+    "enable_reg": "0x8b004",
+    "enable_bit": 0,
+    "name": "gcc_qspi_ahb_clk"
+   },
+   "212": {
+    "binding": "GCC_QSPI_SER_CLK",
+    "kind": "branch",
+    "halt_reg": "0x8b008",
+    "enable_reg": "0x8b008",
+    "enable_bit": 0,
+    "name": "gcc_qspi_ser_clk"
+   },
+   "213": {
+    "binding": "GCC_USB3_CLKREF_CLK",
+    "kind": "branch",
+    "halt_reg": "0x8800c",
+    "enable_reg": "0x8800c",
+    "enable_bit": 0,
+    "name": "gcc_usb3_clkref_clk"
+   },
+   "214": {
+    "binding": "GCC_HDMI_CLKREF_CLK",
+    "kind": "branch",
+    "halt_reg": "0x88000",
+    "enable_reg": "0x88000",
+    "enable_bit": 0,
+    "name": "gcc_hdmi_clkref_clk"
+   },
+   "215": {
+    "binding": "GCC_UFS_CLKREF_CLK",
+    "kind": "branch",
+    "halt_reg": "0x88008",
+    "enable_reg": "0x88008",
+    "enable_bit": 0,
+    "name": "gcc_ufs_clkref_clk"
+   },
+   "216": {
+    "binding": "GCC_PCIE_CLKREF_CLK",
+    "kind": "branch",
+    "halt_reg": "0x88010",
+    "enable_reg": "0x88010",
+    "enable_bit": 0,
+    "name": "gcc_pcie_clkref_clk"
+   },
+   "217": {
+    "binding": "GCC_RX2_USB2_CLKREF_CLK",
+    "kind": "branch",
+    "halt_reg": "0x88014",
+    "enable_reg": "0x88014",
+    "enable_bit": 0,
+    "name": "gcc_rx2_usb2_clkref_clk"
+   },
+   "218": {
+    "binding": "GCC_RX1_USB2_CLKREF_CLK",
+    "kind": "branch",
+    "halt_reg": "0x88018",
+    "enable_reg": "0x88018",
+    "enable_bit": 0,
+    "name": "gcc_rx1_usb2_clkref_clk"
+   },
+   "219": {
+    "binding": "GCC_HLOS1_VOTE_LPASS_CORE_SMMU_CLK",
+    "kind": "branch",
+    "halt_reg": "0x7d010",
+    "enable_reg": "0x7d010",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT_VOTED",
+    "name": "hlos1_vote_lpass_core_smmu_clk"
+   },
+   "220": {
+    "binding": "GCC_HLOS1_VOTE_LPASS_ADSP_SMMU_CLK",
+    "kind": "branch",
+    "halt_reg": "0x7d014",
+    "enable_reg": "0x7d014",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT_VOTED",
+    "name": "hlos1_vote_lpass_adsp_smmu_clk"
+   },
+   "221": {
+    "binding": "GCC_EDP_CLKREF_CLK",
+    "kind": "branch",
+    "halt_reg": "0x88004",
+    "enable_reg": "0x88004",
+    "enable_bit": 0,
+    "name": "gcc_edp_clkref_clk"
+   },
+   "222": {
+    "binding": "GCC_MSS_CFG_AHB_CLK",
+    "kind": "branch",
+    "halt_reg": "0x8a000",
+    "enable_reg": "0x8a000",
+    "enable_bit": 0,
+    "name": "gcc_mss_cfg_ahb_clk"
+   },
+   "223": {
+    "binding": "GCC_MSS_Q6_BIMC_AXI_CLK",
+    "kind": "branch",
+    "halt_reg": "0x8a028",
+    "enable_reg": "0x8a028",
+    "enable_bit": 0,
+    "name": "gcc_mss_q6_bimc_axi_clk"
+   },
+   "224": {
+    "binding": "GCC_MSS_SNOC_AXI_CLK",
+    "kind": "branch",
+    "halt_reg": "0x8a024",
+    "enable_reg": "0x8a024",
+    "enable_bit": 0,
+    "name": "gcc_mss_snoc_axi_clk"
+   },
+   "225": {
+    "binding": "GCC_MSS_MNOC_BIMC_AXI_CLK",
+    "kind": "branch",
+    "halt_reg": "0x8a004",
+    "enable_reg": "0x8a004",
+    "enable_bit": 0,
+    "name": "gcc_mss_mnoc_bimc_axi_clk"
+   },
+   "226": {
+    "binding": "GCC_DCC_AHB_CLK",
+    "kind": "branch",
+    "halt_reg": "0x84004",
+    "enable_reg": "0x84004",
+    "enable_bit": 0,
+    "name": "gcc_dcc_ahb_clk"
+   },
+   "227": {
+    "binding": "GCC_AGGRE0_NOC_MPU_CFG_AHB_CLK",
+    "kind": "branch",
+    "halt_reg": "0x85000",
+    "enable_reg": "0x85000",
+    "enable_bit": 0,
+    "name": "gcc_aggre0_noc_mpu_cfg_ahb_clk"
+   },
+   "228": {
+    "binding": "GCC_MMSS_GPLL0_DIV_CLK",
+    "kind": "branch",
+    "enable_reg": "0x5200c",
+    "enable_bit": 0,
+    "halt_check": "BRANCH_HALT_DELAY",
+    "name": "gcc_mmss_gpll0_div_clk"
+   },
+   "229": {
+    "binding": "GCC_MSS_GPLL0_DIV_CLK",
+    "kind": "branch",
+    "enable_reg": "0x5200c",
+    "enable_bit": 2,
+    "halt_check": "BRANCH_HALT_DELAY",
+    "name": "gcc_mss_gpll0_div_clk"
+   }
+  }
+ },
+ "qup_se_clocks": {}
+}

@@ -1,0 +1,155 @@
+{
+ "schema": "iosport-device/1",
+ "_about": "POCO X5 Pro 5G (redwood, Xiaomi, SM7325 / Snapdragon 778G): the donor's own device (HackiOS boots to SpringBoard on it). Filled from the donor's common/devices/redwood.conf (conf_bridge.py import), its SoC base DT prebuilt/uefi/redwood.dtb (extract_profile.py; board parts are in DTBO overlays, so touch/keys came from the donor drivers), and the donor drivers' redwood tables. Not measured by this project.",
+ "_status": "donor: iOS userland on the phone over fastboot boot + USB (./xl); touch (FocalTech/Goodix over SPI), buttons, cpufreq (EPSS), Wi-Fi (WCN6750 + ath11k), GPU (Adreno 642L).",
+
+ "device": {
+  "codename": "redwood",
+  "model": null,
+  "name": "POCO X5 Pro 5G",
+  "brand": "xiaomi",
+  "soc": "sm7325",
+  "soc_data": "sc7280",
+  "soc_name": "Snapdragon 778G (yupik)",
+  "android_build": null,
+  "ram_bytes": null,
+  "loader_platform": "redwood",
+  "prefix": "redwood"
+ },
+
+ "donor": {
+  "kind": "phone",
+  "soc": "Qualcomm Snapdragon 778G (SM7325)",
+  "boot_via": "fastboot",
+  "uefi_target": "redwood",
+  "uefi_fd": "",
+  "dtb": "",
+  "wifi_ath11k": 1,
+  "bootargs": "touchscreen=1 cpufreq=1 bootcpu=7 cpus=8",
+  "default_secs": 900,
+  "userland_vars": "",
+  "firmware": "fw-gpu fw-wifi fw-audio fw-haptic"
+ },
+
+ "flash": {
+  "_note": "Xiaomi has a real `fastboot boot`: the test image is sent to RAM and booted once; nothing on the phone is written. This is the safest entry method there is. The donor's ./xl does exactly this.",
+  "method": "fastboot-boot",
+  "test_partition": null,
+  "recovery_block_device": null,
+  "recovery_bytes": null,
+  "never_write": ["boot", "vendor_boot", "init_boot", "recovery", "vbmeta", "vbmeta_system", "dtbo", "xbl", "xbl_config", "abl", "aop", "tz", "hyp", "keymaster", "misc", "persist", "modem", "userdata", "super"],
+  "enter_test": "fastboot boot <image> (RAM only; the only fastboot verb besides getvar/reboot the toolkit allows)",
+  "download_mode": {"tool": "Xiaomi EDL / MiFlash with the stock fastboot ROM", "note": "only for a bricked phone; a fastboot-boot test cannot brick it"},
+  "requires_root": false,
+  "min_battery_percent": 30
+ },
+
+ "baseline": {
+  "recovery_sha256": null,
+  "boot_sha256": null,
+  "vbmeta_sha256": null,
+  "reboot_helper_sha256": null,
+  "_note": "fastboot-boot writes nothing, so no restore is needed; record boot/vbmeta hashes anyway to prove they never change"
+ },
+
+ "bootimg": {
+  "header_version": null,
+  "page_size": 4096,
+  "kernel_load_pa": null,
+  "avb_footer": false,
+  "seandroid_trailer": false,
+  "_note": "the donor's mkxnuimg.py builds the fastboot-boot image (BootShim + FD + payload) with mkbootimg"
+ },
+
+ "memory": {
+  "_sources": "donor redwood.conf, redwood.dtb reserved-memory",
+  "dram_base": "0x80000000",
+  "uefi_fd": {"base": "0x9FD00000", "size": "0x200000"},
+  "payload": {"base": "0xF0000000", "max": "0x04000000"},
+  "display_reserved": {"base": "0xE1000000", "size": "0x02300000"},
+  "bootshim_info": null,
+  "log_ring": {"base": null, "_note": "the donor logs over its USB link (./xl log) and a log partition, not a RAM ring"},
+  "smem": {"base": "0x80900000", "size": "0x200000"},
+  "loader_pe_base": null,
+  "xnu_window": {"base": null, "size": null},
+  "resident_image": {"base": null},
+  "secure_no_map": null
+ },
+
+ "log_slot": {"offset": null, "blocks": null, "magic": null, "_note": "not needed: the loader's USB link carries the log"},
+
+ "cpu": {"cores": 8, "mpidr_core_shift": 8, "small_cores": "0x0F", "cntfrq": 19200000, "enable_method": "psci"},
+ "gic": {"dist": "0x17A00000", "redist": "0x17A60000", "vtimer_intid": 27, "_note": "runs under Qualcomm's Gunyah hypervisor with a standard virtual GIC: the timer is at 27"},
+ "soc_io": {"base": "0x00400000", "size": "0x3FC00000"},
+
+ "kernel": {
+  "overlay_dir": "the donor's xnu/files (redwood is its default)",
+  "base_boot_args": "",
+  "feature_boot_args": {"touch": "touchscreen=1", "cpufreq": "cpufreq=1", "bigcore": "bootcpu=7", "cores": "cpus=8", "gpu": "gpu=1", "wifi": "wifi=1", "audio": "adsp=1"}
+ },
+ "loader": {
+  "flag_prefix": null,
+  "platform_struct": {"name": "redwood", "io_base": "0x00400000", "io_size": "0x3FC00000", "gic_dist": "0x17A00000", "gic_redist": "0x17A60000", "uart": 0, "log_other_cpu": 1, "cores": 8, "core_shift": 8, "small_cores": "0x0f", "fb_base": "0xE1000000", "darwin_first": 25374720, "darwin_last": 30617594}
+ },
+
+ "firmware": {
+  "package": "donor uefi/: Mu-Silicium redwood (follows lisa, the same SoC package)",
+  "reference_package": "Mu-Silicium lisa (Xiaomi 11 Lite 5G NE, SM7325)",
+  "usb_msd_label": null
+ },
+
+ "display": {
+  "width": 1080,
+  "height": 2400,
+  "stride": 4320,
+  "mdss_base": "0x0AE00000",
+  "te_gpio": 80,
+  "te_function": 1,
+  "flip_buffers": null
+ },
+
+ "tlmm": {"base": "0x0F100000", "tiles": {"all": "0x0F100000"}},
+
+ "touch": {
+  "_sources": "donor bsd/dev/redwood_goodix.c; registers cross-checked with socs/sc7280.json (engine 0xa94000 = QUPv3 wrap1 SE5)",
+  "compatible": "goodix,gt9916 / focaltech,ft3680 (two panel variants; GPIO96=1 and GPIO68=0 mean FocalTech)",
+  "driver": "redwood_goodix.c",
+  "bus": "spi",
+  "se_base": "0x00A94000",
+  "miso_gpio": 52,
+  "mosi_gpio": 53,
+  "clk_gpio": 54,
+  "cs_gpio": 55,
+  "pin_function": 1,
+  "bus_tile": "all",
+  "irq_gpio": 81,
+  "irq_tile": "all",
+  "reset_gpio": 105,
+  "supplies": [{"name": "avdd switch", "kind": "gpio", "gpio": 107, "active_high": true}],
+  "gcc": {"vote_reg": "0x52008", "vote_bits": {"se": 27, "m_ahb": 20, "s_ahb": 21, "core": 19, "core2x": 18}, "se_cbcr": "0x185FC", "se_rcg": "0x18600", "m_ahb_cbcr": "0x18004", "s_ahb_cbcr": "0x18008", "core_cbcr": "0x23138", "core2x_cbcr": "0x23140"},
+  "transport": "geni-fifo SPI, or bit-banged if the engine cannot be used"
+ },
+
+ "battery": {"gauge": null, "_note": "not in the donor's profile; read the live DT (PM7325B qgauge / an I2C gauge)"},
+
+ "buttons": {
+  "spmi": {"core": "0x0C440000", "chnls": "0x0C600000", "obsrvr": "0x0E600000", "intr": "0x0E700000", "cnfg": "0x0C40A000", "arb_version": 5},
+  "pon": {"pmic": "pmk8350", "sid": 0, "base": "0x1300", "peripheral_id": "0x013", "subtype_from": 9, "subtype_to": 9, "kpdpwr_bit": "0x80", "resin_bit": "0x40", "generation": 3},
+  "volume_up": {"pmic": "pm7325", "sid": 1, "gpio": 6, "peripheral_id": "0x18D", "active_low": true},
+  "volume_down": "resin",
+  "power": "kpdpwr",
+  "access": "read-only through the observer channel"
+ },
+
+ "cpufreq": {
+  "kind": "epss",
+  "domains": [{"cores": "0-3", "base": "0x18591000"}, {"cores": "4-6", "base": "0x18592000"}, {"cores": "7", "base": "0x18593000"}],
+  "table_offset": "0x100",
+  "row_bytes": 4,
+  "perf_state": "0x320"
+ },
+
+ "wifi": {"kind": "wpss", "nodes": [{"node": "/soc/wcn6750", "compatible": "qcom,wcn6750"}], "status": "donor: WCN6750 + ath11k (WPSS DSP loaded through TrustZone)"},
+
+ "userland": {"build_vars": "REST=1", "system_sources": ["usb-loader"], "_note": "./xl ramdisk userland/system.apfs sends it over the loader's USB link"}
+}

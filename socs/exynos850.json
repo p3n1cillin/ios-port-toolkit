@@ -1,0 +1,227 @@
+{
+ "soc": "exynos850",
+ "vendor": "samsung-exynos",
+ "_generated_by": "toolkit/tools/soc_other.py",
+ "_sources": {
+  "banks": "pinctrl-exynos-arm64.c",
+  "dtsi": "exynos850.dtsi"
+ },
+ "pin_state": "samsung,pins = \"bank-N\"; samsung,pin-function = <F>",
+ "bank_registers": {
+  "con": "0x0 (4 bits a pin)",
+  "dat": "0x4",
+  "pud": "0x8",
+  "drv": "0xC"
+ },
+ "gic": {
+  "dist": "0x12a01000",
+  "redist": "0x12a02000"
+ },
+ "i2c": [
+  {
+   "node": "hsi2c_0: i2c@138a0000",
+   "base": "0x138a0000"
+  },
+  {
+   "node": "hsi2c_1: i2c@138b0000",
+   "base": "0x138b0000"
+  },
+  {
+   "node": "hsi2c_2: i2c@138c0000",
+   "base": "0x138c0000"
+  },
+  {
+   "node": "hsi2c_3: i2c@11d00000",
+   "base": "0x11d00000"
+  },
+  {
+   "node": "hsi2c_4: i2c@11d20000",
+   "base": "0x11d20000"
+  }
+ ],
+ "controllers": [
+  {
+   "banks_array": "exynos850_pin_banks0",
+   "banks": [
+    {
+     "name": "gpa0",
+     "pins": 8,
+     "offset": "0x000"
+    },
+    {
+     "name": "gpa1",
+     "pins": 8,
+     "offset": "0x020"
+    },
+    {
+     "name": "gpa2",
+     "pins": 8,
+     "offset": "0x040"
+    },
+    {
+     "name": "gpa3",
+     "pins": 8,
+     "offset": "0x060"
+    },
+    {
+     "name": "gpa4",
+     "pins": 4,
+     "offset": "0x080"
+    },
+    {
+     "name": "gpq0",
+     "pins": 3,
+     "offset": "0x0a0"
+    }
+   ],
+   "label": "pinctrl_alive",
+   "base": "0x11850000"
+  },
+  {
+   "banks_array": "exynos850_pin_banks1",
+   "banks": [
+    {
+     "name": "gpm0",
+     "pins": 1,
+     "offset": "0x000"
+    },
+    {
+     "name": "gpm1",
+     "pins": 1,
+     "offset": "0x020"
+    },
+    {
+     "name": "gpm2",
+     "pins": 1,
+     "offset": "0x040"
+    },
+    {
+     "name": "gpm3",
+     "pins": 1,
+     "offset": "0x060"
+    },
+    {
+     "name": "gpm4",
+     "pins": 1,
+     "offset": "0x080"
+    },
+    {
+     "name": "gpm5",
+     "pins": 1,
+     "offset": "0x0a0"
+    },
+    {
+     "name": "gpm6",
+     "pins": 1,
+     "offset": "0x0c0"
+    },
+    {
+     "name": "gpm7",
+     "pins": 1,
+     "offset": "0x0e0"
+    }
+   ],
+   "label": "pinctrl_cmgp",
+   "base": "0x11c30000"
+  },
+  {
+   "banks_array": "exynos850_pin_banks2",
+   "banks": [
+    {
+     "name": "gpb0",
+     "pins": 5,
+     "offset": "0x000"
+    },
+    {
+     "name": "gpb1",
+     "pins": 5,
+     "offset": "0x020"
+    }
+   ],
+   "label": "pinctrl_aud",
+   "base": "0x14a60000"
+  },
+  {
+   "banks_array": "exynos850_pin_banks3",
+   "banks": [
+    {
+     "name": "gpf2",
+     "pins": 6,
+     "offset": "0x000"
+    }
+   ],
+   "label": "pinctrl_hsi",
+   "base": "0x13430000"
+  },
+  {
+   "banks_array": "exynos850_pin_banks4",
+   "banks": [
+    {
+     "name": "gpf0",
+     "pins": 4,
+     "offset": "0x000"
+    },
+    {
+     "name": "gpf1",
+     "pins": 8,
+     "offset": "0x020"
+    }
+   ],
+   "label": "pinctrl_core",
+   "base": "0x12070000"
+  },
+  {
+   "banks_array": "exynos850_pin_banks5",
+   "banks": [
+    {
+     "name": "gpg0",
+     "pins": 2,
+     "offset": "0x000"
+    },
+    {
+     "name": "gpp0",
+     "pins": 6,
+     "offset": "0x020"
+    },
+    {
+     "name": "gpp1",
+     "pins": 4,
+     "offset": "0x040"
+    },
+    {
+     "name": "gpp2",
+     "pins": 4,
+     "offset": "0x060"
+    },
+    {
+     "name": "gpg1",
+     "pins": 8,
+     "offset": "0x080"
+    },
+    {
+     "name": "gpg2",
+     "pins": 8,
+     "offset": "0x0a0"
+    },
+    {
+     "name": "gpg3",
+     "pins": 1,
+     "offset": "0x0c0"
+    },
+    {
+     "name": "gpc0",
+     "pins": 3,
+     "offset": "0x0e0"
+    },
+    {
+     "name": "gpc1",
+     "pins": 6,
+     "offset": "0x100"
+    }
+   ],
+   "label": "pinctrl_peri",
+   "base": "0x139b0000"
+  }
+ ],
+ "_note": "controller i = DT alias pinctrl<i> (the driver matches them in this order). "
+}

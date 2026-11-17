@@ -1,0 +1,17 @@
+{
+ "_about": "EXAMPLE of the next S10 Lite test as a delta on Test 68. Copy to test69.json and edit; the artefact names below (fulldbg23, xnu-r5q-t69.macho exist in port/build) are placeholders until whoever builds Test 69 says what it runs.",
+ "extends": "test68.json",
+ "number": 69,
+ "previous": 68,
+ "firmware_number": 69,
+ "timed": 900,
+ "artefacts": {
+  "firmware_fd": "port/build/r5q-fulldbg23-uefi.fd",
+  "kernel": "port/build/xnu-r5q-t69.macho"
+ },
+ "notes": "Test 68 (user): <result in the owner's words>. Log: <key lines>. Test 69: <what changes and why>.",
+ "start_blocked_reason": "Built and checked host-side. A hardware run needs the user to authorize it explicitly (one run per authorization). Run after Test 68.",
+ "runner": {
+  "comment": "Test 68 + <change>"
+ }
+}

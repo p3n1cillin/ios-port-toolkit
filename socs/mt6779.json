@@ -1,0 +1,2309 @@
+{
+ "soc": "mt6779",
+ "vendor": "mediatek",
+ "_generated_by": "toolkit/tools/soc_other.py",
+ "_sources": {
+  "pins": "pinctrl-mtk-mt6779.h",
+  "dtsi": "mt6779.dtsi"
+ },
+ "pin_state": "pinmux = <(pin << 8) | mode> (mt65xx.h)",
+ "pins": {
+  "0": {
+   "name": "GPIO0",
+   "functions": [
+    "GPIO0",
+    "SPI6_MI",
+    "I2S5_LRCK",
+    "TDM_LRCK_2ND",
+    "PCM1_SYNC",
+    "SCL_6306",
+    "TP_GPIO0_AO",
+    "PTA_RXD"
+   ]
+  },
+  "1": {
+   "name": "GPIO1",
+   "functions": [
+    "GPIO1",
+    "SPI6_CSB",
+    "I2S5_DO",
+    "TDM_DATA0_2ND",
+    "PCM1_DO0",
+    "SDA_6306",
+    "TP_GPIO1_AO",
+    "PTA_TXD"
+   ]
+  },
+  "2": {
+   "name": "GPIO2",
+   "functions": [
+    "GPIO2",
+    "SPI6_MO",
+    "I2S5_BCK",
+    "TDM_BCK_2ND",
+    "PCM1_CLK",
+    "MD_INT1_C2K_UIM0_HOT_PLUG",
+    "TP_GPIO2_AO"
+   ]
+  },
+  "3": {
+   "name": "GPIO3",
+   "functions": [
+    "GPIO3",
+    "SPI6_CLK",
+    "I2S5_MCK",
+    "TDM_MCK_2ND",
+    "EXT_FRAME_SYNC",
+    "MD_INT2_C2K_UIM1_HOT_PLUG",
+    "TP_GPIO3_AO"
+   ]
+  },
+  "4": {
+   "name": "GPIO4",
+   "functions": [
+    "GPIO4",
+    "SPI7_MI",
+    "I2S0_MCK",
+    "TDM_DATA1_2ND",
+    "PCM1_DO1",
+    "DMIC1_CLK",
+    "TP_GPIO4_AO",
+    "SCL8"
+   ]
+  },
+  "5": {
+   "name": "GPIO5",
+   "functions": [
+    "GPIO5",
+    "SPI7_CSB",
+    "I2S0_BCK",
+    "TDM_DATA2_2ND",
+    "PCM1_DO2",
+    "DMIC1_DAT",
+    "TP_GPIO5_AO",
+    "SDA8"
+   ]
+  },
+  "6": {
+   "name": "GPIO6",
+   "functions": [
+    "GPIO6",
+    "SPI7_MO",
+    "I2S0_LRCK",
+    "TDM_DATA3_2ND",
+    "PCM1_DI",
+    "DMIC_CLK",
+    "TP_GPIO6_AO",
+    "SCL9"
+   ]
+  },
+  "7": {
+   "name": "GPIO7",
+   "functions": [
+    "GPIO7",
+    "SPI7_CLK",
+    "I2S0_DI",
+    "SRCLKENAI1",
+    "DVFSRC_EXT_REQ",
+    "DMIC_DAT",
+    "TP_GPIO7_AO",
+    "SDA9"
+   ]
+  },
+  "8": {
+   "name": "GPIO8",
+   "functions": [
+    "GPIO8",
+    "PWM_0",
+    "I2S2_DI2",
+    "SRCLKENAI0",
+    "URXD1",
+    "I2S0_MCK",
+    "CONN_MCU_DBGACK_N",
+    "IDDIG"
+   ]
+  },
+  "9": {
+   "name": "GPIO9",
+   "functions": [
+    "GPIO9",
+    "PWM_3",
+    "MD_INT0",
+    "SRCLKENAI1",
+    "UTXD1",
+    "I2S0_BCK",
+    "CONN_MCU_TRST_B",
+    "USB_DRVVBUS"
+   ]
+  },
+  "10": {
+   "name": "GPIO10",
+   "functions": [
+    "GPIO10",
+    "MSDC1_CLK_A",
+    "TP_URXD1_AO",
+    "I2S1_LRCK",
+    "UCTS0",
+    "DMIC1_CLK",
+    "KPCOL2",
+    "SCL8"
+   ]
+  },
+  "11": {
+   "name": "GPIO11",
+   "functions": [
+    "GPIO11",
+    "MSDC1_CMD_A",
+    "TP_UTXD1_AO",
+    "I2S1_DO",
+    "URTS0",
+    "DMIC1_DAT",
+    "KPROW2",
+    "SDA8"
+   ]
+  },
+  "12": {
+   "name": "GPIO12",
+   "functions": [
+    "GPIO12",
+    "MSDC1_DAT3_A",
+    "TP_URXD2_AO",
+    "I2S1_MCK",
+    "UCTS1",
+    "DMIC_CLK",
+    "ANT_SEL9",
+    "SCL9"
+   ]
+  },
+  "13": {
+   "name": "GPIO13",
+   "functions": [
+    "GPIO13",
+    "MSDC1_DAT0_A",
+    "TP_UTXD2_AO",
+    "I2S1_BCK",
+    "URTS1",
+    "DMIC_DAT",
+    "ANT_SEL10",
+    "SDA9"
+   ]
+  },
+  "14": {
+   "name": "GPIO14",
+   "functions": [
+    "GPIO14",
+    "MSDC1_DAT2_A",
+    "PWM_3",
+    "IDDIG",
+    "MD_INT0",
+    "PTA_RXD",
+    "ANT_SEL11"
+   ]
+  },
+  "15": {
+   "name": "GPIO15",
+   "functions": [
+    "GPIO15",
+    "MSDC1_DAT1_A",
+    "DVFSRC_EXT_REQ",
+    "USB_DRVVBUS",
+    "MD_INT1_C2K_UIM0_HOT_PLUG",
+    "PTA_TXD",
+    "ANT_SEL12"
+   ]
+  },
+  "16": {
+   "name": "GPIO16",
+   "functions": [
+    "GPIO16",
+    "SRCLKENAI0",
+    "EXT_FRAME_SYNC",
+    "MFG_EJTAG_TRSTN",
+    "MD_INT2_C2K_UIM1_HOT_PLUG",
+    "CONN_TCXOENA_REQ",
+    "PWM_2",
+    "JTRSTN_SEL1"
+   ]
+  },
+  "17": {
+   "name": "GPIO17",
+   "functions": [
+    "GPIO17",
+    "SPI0_A_MI",
+    "SCP_SPI0_MI",
+    "MFG_EJTAG_TDO",
+    "DPI_HSYNC",
+    "MFG_DFD_JTAG_TDO",
+    "DFD_TDO",
+    "JTDO_SEL1"
+   ]
+  },
+  "18": {
+   "name": "GPIO18",
+   "functions": [
+    "GPIO18",
+    "SPI0_A_MO",
+    "SCP_SPI0_MO",
+    "MFG_EJTAG_TDI",
+    "DPI_VSYNC",
+    "MFG_DFD_JTAG_TDI",
+    "DFD_TDI",
+    "JTDI_SEL1"
+   ]
+  },
+  "19": {
+   "name": "GPIO19",
+   "functions": [
+    "GPIO19",
+    "SPI0_A_CSB",
+    "SCP_SPI0_CS",
+    "MFG_EJTAG_TMS",
+    "DPI_DE",
+    "MFG_DFD_JTAG_TMS",
+    "DFD_TMS",
+    "JTMS_SEL1"
+   ]
+  },
+  "20": {
+   "name": "GPIO20",
+   "functions": [
+    "GPIO20",
+    "SPI0_A_CLK",
+    "SCP_SPI0_CK",
+    "MFG_EJTAG_TCK",
+    "DPI_CK",
+    "MFG_DFD_JTAG_TCK",
+    "DFD_TCK_XI",
+    "JTCK_SEL1"
+   ]
+  },
+  "21": {
+   "name": "GPIO21",
+   "functions": [
+    "GPIO21",
+    "PWM_0",
+    "CMFLASH0",
+    "CMVREF2",
+    "CLKM0",
+    "ANT_SEL9",
+    "CONN_TCXOENA_REQ",
+    "DBG_MON_A27"
+   ]
+  },
+  "22": {
+   "name": "GPIO22",
+   "functions": [
+    "GPIO22",
+    "PWM_1",
+    "CMFLASH1",
+    "CMVREF3",
+    "CLKM1",
+    "ANT_SEL10",
+    null,
+    "DBG_MON_A28"
+   ]
+  },
+  "23": {
+   "name": "GPIO23",
+   "functions": [
+    "GPIO23",
+    "PWM_2",
+    "CMFLASH2",
+    "CMVREF0",
+    "CLKM2",
+    "ANT_SEL11",
+    null,
+    "DBG_MON_A29"
+   ]
+  },
+  "24": {
+   "name": "GPIO24",
+   "functions": [
+    "GPIO24",
+    "PWM_0",
+    "CMFLASH3",
+    "CMVREF1",
+    "CLKM3",
+    "ANT_SEL12",
+    null,
+    "DBG_MON_A30"
+   ]
+  },
+  "25": {
+   "name": "GPIO25",
+   "functions": [
+    "GPIO25",
+    "SRCLKENAI0",
+    "UCTS0",
+    "SCL8",
+    "CMVREF4",
+    "I2S0_LRCK",
+    "CONN_TCXOENA_REQ",
+    "DBG_MON_A31"
+   ]
+  },
+  "26": {
+   "name": "GPIO26",
+   "functions": [
+    "GPIO26",
+    "PWM_0",
+    "URTS0",
+    "SDA8",
+    "CLKM0",
+    "I2S0_DI",
+    "AGPS_SYNC",
+    "DBG_MON_A32"
+   ]
+  },
+  "27": {
+   "name": "GPIO27",
+   "functions": [
+    "GPIO27",
+    "AP_GOOD"
+   ]
+  },
+  "28": {
+   "name": "GPIO28",
+   "functions": [
+    "GPIO28",
+    "SCL5"
+   ]
+  },
+  "29": {
+   "name": "GPIO29",
+   "functions": [
+    "GPIO29",
+    "SDA5"
+   ]
+  },
+  "30": {
+   "name": "GPIO30",
+   "functions": [
+    "GPIO30",
+    "I2S1_MCK",
+    "I2S3_MCK",
+    "I2S2_MCK",
+    "DPI_D0",
+    "SPI4_MI",
+    "CONN_MCU_DBGI_N"
+   ]
+  },
+  "31": {
+   "name": "GPIO31",
+   "functions": [
+    "GPIO31",
+    "I2S1_BCK",
+    "I2S3_BCK",
+    "I2S2_BCK",
+    "DPI_D1",
+    "SPI4_CSB",
+    "CONN_MCU_TDO"
+   ]
+  },
+  "32": {
+   "name": "GPIO32",
+   "functions": [
+    "GPIO32",
+    "I2S1_LRCK",
+    "I2S3_LRCK",
+    "I2S2_LRCK",
+    "DPI_D2",
+    "SPI4_MO",
+    "CONN_MCU_TDI"
+   ]
+  },
+  "33": {
+   "name": "GPIO33",
+   "functions": [
+    "GPIO33",
+    "I2S2_DI",
+    "I2S0_DI",
+    "I2S5_DO",
+    "DPI_D3",
+    "SPI4_CLK",
+    "CONN_MCU_TMS"
+   ]
+  },
+  "34": {
+   "name": "GPIO34",
+   "functions": [
+    "GPIO34",
+    "I2S1_DO",
+    "I2S3_DO",
+    "I2S2_DI2",
+    "DPI_D4",
+    "AGPS_SYNC",
+    "CONN_MCU_TCK"
+   ]
+  },
+  "35": {
+   "name": "GPIO35",
+   "functions": [
+    "GPIO35",
+    "TDM_LRCK",
+    "I2S1_LRCK",
+    "I2S5_LRCK",
+    "DPI_D5",
+    "SPI5_A_MO",
+    "IO_JTAG_TDI",
+    "PWM_2"
+   ]
+  },
+  "36": {
+   "name": "GPIO36",
+   "functions": [
+    "GPIO36",
+    "TDM_BCK",
+    "I2S1_BCK",
+    "I2S5_BCK",
+    "DPI_D6",
+    "SPI5_A_CSB",
+    "IO_JTAG_TRSTN",
+    "SRCLKENAI1"
+   ]
+  },
+  "37": {
+   "name": "GPIO37",
+   "functions": [
+    "GPIO37",
+    "TDM_MCK",
+    "I2S1_MCK",
+    "I2S5_MCK",
+    "DPI_D7",
+    "SPI5_A_MI",
+    "IO_JTAG_TCK",
+    "SRCLKENAI0"
+   ]
+  },
+  "38": {
+   "name": "GPIO38",
+   "functions": [
+    "GPIO38",
+    "TDM_DATA0",
+    "I2S2_DI",
+    "I2S5_DO",
+    "DPI_D8",
+    "SPI5_A_CLK",
+    "IO_JTAG_TDO",
+    "CONN_TCXOENA_REQ"
+   ]
+  },
+  "39": {
+   "name": "GPIO39",
+   "functions": [
+    "GPIO39",
+    "TDM_DATA1",
+    "I2S1_DO",
+    "I2S2_DI2",
+    "DPI_D9",
+    "DVFSRC_EXT_REQ",
+    "IO_JTAG_TMS",
+    "IDDIG"
+   ]
+  },
+  "40": {
+   "name": "GPIO40",
+   "functions": [
+    "GPIO40",
+    "TDM_DATA2",
+    "SCL9",
+    "PWM_3",
+    "DPI_D10",
+    "SRCLKENAI0",
+    "DAP_MD32_SWD",
+    "USB_DRVVBUS"
+   ]
+  },
+  "41": {
+   "name": "GPIO41",
+   "functions": [
+    "GPIO41",
+    "TDM_DATA3",
+    "SDA9",
+    "PWM_1",
+    "DPI_D11",
+    "CLKM1",
+    "DAP_MD32_SWCK"
+   ]
+  },
+  "42": {
+   "name": "GPIO42",
+   "functions": [
+    "GPIO42",
+    "DISP_PWM"
+   ]
+  },
+  "43": {
+   "name": "GPIO43",
+   "functions": [
+    "GPIO43",
+    "DSI_TE"
+   ]
+  },
+  "44": {
+   "name": "GPIO44",
+   "functions": [
+    "GPIO44",
+    "LCM_RST"
+   ]
+  },
+  "45": {
+   "name": "GPIO45",
+   "functions": [
+    "GPIO45",
+    "SCL6",
+    "SCP_SCL0",
+    "SCP_SCL1",
+    "SCL_6306"
+   ]
+  },
+  "46": {
+   "name": "GPIO46",
+   "functions": [
+    "GPIO46",
+    "SDA6",
+    "SCP_SDA0",
+    "SCP_SDA1",
+    "SDA_6306"
+   ]
+  },
+  "47": {
+   "name": "GPIO47",
+   "functions": [
+    "GPIO47",
+    "SPI1_A_MI",
+    "SCP_SPI1_A_MI",
+    "KPCOL2",
+    "MD_URXD0",
+    "CONN_UART0_RXD",
+    "SSPM_URXD_AO",
+    "DBG_MON_B32"
+   ]
+  },
+  "48": {
+   "name": "GPIO48",
+   "functions": [
+    "GPIO48",
+    "SPI1_A_CSB",
+    "SCP_SPI1_A_CS",
+    "KPROW2",
+    "MD_UTXD0",
+    "CONN_UART0_TXD",
+    "SSPM_UTXD_AO",
+    "DBG_MON_B31"
+   ]
+  },
+  "49": {
+   "name": "GPIO49",
+   "functions": [
+    "GPIO49",
+    "SPI1_A_MO",
+    "SCP_SPI1_A_MO",
+    "UCTS0",
+    "MD_URXD1",
+    "PWM_1",
+    "TP_URXD2_AO",
+    "DBG_MON_B30"
+   ]
+  },
+  "50": {
+   "name": "GPIO50",
+   "functions": [
+    "GPIO50",
+    "SPI1_A_CLK",
+    "SCP_SPI1_A_CK",
+    "URTS0",
+    "MD_UTXD1",
+    "WIFI_TXD",
+    "TP_UTXD2_AO",
+    "DBG_MON_B29"
+   ]
+  },
+  "51": {
+   "name": "GPIO51",
+   "functions": [
+    "GPIO51",
+    "SCL0"
+   ]
+  },
+  "52": {
+   "name": "GPIO52",
+   "functions": [
+    "GPIO52",
+    "SDA0"
+   ]
+  },
+  "53": {
+   "name": "GPIO53",
+   "functions": [
+    "GPIO53",
+    "URXD0",
+    "UTXD0",
+    "MD_URXD0",
+    "MD_URXD1",
+    "SSPM_URXD_AO",
+    null,
+    "CONN_UART0_RXD"
+   ]
+  },
+  "54": {
+   "name": "GPIO54",
+   "functions": [
+    "GPIO54",
+    "UTXD0",
+    "URXD0",
+    "MD_UTXD0",
+    "MD_UTXD1",
+    "SSPM_UTXD_AO",
+    "WIFI_TXD",
+    "CONN_UART0_TXD"
+   ]
+  },
+  "55": {
+   "name": "GPIO55",
+   "functions": [
+    "GPIO55",
+    "SCL3",
+    "SCP_SCL0",
+    "SCP_SCL1",
+    "SCL_6306"
+   ]
+  },
+  "56": {
+   "name": "GPIO56",
+   "functions": [
+    "GPIO56",
+    "SDA3",
+    "SCP_SDA0",
+    "SCP_SDA1",
+    "SDA_6306"
+   ]
+  },
+  "57": {
+   "name": "GPIO57",
+   "functions": [
+    "GPIO57",
+    "KPROW1",
+    "PWM_1",
+    "DVFSRC_EXT_REQ",
+    "CLKM1",
+    "IDDIG",
+    "CONN_TCXOENA_REQ",
+    "MBISTREADEN_TRIGGER"
+   ]
+  },
+  "58": {
+   "name": "GPIO58",
+   "functions": [
+    "GPIO58",
+    "KPROW0",
+    null,
+    null,
+    null,
+    null,
+    null,
+    "DBG_MON_B28"
+   ]
+  },
+  "59": {
+   "name": "GPIO59",
+   "functions": [
+    "GPIO59",
+    "KPCOL0",
+    null,
+    null,
+    null,
+    null,
+    null,
+    "DBG_MON_B27"
+   ]
+  },
+  "60": {
+   "name": "GPIO60",
+   "functions": [
+    "GPIO60",
+    "KPCOL1",
+    "PWM_2",
+    "UCTS1",
+    "CLKM2",
+    "USB_DRVVBUS",
+    null,
+    "MBISTWRITEEN_TRIGGER"
+   ]
+  },
+  "61": {
+   "name": "GPIO61",
+   "functions": [
+    "GPIO61",
+    "SCL1",
+    "SCP_SCL0",
+    "SCP_SCL1"
+   ]
+  },
+  "62": {
+   "name": "GPIO62",
+   "functions": [
+    "GPIO62",
+    "SDA1",
+    "SCP_SDA0",
+    "SCP_SDA1"
+   ]
+  },
+  "63": {
+   "name": "GPIO63",
+   "functions": [
+    "GPIO63",
+    "SPI2_MI",
+    "SCP_SPI2_MI",
+    "KPCOL2",
+    "MRG_DI",
+    "MD_URXD0",
+    "CONN_UART0_RXD",
+    "DBG_MON_B26"
+   ]
+  },
+  "64": {
+   "name": "GPIO64",
+   "functions": [
+    "GPIO64",
+    "SPI2_CSB",
+    "SCP_SPI2_CS",
+    "KPROW2",
+    "MRG_SYNC",
+    "MD_UTXD0",
+    "CONN_UART0_TXD",
+    "DBG_MON_B25"
+   ]
+  },
+  "65": {
+   "name": "GPIO65",
+   "functions": [
+    "GPIO65",
+    "SPI2_MO",
+    "SCP_SPI2_MO",
+    "SCP_SDA1",
+    "MRG_DO",
+    "MD_URXD1",
+    "PWM_3"
+   ]
+  },
+  "66": {
+   "name": "GPIO66",
+   "functions": [
+    "GPIO66",
+    "SPI2_CLK",
+    "SCP_SPI2_CK",
+    "SCP_SCL1",
+    "MRG_CLK",
+    "MD_UTXD1",
+    "WIFI_TXD"
+   ]
+  },
+  "67": {
+   "name": "GPIO67",
+   "functions": [
+    "GPIO67",
+    "I2S3_LRCK",
+    "I2S1_LRCK",
+    "URXD1",
+    "PCM0_SYNC",
+    "I2S5_LRCK",
+    "ANT_SEL9",
+    "DBG_MON_B10"
+   ]
+  },
+  "68": {
+   "name": "GPIO68",
+   "functions": [
+    "GPIO68",
+    "I2S3_DO",
+    "I2S1_DO",
+    "UTXD1",
+    "PCM0_DO",
+    "I2S5_DO",
+    "ANT_SEL10",
+    "DBG_MON_B9"
+   ]
+  },
+  "69": {
+   "name": "GPIO69",
+   "functions": [
+    "GPIO69",
+    "I2S3_MCK",
+    "I2S1_MCK",
+    "URTS1",
+    "AGPS_SYNC",
+    "I2S5_MCK",
+    "DVFSRC_EXT_REQ",
+    "DBG_MON_B8"
+   ]
+  },
+  "70": {
+   "name": "GPIO70",
+   "functions": [
+    "GPIO70",
+    "I2S0_DI",
+    "I2S2_DI",
+    "KPCOL2",
+    "PCM0_DI",
+    "I2S2_DI2",
+    "ANT_SEL11",
+    "DBG_MON_B7"
+   ]
+  },
+  "71": {
+   "name": "GPIO71",
+   "functions": [
+    "GPIO71",
+    "I2S3_BCK",
+    "I2S1_BCK",
+    "KPROW2",
+    "PCM0_CLK",
+    "I2S5_BCK",
+    "ANT_SEL12",
+    "DBG_MON_B6"
+   ]
+  },
+  "72": {
+   "name": "GPIO72",
+   "functions": [
+    "GPIO72",
+    "BPI_BUS19_OLAT0",
+    "CONN_BPI_BUS19_OLAT0"
+   ]
+  },
+  "73": {
+   "name": "GPIO73",
+   "functions": [
+    "GPIO73",
+    "BPI_BUS18_PA_VM1",
+    "CONN_MIPI5_SCLK",
+    "MIPI5_SCLK"
+   ]
+  },
+  "74": {
+   "name": "GPIO74",
+   "functions": [
+    "GPIO74",
+    "BPI_BUS17_PA_VM0",
+    "CONN_MIPI5_SDATA",
+    "MIPI5_SDATA"
+   ]
+  },
+  "75": {
+   "name": "GPIO75",
+   "functions": [
+    "GPIO75",
+    "BPI_BUS20_OLAT1",
+    "CONN_BPI_BUS20_OLAT1",
+    "RFIC0_BSI_D2"
+   ]
+  },
+  "76": {
+   "name": "GPIO76",
+   "functions": [
+    "GPIO76",
+    "RFIC0_BSI_D1"
+   ]
+  },
+  "77": {
+   "name": "GPIO77",
+   "functions": [
+    "GPIO77",
+    "RFIC0_BSI_D0"
+   ]
+  },
+  "78": {
+   "name": "GPIO78",
+   "functions": [
+    "GPIO78",
+    "BPI_BUS7",
+    null,
+    null,
+    null,
+    null,
+    null,
+    "DBG_MON_B24"
+   ]
+  },
+  "79": {
+   "name": "GPIO79",
+   "functions": [
+    "GPIO79",
+    "BPI_BUS6",
+    null,
+    null,
+    null,
+    null,
+    null,
+    "DBG_MON_B23"
+   ]
+  },
+  "80": {
+   "name": "GPIO80",
+   "functions": [
+    "GPIO80",
+    "BPI_BUS8",
+    null,
+    null,
+    null,
+    null,
+    null,
+    "DBG_MON_B22"
+   ]
+  },
+  "81": {
+   "name": "GPIO81",
+   "functions": [
+    "GPIO81",
+    "BPI_BUS9",
+    null,
+    null,
+    null,
+    null,
+    null,
+    "DBG_MON_B21"
+   ]
+  },
+  "82": {
+   "name": "GPIO82",
+   "functions": [
+    "GPIO82",
+    "BPI_BUS10",
+    null,
+    null,
+    null,
+    null,
+    null,
+    "DBG_MON_B20"
+   ]
+  },
+  "83": {
+   "name": "GPIO83",
+   "functions": [
+    "GPIO83",
+    "BPI_BUS11",
+    null,
+    null,
+    null,
+    null,
+    null,
+    "DBG_MON_B19"
+   ]
+  },
+  "84": {
+   "name": "GPIO84",
+   "functions": [
+    "GPIO84",
+    "BPI_BUS12",
+    "CONN_BPI_BUS12"
+   ]
+  },
+  "85": {
+   "name": "GPIO85",
+   "functions": [
+    "GPIO85",
+    "BPI_BUS13",
+    "CONN_BPI_BUS13"
+   ]
+  },
+  "86": {
+   "name": "GPIO86",
+   "functions": [
+    "GPIO86",
+    "BPI_BUS14",
+    "CONN_BPI_BUS14"
+   ]
+  },
+  "87": {
+   "name": "GPIO87",
+   "functions": [
+    "GPIO87",
+    "BPI_BUS15",
+    "CONN_BPI_BUS15"
+   ]
+  },
+  "88": {
+   "name": "GPIO88",
+   "functions": [
+    "GPIO88",
+    "BPI_BUS16",
+    "CONN_BPI_BUS16"
+   ]
+  },
+  "89": {
+   "name": "GPIO89",
+   "functions": [
+    "GPIO89",
+    "BPI_BUS5",
+    null,
+    null,
+    null,
+    null,
+    null,
+    "DBG_MON_B18"
+   ]
+  },
+  "90": {
+   "name": "GPIO90",
+   "functions": [
+    "GPIO90",
+    "BPI_BUS4",
+    null,
+    null,
+    null,
+    null,
+    null,
+    "DBG_MON_B17"
+   ]
+  },
+  "91": {
+   "name": "GPIO91",
+   "functions": [
+    "GPIO91",
+    "BPI_BUS3"
+   ]
+  },
+  "92": {
+   "name": "GPIO92",
+   "functions": [
+    "GPIO92",
+    "BPI_BUS2",
+    null,
+    null,
+    null,
+    null,
+    null,
+    "DBG_MON_B16"
+   ]
+  },
+  "93": {
+   "name": "GPIO93",
+   "functions": [
+    "GPIO93",
+    "BPI_BUS1"
+   ]
+  },
+  "94": {
+   "name": "GPIO94",
+   "functions": [
+    "GPIO94",
+    "BPI_BUS0",
+    null,
+    null,
+    null,
+    null,
+    null,
+    "DBG_MON_B15"
+   ]
+  },
+  "95": {
+   "name": "GPIO95",
+   "functions": [
+    "GPIO95",
+    "MIPI0_SDATA"
+   ]
+  },
+  "96": {
+   "name": "GPIO96",
+   "functions": [
+    "GPIO96",
+    "MIPI0_SCLK"
+   ]
+  },
+  "97": {
+   "name": "GPIO97",
+   "functions": [
+    "GPIO97",
+    "MIPI1_SDATA"
+   ]
+  },
+  "98": {
+   "name": "GPIO98",
+   "functions": [
+    "GPIO98",
+    "MIPI1_SCLK"
+   ]
+  },
+  "99": {
+   "name": "GPIO99",
+   "functions": [
+    "GPIO99",
+    "MIPI2_SCLK",
+    null,
+    null,
+    null,
+    null,
+    null,
+    "DBG_MON_B14"
+   ]
+  },
+  "100": {
+   "name": "GPIO100",
+   "functions": [
+    "GPIO100",
+    "MIPI2_SDATA",
+    null,
+    null,
+    null,
+    null,
+    null,
+    "DBG_MON_B13"
+   ]
+  },
+  "101": {
+   "name": "GPIO101",
+   "functions": [
+    "GPIO101",
+    "MIPI3_SCLK",
+    null,
+    null,
+    null,
+    null,
+    null,
+    "DBG_MON_B12"
+   ]
+  },
+  "102": {
+   "name": "GPIO102",
+   "functions": [
+    "GPIO102",
+    "MIPI3_SDATA",
+    null,
+    null,
+    null,
+    null,
+    null,
+    "DBG_MON_B11"
+   ]
+  },
+  "103": {
+   "name": "GPIO103",
+   "functions": [
+    "GPIO103",
+    "MIPI4_SCLK",
+    "CONN_MIPI4_SCLK"
+   ]
+  },
+  "104": {
+   "name": "GPIO104",
+   "functions": [
+    "GPIO104",
+    "MIPI4_SDATA",
+    "CONN_MIPI4_SDATA"
+   ]
+  },
+  "105": {
+   "name": "GPIO105",
+   "functions": [
+    "GPIO105",
+    "BPI_BUS22_OLAT3",
+    "CONN_BPI_BUS22_OLAT3"
+   ]
+  },
+  "106": {
+   "name": "GPIO106",
+   "functions": [
+    "GPIO106",
+    "BPI_BUS21_OLAT2",
+    "CONN_BPI_BUS21_OLAT2"
+   ]
+  },
+  "107": {
+   "name": "GPIO107",
+   "functions": [
+    "GPIO107",
+    "BPI_BUS24_ANT1",
+    "CONN_BPI_BUS24_ANT1"
+   ]
+  },
+  "108": {
+   "name": "GPIO108",
+   "functions": [
+    "GPIO108",
+    "BPI_BUS25_ANT2",
+    "CONN_BPI_BUS25_ANT2"
+   ]
+  },
+  "109": {
+   "name": "GPIO109",
+   "functions": [
+    "GPIO109",
+    "BPI_BUS23_ANT0",
+    "CONN_BPI_BUS23_ANT0"
+   ]
+  },
+  "110": {
+   "name": "GPIO110",
+   "functions": [
+    "GPIO110",
+    "SCL4"
+   ]
+  },
+  "111": {
+   "name": "GPIO111",
+   "functions": [
+    "GPIO111",
+    "SDA4"
+   ]
+  },
+  "112": {
+   "name": "GPIO112",
+   "functions": [
+    "GPIO112",
+    "SCL2"
+   ]
+  },
+  "113": {
+   "name": "GPIO113",
+   "functions": [
+    "GPIO113",
+    "SDA2"
+   ]
+  },
+  "114": {
+   "name": "GPIO114",
+   "functions": [
+    "GPIO114",
+    "CLKM0",
+    "SPI3_MI",
+    null,
+    null,
+    null,
+    null,
+    "DBG_MON_B5"
+   ]
+  },
+  "115": {
+   "name": "GPIO115",
+   "functions": [
+    "GPIO115",
+    "CLKM1",
+    "SPI3_CSB",
+    null,
+    null,
+    null,
+    null,
+    "DBG_MON_B4"
+   ]
+  },
+  "116": {
+   "name": "GPIO116",
+   "functions": [
+    "GPIO116",
+    "CMMCLK0",
+    null,
+    null,
+    null,
+    null,
+    null,
+    "DBG_MON_B3"
+   ]
+  },
+  "117": {
+   "name": "GPIO117",
+   "functions": [
+    "GPIO117",
+    "CMMCLK1",
+    "DVFSRC_EXT_REQ",
+    null,
+    null,
+    null,
+    null,
+    "DBG_MON_B2"
+   ]
+  },
+  "118": {
+   "name": "GPIO118",
+   "functions": [
+    "GPIO118",
+    "CLKM2",
+    "SPI3_MO",
+    null,
+    null,
+    null,
+    null,
+    "DBG_MON_B1"
+   ]
+  },
+  "119": {
+   "name": "GPIO119",
+   "functions": [
+    "GPIO119",
+    "CLKM3",
+    "SPI3_CLK",
+    null,
+    null,
+    null,
+    null,
+    "DBG_MON_B0"
+   ]
+  },
+  "120": {
+   "name": "GPIO120",
+   "functions": [
+    "GPIO120",
+    "CMMCLK2",
+    "CLKM2",
+    null,
+    null,
+    null,
+    "ANT_SEL12",
+    "TP_UCTS2_AO"
+   ]
+  },
+  "121": {
+   "name": "GPIO121",
+   "functions": [
+    "GPIO121",
+    "CMMCLK3",
+    "CLKM3",
+    "DVFSRC_EXT_REQ",
+    null,
+    null,
+    "ANT_SEL11",
+    "TP_URTS2_AO"
+   ]
+  },
+  "122": {
+   "name": "GPIO122",
+   "functions": [
+    "GPIO122",
+    "CMVREF1",
+    "PCM0_SYNC",
+    "SRCLKENAI1",
+    "AGPS_SYNC",
+    "PWM_1",
+    "ANT_SEL9",
+    "TP_UCTS1_AO"
+   ]
+  },
+  "123": {
+   "name": "GPIO123",
+   "functions": [
+    "GPIO123",
+    null,
+    "PCM0_DI",
+    "ADSP_JTAG_TRSTN",
+    "VPU_UDI_NTRST",
+    "SPM_JTAG_TRSTN",
+    "SSPM_JTAG_TRSTN"
+   ]
+  },
+  "124": {
+   "name": "GPIO124",
+   "functions": [
+    "GPIO124",
+    "CMVREF2",
+    "PCM0_CLK",
+    "MD_INT0",
+    "EXT_FRAME_SYNC",
+    "PWM_2",
+    "ANT_SEL10",
+    "TP_URTS1_AO"
+   ]
+  },
+  "125": {
+   "name": "GPIO125",
+   "functions": [
+    "GPIO125",
+    "CMVREF3",
+    "PCM0_DO",
+    "ADSP_JTAG_TMS",
+    "VPU_UDI_TMS",
+    "SPM_JTAG_TMS",
+    "SSPM_JTAG_TMS"
+   ]
+  },
+  "126": {
+   "name": "GPIO126",
+   "functions": [
+    "GPIO126",
+    "CMVREF4",
+    "CMFLASH0",
+    null,
+    null,
+    null,
+    "CONN_MCU_AICE_TMSC"
+   ]
+  },
+  "127": {
+   "name": "GPIO127",
+   "functions": [
+    "GPIO127",
+    "CMVREF0",
+    "CMFLASH1",
+    null,
+    null,
+    null,
+    "CONN_MCU_AICE_TCKC"
+   ]
+  },
+  "128": {
+   "name": "GPIO128",
+   "functions": [
+    "GPIO128",
+    "MD1_SIM1_SIO",
+    "MD1_SIM2_SIO",
+    "CCU_JTAG_TRST",
+    "CONN_DSP_JINTP",
+    "SCP_JTAG_TRSTN",
+    "LVTS_FOUT",
+    "DBG_MON_A3"
+   ]
+  },
+  "129": {
+   "name": "GPIO129",
+   "functions": [
+    "GPIO129",
+    "MD1_SIM1_SRST",
+    "MD1_SIM2_SRST",
+    "CCU_JTAG_TCK",
+    "CONN_DSP_JCK",
+    "SCP_JTAG_TCK",
+    "LVTS_SDO",
+    "DBG_MON_A4"
+   ]
+  },
+  "130": {
+   "name": "GPIO130",
+   "functions": [
+    "GPIO130",
+    "MD1_SIM1_SCLK",
+    "MD1_SIM2_SCLK",
+    null,
+    null,
+    null,
+    "LVTS_26M",
+    "DBG_MON_A5"
+   ]
+  },
+  "131": {
+   "name": "GPIO131",
+   "functions": [
+    "GPIO131",
+    "MD1_SIM2_SCLK",
+    "MD1_SIM1_SCLK",
+    "CCU_JTAG_TDI",
+    "CONN_DSP_JDI",
+    "SCP_JTAG_TDI",
+    "LVTS_SCK",
+    "DBG_MON_A0"
+   ]
+  },
+  "132": {
+   "name": "GPIO132",
+   "functions": [
+    "GPIO132",
+    "MD1_SIM2_SRST",
+    "MD1_SIM1_SRST",
+    "CCU_JTAG_TMS",
+    "CONN_DSP_JMS",
+    "SCP_JTAG_TMS",
+    "LVTS_SDI",
+    "DBG_MON_A1"
+   ]
+  },
+  "133": {
+   "name": "GPIO133",
+   "functions": [
+    "GPIO133",
+    "MD1_SIM2_SIO",
+    "MD1_SIM1_SIO",
+    "CCU_JTAG_TDO",
+    "CONN_DSP_JDO",
+    "SCP_JTAG_TDO",
+    "LVTS_SCF",
+    "DBG_MON_A2"
+   ]
+  },
+  "134": {
+   "name": "GPIO134",
+   "functions": [
+    "GPIO134",
+    "MSDC1_CLK",
+    "PCM1_CLK",
+    "SPI5_B_MI",
+    "UDI_TCK",
+    "CONN_DSP_JCK",
+    "IPU_JTAG_TCK",
+    "JTCK_SEL3"
+   ]
+  },
+  "135": {
+   "name": "GPIO135",
+   "functions": [
+    "GPIO135",
+    "MSDC1_CMD",
+    "PCM1_SYNC",
+    "SPI5_B_CSB",
+    "UDI_TMS",
+    "CONN_DSP_JMS",
+    "IPU_JTAG_TMS",
+    "JTMS_SEL3"
+   ]
+  },
+  "136": {
+   "name": "GPIO136",
+   "functions": [
+    "GPIO136",
+    "MSDC1_DAT3",
+    "PCM1_DI",
+    "SPI5_B_MO",
+    "CONN_TCXOENA_REQ",
+    "CONN_DSP_JINTP",
+    "CONN_MCU_AICE_TMSC"
+   ]
+  },
+  "137": {
+   "name": "GPIO137",
+   "functions": [
+    "GPIO137",
+    "MSDC1_DAT0",
+    "PCM1_DO0",
+    "SPI5_B_CLK",
+    "UDI_TDI",
+    "CONN_DSP_JDI",
+    "IPU_JTAG_TDI",
+    "JTDI_SEL3"
+   ]
+  },
+  "138": {
+   "name": "GPIO138",
+   "functions": [
+    "GPIO138",
+    "MSDC1_DAT2",
+    "PCM1_DO2",
+    "ANT_SEL11",
+    "UDI_NTRST",
+    "CONN_MCU_AICE_TCKC",
+    "IPU_JTAG_TRST",
+    "JTRSTN_SEL3"
+   ]
+  },
+  "139": {
+   "name": "GPIO139",
+   "functions": [
+    "GPIO139",
+    "MSDC1_DAT1",
+    "PCM1_DO1",
+    "ANT_SEL12",
+    "UDI_TDO",
+    "CONN_DSP_JDO",
+    "IPU_JTAG_TDO",
+    "JTDO_SEL3"
+   ]
+  },
+  "140": {
+   "name": "GPIO140",
+   "functions": [
+    "GPIO140",
+    "MD_INT1_C2K_UIM0_HOT_PLUG",
+    "MD_INT2_C2K_UIM1_HOT_PLUG",
+    "ADSP_URXD0",
+    "SCL_6306",
+    "PTA_RXD",
+    "SSPM_URXD_AO"
+   ]
+  },
+  "141": {
+   "name": "GPIO141",
+   "functions": [
+    "GPIO141",
+    "MD_INT2_C2K_UIM1_HOT_PLUG",
+    "MD_INT1_C2K_UIM0_HOT_PLUG",
+    "ADSP_UTXD0",
+    "SDA_6306",
+    "PTA_TXD",
+    "SSPM_UTXD_AO"
+   ]
+  },
+  "142": {
+   "name": "GPIO142",
+   "functions": [
+    "GPIO142",
+    "SCP_VREQ_VAO",
+    "DVFSRC_EXT_REQ"
+   ]
+  },
+  "143": {
+   "name": "GPIO143",
+   "functions": [
+    "GPIO143",
+    "AUD_DAT_MOSI2",
+    null,
+    null,
+    null,
+    null,
+    null,
+    "DBG_MON_A9"
+   ]
+  },
+  "144": {
+   "name": "GPIO144",
+   "functions": [
+    "GPIO144",
+    "AUD_NLE_MOSI1",
+    "AUD_CLK_MISO",
+    "I2S2_MCK",
+    null,
+    "UDI_TCK",
+    "UFS_UNIPRO_SDA",
+    "DBG_MON_A10"
+   ]
+  },
+  "145": {
+   "name": "GPIO145",
+   "functions": [
+    "GPIO145",
+    "AUD_NLE_MOSI0",
+    "AUD_SYNC_MISO",
+    "I2S2_BCK",
+    null,
+    "UDI_TMS",
+    null,
+    "DBG_MON_A11"
+   ]
+  },
+  "146": {
+   "name": "GPIO146",
+   "functions": [
+    "GPIO146",
+    "AUD_DAT_MISO2",
+    null,
+    "I2S2_DI2",
+    null,
+    "UDI_TDO",
+    null,
+    "DBG_MON_A14"
+   ]
+  },
+  "147": {
+   "name": "GPIO147",
+   "functions": [
+    "GPIO147",
+    "ANT_SEL0",
+    "PWM_3"
+   ]
+  },
+  "148": {
+   "name": "GPIO148",
+   "functions": [
+    "GPIO148",
+    "ANT_SEL1",
+    "SPI0_B_MI",
+    "SSPM_URXD_AO",
+    null,
+    "TP_UCTS2_AO",
+    "CLKM0"
+   ]
+  },
+  "149": {
+   "name": "GPIO149",
+   "functions": [
+    "GPIO149",
+    "ANT_SEL2",
+    "SPI0_B_CSB",
+    "SSPM_UTXD_AO",
+    null,
+    "TP_URTS2_AO",
+    "CONN_TCXOENA_REQ"
+   ]
+  },
+  "150": {
+   "name": "GPIO150",
+   "functions": [
+    "GPIO150",
+    "ANT_SEL3",
+    "SPI0_B_MO",
+    "UCTS1",
+    null,
+    "TP_UCTS1_AO",
+    "IDDIG",
+    "SCL9"
+   ]
+  },
+  "151": {
+   "name": "GPIO151",
+   "functions": [
+    "GPIO151",
+    "ANT_SEL4",
+    "SPI0_B_CLK",
+    "URTS1",
+    null,
+    "TP_URTS1_AO",
+    "USB_DRVVBUS",
+    "SDA9"
+   ]
+  },
+  "152": {
+   "name": "GPIO152",
+   "functions": [
+    "GPIO152",
+    "ANT_SEL5",
+    "SPI1_B_MI",
+    "CLKM3",
+    null,
+    "TP_URXD1_AO",
+    "SCP_SPI1_B_MI",
+    "SCL8"
+   ]
+  },
+  "153": {
+   "name": "GPIO153",
+   "functions": [
+    "GPIO153",
+    "ANT_SEL6",
+    "SPI1_B_CSB",
+    "SRCLKENAI0",
+    "PWM_0",
+    "TP_UTXD1_AO",
+    "SCP_SPI1_B_CS",
+    "SDA8"
+   ]
+  },
+  "154": {
+   "name": "GPIO154",
+   "functions": [
+    "GPIO154",
+    "ANT_SEL7",
+    "SPI1_B_MO",
+    "SRCLKENAI1",
+    null,
+    "TP_URXD2_AO",
+    "SCP_SPI1_B_MO"
+   ]
+  },
+  "155": {
+   "name": "GPIO155",
+   "functions": [
+    "GPIO155",
+    "ANT_SEL8",
+    "SPI1_B_CLK",
+    "MD_INT0",
+    null,
+    "TP_UTXD2_AO",
+    "SCP_SPI1_B_CK",
+    "DBG_MON_A15"
+   ]
+  },
+  "156": {
+   "name": "GPIO156",
+   "functions": [
+    "GPIO156",
+    "CONN_TOP_CLK",
+    "AUXIF_CLK0",
+    null,
+    null,
+    null,
+    null,
+    "DBG_MON_A16"
+   ]
+  },
+  "157": {
+   "name": "GPIO157",
+   "functions": [
+    "GPIO157",
+    "CONN_TOP_DATA",
+    "AUXIF_ST0",
+    null,
+    null,
+    null,
+    null,
+    "DBG_MON_A17"
+   ]
+  },
+  "158": {
+   "name": "GPIO158",
+   "functions": [
+    "GPIO158",
+    "CONN_HRST_B",
+    null,
+    null,
+    null,
+    null,
+    null,
+    "DBG_MON_A18"
+   ]
+  },
+  "159": {
+   "name": "GPIO159",
+   "functions": [
+    "GPIO159",
+    "CONN_WB_PTA",
+    null,
+    null,
+    null,
+    null,
+    null,
+    "DBG_MON_A19"
+   ]
+  },
+  "160": {
+   "name": "GPIO160",
+   "functions": [
+    "GPIO160",
+    "CONN_BT_CLK",
+    "AUXIF_CLK1",
+    null,
+    null,
+    null,
+    null,
+    "DBG_MON_A20"
+   ]
+  },
+  "161": {
+   "name": "GPIO161",
+   "functions": [
+    "GPIO161",
+    "CONN_BT_DATA",
+    "AUXIF_ST1",
+    null,
+    null,
+    null,
+    null,
+    "DBG_MON_A21"
+   ]
+  },
+  "162": {
+   "name": "GPIO162",
+   "functions": [
+    "GPIO162",
+    "CONN_WF_CTRL0",
+    null,
+    null,
+    null,
+    null,
+    null,
+    "DBG_MON_A22"
+   ]
+  },
+  "163": {
+   "name": "GPIO163",
+   "functions": [
+    "GPIO163",
+    "CONN_WF_CTRL1",
+    "UFS_MPHY_SCL",
+    null,
+    null,
+    null,
+    null,
+    "DBG_MON_A23"
+   ]
+  },
+  "164": {
+   "name": "GPIO164",
+   "functions": [
+    "GPIO164",
+    "CONN_WF_CTRL2",
+    "UFS_MPHY_SDA",
+    null,
+    null,
+    null,
+    null,
+    "DBG_MON_A24"
+   ]
+  },
+  "165": {
+   "name": "GPIO165",
+   "functions": [
+    "GPIO165",
+    "CONN_WF_CTRL3",
+    "UFS_UNIPRO_SDA",
+    null,
+    null,
+    null,
+    null,
+    "DBG_MON_A25"
+   ]
+  },
+  "166": {
+   "name": "GPIO166",
+   "functions": [
+    "GPIO166",
+    "CONN_WF_CTRL4",
+    "UFS_UNIPRO_SCL",
+    null,
+    null,
+    null,
+    null,
+    "DBG_MON_A26"
+   ]
+  },
+  "167": {
+   "name": "GPIO167",
+   "functions": [
+    "GPIO167",
+    "MSDC0_CMD"
+   ]
+  },
+  "168": {
+   "name": "GPIO168",
+   "functions": [
+    "GPIO168",
+    "MSDC0_DAT0"
+   ]
+  },
+  "169": {
+   "name": "GPIO169",
+   "functions": [
+    "GPIO169",
+    "MSDC0_DAT2"
+   ]
+  },
+  "170": {
+   "name": "GPIO170",
+   "functions": [
+    "GPIO170",
+    "MSDC0_DAT4"
+   ]
+  },
+  "171": {
+   "name": "GPIO171",
+   "functions": [
+    "GPIO171",
+    "MSDC0_DAT6"
+   ]
+  },
+  "172": {
+   "name": "GPIO172",
+   "functions": [
+    "GPIO172",
+    "MSDC0_DAT1"
+   ]
+  },
+  "173": {
+   "name": "GPIO173",
+   "functions": [
+    "GPIO173",
+    "MSDC0_DAT5"
+   ]
+  },
+  "174": {
+   "name": "GPIO174",
+   "functions": [
+    "GPIO174",
+    "MSDC0_DAT7"
+   ]
+  },
+  "175": {
+   "name": "GPIO175",
+   "functions": [
+    "GPIO175",
+    "MSDC0_DSL",
+    "ANT_SEL9"
+   ]
+  },
+  "176": {
+   "name": "GPIO176",
+   "functions": [
+    "GPIO176",
+    "MSDC0_CLK",
+    "ANT_SEL10"
+   ]
+  },
+  "177": {
+   "name": "GPIO177",
+   "functions": [
+    "GPIO177",
+    "MSDC0_DAT3"
+   ]
+  },
+  "178": {
+   "name": "GPIO178",
+   "functions": [
+    "GPIO178",
+    "MSDC0_RSTB"
+   ]
+  },
+  "179": {
+   "name": "GPIO179",
+   "functions": [
+    "GPIO179",
+    "RFIC0_BSI_EN"
+   ]
+  },
+  "180": {
+   "name": "GPIO180",
+   "functions": [
+    "GPIO180",
+    "RFIC0_BSI_CK"
+   ]
+  },
+  "181": {
+   "name": "GPIO181",
+   "functions": [
+    "GPIO181",
+    "SRCLKENA0"
+   ]
+  },
+  "182": {
+   "name": "GPIO182",
+   "functions": [
+    "GPIO182",
+    "SRCLKENA1"
+   ]
+  },
+  "183": {
+   "name": "GPIO183",
+   "functions": [
+    "GPIO183",
+    "WATCHDOG"
+   ]
+  },
+  "184": {
+   "name": "GPIO184",
+   "functions": [
+    "GPIO184",
+    "PWRAP_SPI0_MI",
+    "PWRAP_SPI0_MO"
+   ]
+  },
+  "185": {
+   "name": "GPIO185",
+   "functions": [
+    "GPIO185",
+    "PWRAP_SPI0_CSN"
+   ]
+  },
+  "186": {
+   "name": "GPIO186",
+   "functions": [
+    "GPIO186",
+    "PWRAP_SPI0_MO",
+    "PWRAP_SPI0_MI"
+   ]
+  },
+  "187": {
+   "name": "GPIO187",
+   "functions": [
+    "GPIO187",
+    "PWRAP_SPI0_CK"
+   ]
+  },
+  "188": {
+   "name": "GPIO188",
+   "functions": [
+    "GPIO188",
+    "RTC32K_CK"
+   ]
+  },
+  "189": {
+   "name": "GPIO189",
+   "functions": [
+    "GPIO189",
+    "AUD_CLK_MOSI",
+    null,
+    "I2S1_MCK",
+    null,
+    null,
+    "UFS_UNIPRO_SCL"
+   ]
+  },
+  "190": {
+   "name": "GPIO190",
+   "functions": [
+    "GPIO190",
+    "AUD_SYNC_MOSI",
+    null,
+    "I2S1_BCK",
+    null,
+    null,
+    null,
+    "DBG_MON_A6"
+   ]
+  },
+  "191": {
+   "name": "GPIO191",
+   "functions": [
+    "GPIO191",
+    "AUD_DAT_MOSI0",
+    null,
+    "I2S1_LRCK",
+    null,
+    null,
+    null,
+    "DBG_MON_A7"
+   ]
+  },
+  "192": {
+   "name": "GPIO192",
+   "functions": [
+    "GPIO192",
+    "AUD_DAT_MOSI1",
+    null,
+    "I2S1_DO",
+    null,
+    null,
+    "UFS_MPHY_SDA",
+    "DBG_MON_A8"
+   ]
+  },
+  "193": {
+   "name": "GPIO193",
+   "functions": [
+    "GPIO193",
+    "AUD_DAT_MISO0",
+    "VOW_DAT_MISO",
+    "I2S2_LRCK",
+    null,
+    "UDI_TDI",
+    null,
+    "DBG_MON_A12"
+   ]
+  },
+  "194": {
+   "name": "GPIO194",
+   "functions": [
+    "GPIO194",
+    "AUD_DAT_MISO1",
+    "VOW_CLK_MISO",
+    "I2S2_DI",
+    null,
+    "UDI_NTRST",
+    "UFS_MPHY_SCL",
+    "DBG_MON_A13"
+   ]
+  },
+  "195": {
+   "name": "GPIO195",
+   "functions": [
+    "GPIO195",
+    null,
+    null,
+    "ADSP_JTAG_TCK",
+    "VPU_UDI_TCK",
+    "SPM_JTAG_TCK",
+    "SSPM_JTAG_TCK"
+   ]
+  },
+  "196": {
+   "name": "GPIO196",
+   "functions": [
+    "GPIO196",
+    "CMMCLK4",
+    null,
+    "ADSP_JTAG_TDI",
+    "VPU_UDI_TDI",
+    "SPM_JTAG_TDI",
+    "SSPM_JTAG_TDI"
+   ]
+  },
+  "197": {
+   "name": "GPIO197",
+   "functions": [
+    "GPIO197",
+    null,
+    null,
+    "ADSP_JTAG_TDO",
+    "VPU_UDI_TDO",
+    "SPM_JTAG_TDO",
+    "SSPM_JTAG_TDO"
+   ]
+  },
+  "198": {
+   "name": "GPIO198",
+   "functions": [
+    "GPIO198",
+    "SCL7"
+   ]
+  },
+  "199": {
+   "name": "GPIO199",
+   "functions": [
+    "GPIO199",
+    "SDA7"
+   ]
+  },
+  "200": {
+   "name": "GPIO200",
+   "functions": [
+    "GPIO200",
+    "URXD1",
+    "ADSP_URXD0",
+    "TP_URXD1_AO",
+    "SSPM_URXD_AO",
+    "TP_URXD2_AO",
+    "MBISTREADEN_TRIGGER"
+   ]
+  },
+  "201": {
+   "name": "GPIO201",
+   "functions": [
+    "GPIO201",
+    "UTXD1",
+    "ADSP_UTXD0",
+    "TP_UTXD1_AO",
+    "SSPM_UTXD_AO",
+    "TP_UTXD2_AO",
+    "MBISTWRITEEN_TRIGGER"
+   ]
+  },
+  "202": {
+   "name": "GPIO202",
+   "functions": [
+    "GPIO202",
+    "PWM_3",
+    "CLKM3"
+   ]
+  },
+  "203": {
+   "name": "GPIO203",
+   "functions": []
+  },
+  "204": {
+   "name": "GPIO204",
+   "functions": []
+  },
+  "205": {
+   "name": "GPIO205",
+   "functions": []
+  },
+  "206": {
+   "name": "GPIO206",
+   "functions": []
+  },
+  "207": {
+   "name": "GPIO207",
+   "functions": []
+  },
+  "208": {
+   "name": "GPIO208",
+   "functions": []
+  },
+  "209": {
+   "name": "GPIO209",
+   "functions": []
+  }
+ },
+ "pio": {
+  "node": "pio: pinctrl@10005000",
+  "reg": [
+   "0x10005000",
+   "0x11c20000",
+   "0x11d10000",
+   "0x11e20000",
+   "0x11e70000",
+   "0x11ea0000",
+   "0x11f20000",
+   "0x11f30000",
+   "0x1000b000"
+  ],
+  "reg_names": [
+   "gpio",
+   "iocfg_rm",
+   "iocfg_br",
+   "iocfg_lm",
+   "iocfg_lb",
+   "iocfg_rt",
+   "iocfg_lt",
+   "iocfg_tl",
+   "eint"
+  ]
+ },
+ "i2c": [],
+ "gic": {
+  "dist": "0xc000000",
+  "redist": "0xc040000"
+ }
+}

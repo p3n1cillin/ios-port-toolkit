@@ -1,0 +1,38 @@
+## @file
+#  r5qfull: the firmware log kept in USERDATA from the start of the driver stage (installed S10 Lite, Test 73+).
+##
+
+[Defines]
+  INF_VERSION    = 0x00010005
+  BASE_NAME      = R5qEarlyLogDxe
+  FILE_GUID      = 6b2f0c1e-6a55-4d1c-9f3e-52355145524c
+  MODULE_TYPE    = DXE_DRIVER
+  VERSION_STRING = 1.0
+  ENTRY_POINT    = R5qEarlyLogEntry
+
+[Sources]
+  R5qEarlyLogDxe.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+  MdeModulePkg/MdeModulePkg.dec
+
+[LibraryClasses]
+  BaseLib
+  BaseMemoryLib
+  MemoryAllocationLib
+  PrintLib
+  UefiBootServicesTableLib
+  UefiRuntimeServicesTableLib
+  UefiDriverEntryPoint
+  UefiLib
+
+[Protocols]
+  gEfiBlockIoProtocolGuid
+  gEfiResetArchProtocolGuid
+
+[Guids]
+  gEfiEndOfDxeEventGroupGuid
+
+[Depex]
+  TRUE

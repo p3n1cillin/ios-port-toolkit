@@ -1,0 +1,7 @@
+{
+  "source": "https://github.com/joseluisq/macosx-sdks/releases/download/13.3/MacOSX13.3.sdk.tar.xz",
+  "bytes": 59089188,
+  "sha256": "518e35eae6039b3f64e8025f4525c1c43786cc5cf39459d609852faf091e34be",
+  "purpose": "pre-generated DriverKit headers for the pinned donor Linux XNU build",
+  "status": "staged only; not extracted or executed; source is SDK redistributor"
+}

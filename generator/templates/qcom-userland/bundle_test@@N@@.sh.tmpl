@@ -1,0 +1,8 @@
+#!/bin/bash
+set -eu
+R=@@WORK_WSL@@
+cd "$R"
+python3 package_test@@N@@.py "$R" | grep -E '"sha256"' | head -1
+python3 bundle_native_test.py @@N@@ --firmware-number @@FIRMWARE_NUMBER@@ --mode @@MODE@@ \
+  --notes "@@NOTES@@" \
+  --start-blocked-reason "@@START_BLOCKED_REASON@@" | grep -E '"bundle"|"image"'

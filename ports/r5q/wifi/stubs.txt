@@ -1,0 +1,3 @@
+ath10k_swap_code_seg_configure
+ath10k_swap_code_seg_init
+ath10k_swap_code_seg_release

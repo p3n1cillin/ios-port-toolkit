@@ -1,0 +1,223 @@
+{
+ "schema": "iosport-device/1",
+ "_about": "Samsung Galaxy S20+ 5G (SM-G986N, y2q, SM8250). Filled from the donor port (redwood-src: common/devices/y2q.conf, xnuloader/loader.c platform_y2q, uefi/files/Platforms/Samsung/y2qPkg, the y2q tables in the kernel drivers) and its device tree (uefi/files/Resources/DTBs/y2q.dtb) through tools/extract_profile.py. Not measured by this project: no y2q phone here. null = unknown until someone with the phone gathers it (README, 'What to gather').",
+ "_status": "donor: boots iOS from TWRP-flashed boot (a path this toolkit does not use); touch, battery (MAX77705), Wi-Fi (BCM4375) in the donor's kernel. This profile lets the toolkit's recovery-only flow and generator target it.",
+
+ "device": {
+  "codename": "y2q",
+  "brand": "samsung",
+  "model": "SM-G986N",
+  "name": "Samsung Galaxy S20+ 5G",
+  "soc": "sm8250",
+  "soc_name": "Snapdragon 865 (kona)",
+  "android_build": null,
+  "ram_bytes": 12776898560,
+  "loader_platform": "y2q",
+  "prefix": "y2q"
+ },
+
+ "donor": {
+  "_about": "The donor's common/devices/y2q.conf, value for value (conf_bridge.py check agrees). Its BOOT_VIA=twrp writes the boot partition: conf_bridge.py export turns this into KIND=phone-recovery for the toolkit's recovery-only flow.",
+  "kind": "phone",
+  "soc": "Qualcomm Snapdragon 865 (SM8250)",
+  "boot_via": "twrp",
+  "uefi_target": "y2q",
+  "uefi_fd": "",
+  "dtb": "uefi/files/Resources/DTBs/y2q.dtb",
+  "wifi_ath11k": 0,
+  "bootargs": "cpus=8",
+  "default_secs": 300,
+  "userland_vars": "GL=1",
+  "firmware": "",
+  "autoboot_args": "cpus=8 bootcpu=7 touchscreen=1 ufs=2 root_apfs=ufs_darwin sb_delay=8 var_store=1 ufs_write=1 gpu=1 max77705=1 wifi=1"
+ },
+
+ "flash": {
+  "_note": "The donor flashes BOOT from TWRP. This toolkit never writes boot: tests go to recovery with an automatic restore, exactly as on r5q. Everything below must be read from the phone (root) before a first test.",
+  "method": "recovery",
+  "test_partition": "recovery",
+  "recovery_block_device": null,
+  "recovery_bytes": null,
+  "never_write": ["boot", "vbmeta", "vbmeta_samsung", "dtbo", "xbl", "xbl_config", "abl", "aop", "tz", "hyp", "keymaster", "param", "misc", "efs", "sec_efs", "persist", "userdata", "super"],
+  "enter_test": "reboot-recovery helper: reboot(2) LINUX_REBOOT_CMD_RESTART2 \"recovery\"",
+  "download_mode": {"usb_id": "04E8:685D", "tool": "samloader/Odin (RECOVERY only)", "partition": "RECOVERY", "partition_id": null, "only_image": "the original recovery (sha256 = baseline.recovery_sha256)"},
+  "requires_root": true,
+  "min_battery_percent": 30
+ },
+
+ "baseline": {
+  "recovery_sha256": null,
+  "boot_sha256": null,
+  "vbmeta_sha256": null,
+  "dtbo_sha256": null,
+  "xbl_sha256": null,
+  "reboot_helper_sha256": "951c9a6519415e1a739e2c992b5247aefe332d1cc88dc85babd9ace0e6291a0a"
+ },
+
+ "bootimg": {
+  "header_version": null,
+  "page_size": null,
+  "kernel_load_pa": "0x80080000",
+  "avb_footer": true,
+  "seandroid_trailer": true
+ },
+
+ "memory": {
+  "_sources": "y2qPkg MemoryMapLib.c, y2q.conf, y2q.dtb reserved-memory",
+  "dram_base": "0x80000000",
+  "uefi_fd": {"base": "0x9FC00000", "size": "0x300000"},
+  "payload": {"base": "0xF0000000", "max": "0x04000000"},
+  "display_reserved": {"base": "0x9C000000", "size": "0x02400000", "_note": "y2qPkg MemoryMapLib reserves 0x2400000; the DT cont_splash_region is 0x2300000 and dfps_data_region sits at 0x9E300000+0x100000"},
+  "bootshim_info": null,
+  "_bootshim_info_note": "r5q's choice (last MiB of Display Reserved) does not carry over: on y2q 0x9E300000 is dfps_data_region and inside the second 1440x3200 flip buffer (0x9D200000 + 0x1194000). Pick a free MiB and record it here.",
+  "dsi_command_page": null,
+  "log_ring": {"base": "0x9F200000", "size": "0x200000", "magic": "0x4D474F4C", "_note": "UNVERIFIED: sec_debug_region 0x9F000000 + 0x200000 by analogy with r5q; read /proc/last_kmsg's ring header there before relying on it. The donor logs to its own partition instead."},
+  "smem": {"base": "0x80900000", "size": "0x200000"},
+  "loader_pe_base": null,
+  "loader_window_check": null,
+  "xnu_window": {"base": null, "size": null},
+  "resident_image": {"base": null},
+  "usb_ramdisk": {"base": null, "size": null},
+  "dxe_heap2": null,
+  "secure_no_map": [
+   {"name": "hyp_region", "base": "0x80000000", "size": "0x600000"},
+   {"name": "xbl_aop_region", "base": "0x80603000", "size": "0x25D000"},
+   {"name": "cmd_db", "base": "0x80860000", "size": "0x20000"},
+   {"name": "smem_region", "base": "0x80900000", "size": "0x200000"},
+   {"name": "removed_region", "base": "0x80B00000", "size": "0x6300000"},
+   {"name": "pil_slpi_region", "base": "0x89200000", "size": "0x1500000"},
+   {"name": "pil_adsp_region", "base": "0x8A700000", "size": "0x2C00000"},
+   {"name": "pil_spss_region", "base": "0x8D300000", "size": "0x100000"},
+   {"name": "pil_npu_region", "base": "0x8D400000", "size": "0x500000"},
+   {"name": "pil_video_region", "base": "0x8D900000", "size": "0x500000"},
+   {"name": "pil_cvp_region", "base": "0x8DE00000", "size": "0x500000"},
+   {"name": "pil_cdsp_region", "base": "0x8E300000", "size": "0x1A00000"},
+   {"name": "pil_camera_region", "base": "0x8FD00000", "size": "0x500000"},
+   {"name": "pil_wlan_fw_region", "base": "0x90200000", "size": "0x100000"},
+   {"name": "pil_ipa_fw_region", "base": "0x90300000", "size": "0x10000"},
+   {"name": "pil_ipa_gsi_region", "base": "0x90310000", "size": "0xA000"},
+   {"name": "pil_gpu_region", "base": "0x9031A000", "size": "0x2000"},
+   {"name": "cdsp_secure_heap", "base": "0x90400000", "size": "0x600000"},
+   {"name": "sec_debug_region", "base": "0x9F000000", "size": "0x800000"},
+   {"name": "ss_plog_region", "base": "0x9F800000", "size": "0x200000"},
+   {"name": "hdm_region", "base": "0x9FB00000", "size": "0x1000"},
+   {"name": "kaslr_region", "base": "0xA0001000", "size": "0x1000"},
+   {"name": "tima_region", "base": "0xB0100000", "size": "0x100000"}
+  ]
+ },
+
+ "log_slot": {"offset": null, "blocks": 513, "magic": "Y2QLOGSLOT/V1"},
+
+ "cpu": {"cores": 8, "mpidr_core_shift": 8, "small_cores": "0x0F", "midr": null, "cntfrq": 19200000, "enable_method": "psci"},
+ "gic": {"dist": "0x17A00000", "redist": "0x17A60000", "vtimer_intid": 27, "_note": "y2q.dtb arm,armv8-timer gives the virtual timer at PPI 11 = INTID 27 (XNU's default)"},
+ "soc_io": {"base": "0x00400000", "size": "0x3FC00000"},
+ "pshold": null,
+
+ "kernel": {
+  "overlay_dir": "redwood-src/xnu/files (the donor's y2q tables are already in its drivers)",
+  "base_boot_args": "debug=0x8",
+  "feature_boot_args": {"touch": "touchscreen=1", "cores": "cpus=8", "battery": "max77705=1", "wifi": "wifi=1", "gpu": "gpu=1"}
+ },
+ "loader": {
+  "flag_prefix": "R5Q_",
+  "profile_flags": null,
+  "platform_struct": {"name": "y2q", "io_base": "0x00400000", "io_size": "0x3FC00000", "gic_dist": "0x17A00000", "gic_redist": "0x17A60000", "uart": 0, "log_other_cpu": 1, "cores": 8, "core_shift": 8, "small_cores": "0x0f", "fb_base": "0x9C000000", "darwin_first": 28904192, "darwin_last": 62458874}
+ },
+
+ "firmware": {
+  "package": "redwood-src uefi/files/Platforms/Samsung/y2qPkg",
+  "reference_package": "Mu-Silicium r8q (Galaxy S20 FE, SM8250)",
+  "uefiplat_cfg": null,
+  "usb_msd_label": "Y2QRAM",
+  "usb_controller_init_event": "1C0CFFCE-FC8D-4E44-8C78-9C9E5B530D36",
+  "pmic_pshold_reset_type": null
+ },
+
+ "display": {
+  "_sources": "y2q.conf FB_BASE (1440 x 3200 'TODO: check'), docs/y2q-display.md, donor MiniIOMobileFramebuffer.cpp",
+  "width": 1440,
+  "height": 3200,
+  "stride": 5760,
+  "mdss_base": "0x0AE00000",
+  "dsi0_offset": "0x94000",
+  "intf_offset": "0x6B800",
+  "pipe_offsets": ["0x05000", "0x07000", "0x09000", "0x0B000", "0x25000", "0x27000", "0x29000", "0x2B000"],
+  "te_gpio": 66,
+  "te_function": 1,
+  "panel_window_dcs": {"2A": "00 00 05 9F", "2B": "00 00 0C 7F", "_note": "derived from 1440 x 3200; only needed if the panel window is garbled as on r5q"},
+  "abl_command_buffer": null,
+  "autorefresh": null,
+  "flip_buffers": ["0x9C000000", "0x9D200000"],
+  "reserved_end": "0x9E400000",
+  "gcc_disp_ahb_cbcr": "0x0010B00C",
+  "dispcc_base": "0x0AF00000",
+  "ios_points": [375, 812]
+ },
+
+ "tlmm": {"base": "0x0F000000", "tiles": {"west": "0x0F100000", "south": "0x0F500000", "north": "0x0F900000"}},
+
+ "touch": {
+  "_sources": "y2q.dtb i2c@994000/touchscreen@48 via extract_profile.py; donor redwood_sec_ts.c (y2q defaults) agrees on every register",
+  "compatible": "sec,sec_ts",
+  "driver": "redwood_sec_ts.c (y2q defaults)",
+  "i2c_address": "0x48",
+  "se_base": "0x00994000",
+  "sda_gpio": 12,
+  "scl_gpio": 13,
+  "pin_function": 1,
+  "bus_tile": "north",
+  "irq_gpio": 15,
+  "irq_tile": "north",
+  "supplies": [
+   {"name": "s2dos05-ldo2", "kind": "pmic-regulator", "pmic": "S2DOS05 @ 0x60 on bit-banged GPIO62 SDA / GPIO63 SCL (south)", "microvolts": 1800000},
+   {"name": "s2dos05-ldo3", "kind": "pmic-regulator", "pmic": "S2DOS05 @ 0x60", "microvolts": 3000000}
+  ],
+  "gcc": {"vote_reg": "0x52008", "vote_bits": {"m_ahb": 6, "s_ahb": 7, "core": 8, "core2x": 9, "se": 15}, "se_cbcr": "0x175FC", "se_rcg": "0x17600", "m_ahb_cbcr": "0x17004", "s_ahb_cbcr": "0x17008", "core_cbcr": "0x23000", "core2x_cbcr": "0x23008"},
+  "transport": "geni-fifo (donor driver)",
+  "max_coords": [4096, 4096],
+  "firmware": "tsp_sec/y79a_y2.bin"
+ },
+
+ "battery": {
+  "_sources": "y2q.dtb i2c@980000/max77705@66 via extract_profile.py; donor redwood_max77705.c",
+  "gauge": "max77705",
+  "compatible": "maxim,max77705",
+  "i2c_address": "0x66",
+  "se_base": "0x00980000",
+  "sda_gpio": 28,
+  "scl_gpio": 29,
+  "pin_function": 1,
+  "transport": "bitbang (donor)",
+  "registers": {"note": "donor bsd/dev/redwood_max77705.c (reads only)"},
+  "capacity_max": null
+ },
+
+ "buttons": {
+  "spmi": {"core": "0x0C440000", "chnls": "0x0C600000", "obsrvr": "0x0E600000", "intr": "0x0E700000", "cnfg": "0x0C40A000", "arb_version": 5},
+  "pon": {"pmic": "pm8150", "sid": 0, "base": "0x800", "peripheral_id": "0x008", "subtype_from": 4, "subtype_to": 5, "kpdpwr_bit": "0x01", "resin_bit": "0x02"},
+  "volume_up": {"pmic": "pm8150l", "sid": 4, "gpio": 3, "peripheral_id": "0x4C2", "active_low": true},
+  "volume_down": "resin",
+  "power": "kpdpwr",
+  "access": "read-only through the observer channel"
+ },
+
+ "cpufreq": {
+  "_sources": "y2q.dtb cpufreq-hw (EPSS layout), donor redwood_cpufreq.c EPSS_PHYS 0x18591000",
+  "kind": "epss",
+  "domains": [{"cores": "0-3", "base": "0x18591000"}, {"cores": "4-6", "base": "0x18592000"}, {"cores": "7", "base": "0x18593000"}],
+  "table_offset": "0x100",
+  "row_bytes": 4,
+  "perf_state": "0x320"
+ },
+
+ "wifi": {
+  "kind": "brcm",
+  "bus": "pcie",
+  "nodes": [{"node": "/soc/pcie@1c00000", "status": "okay"}, {"node": "/soc/bcmdhd_wlan", "compatible": "android,bcmdhd_wlan"}],
+  "status": "donor: BCM4375 over PCIe with brcmfmac (docs/y2q-wifi.md); WLAN enable GPIO20"
+ },
+
+ "storage": {"userdata_block_device": null, "ufs_luns": null, "darwin_partition": "sda38 (donor repartition; this toolkit never repartitions)"},
+
+ "userland": {"system_image": null, "system_image_bytes": null, "root_image": null}
+}

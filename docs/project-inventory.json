@@ -1,0 +1,40 @@
+{
+  "root": "C:\\Users\\user\\Documents\\Codex\\2026-11-04\\hel\\S10-Lite-project",
+  "windows_folders": {
+    "work/ios-r5q": {
+      "files": 1427,
+      "bytes": 447183285,
+      "symbolic_links": 0
+    },
+    "work/privacy-build": {
+      "files": 11177,
+      "bytes": 570040932,
+      "symbolic_links": 0
+    },
+    "work/s10-relock": {
+      "files": 15,
+      "bytes": 14879676528,
+      "symbolic_links": 0
+    },
+    "outputs/DualSpace-prototype": {
+      "files": 12,
+      "bytes": 52922,
+      "symbolic_links": 0
+    },
+    "outputs/S10-Lite-native-iOS-port": {
+      "files": 77,
+      "bytes": 248829542,
+      "symbolic_links": 0
+    }
+  },
+  "critical_backup_checksums": {
+    "work/ios-r5q/backups/<SERIAL>/recovery.img": "332e1dd4a1c87bcd929696c5e1aa4f6730795c5de440acface1572ae3ba383cd",
+    "work/ios-r5q/backups/<SERIAL>/boot.img": "381e6aa72b0fee42a04c4f7be51d0c63bccaaed26e54f9ac30d3de6255e1bc1a",
+    "outputs/S10-Lite-native-iOS-port/first-test/restore/recovery-original.img": "332e1dd4a1c87bcd929696c5e1aa4f6730795c5de440acface1572ae3ba383cd",
+    "outputs/S10-Lite-native-iOS-port/first-test/restore/recovery-original-odin.tar": "b2775230c1e914ed5fec71cfa35b9d970fcc9e2fd58fb887b9c19f4355a93d7d"
+  },
+  "compatibility_junctions": {
+    "../work": "work",
+    "../outputs": "outputs"
+  }
+}

@@ -1,0 +1,6 @@
+#!/bin/sh
+@@LOADER_COMMENT@@
+set -eu
+clang --target=aarch64-unknown-windows @@LOADER_FLAGS@@ -ffreestanding -fno-builtin -fno-stack-protector -fshort-wchar  -mgeneral-regs-only -O1 -Wall -Wextra -Wno-unused-parameter  -Wno-unused-function -c /src/loader.c -o /scratch/loader.obj
+lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib  /base:@@loader_pe_base@@ /out:/scratch/loader.efi /scratch/loader.obj
+base64 -w0 /scratch/loader.efi

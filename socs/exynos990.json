@@ -1,0 +1,378 @@
+{
+ "soc": "exynos990",
+ "vendor": "samsung-exynos",
+ "_generated_by": "toolkit/tools/soc_other.py",
+ "_sources": {
+  "banks": "pinctrl-exynos-arm64.c",
+  "dtsi": "exynos990.dtsi"
+ },
+ "pin_state": "samsung,pins = \"bank-N\"; samsung,pin-function = <F>",
+ "bank_registers": {
+  "con": "0x0 (4 bits a pin)",
+  "dat": "0x4",
+  "pud": "0x8",
+  "drv": "0xC"
+ },
+ "gic": {
+  "dist": "0x10101000",
+  "redist": "0x10102000"
+ },
+ "i2c": [],
+ "controllers": [
+  {
+   "banks_array": "exynos990_pin_banks0",
+   "banks": [
+    {
+     "name": "gpa0",
+     "pins": 8,
+     "offset": "0x000"
+    },
+    {
+     "name": "gpa1",
+     "pins": 8,
+     "offset": "0x020"
+    },
+    {
+     "name": "gpa2",
+     "pins": 8,
+     "offset": "0x040"
+    },
+    {
+     "name": "gpa3",
+     "pins": 8,
+     "offset": "0x060"
+    },
+    {
+     "name": "gpa4",
+     "pins": 2,
+     "offset": "0x080"
+    },
+    {
+     "name": "gpq0",
+     "pins": 7,
+     "offset": "0x0A0"
+    }
+   ],
+   "label": "pinctrl_alive",
+   "base": "0x15850000"
+  },
+  {
+   "banks_array": "exynos990_pin_banks1",
+   "banks": [
+    {
+     "name": "gpm0",
+     "pins": 1,
+     "offset": "0x000"
+    },
+    {
+     "name": "gpm1",
+     "pins": 1,
+     "offset": "0x020"
+    },
+    {
+     "name": "gpm2",
+     "pins": 1,
+     "offset": "0x040"
+    },
+    {
+     "name": "gpm3",
+     "pins": 1,
+     "offset": "0x060"
+    },
+    {
+     "name": "gpm4",
+     "pins": 1,
+     "offset": "0x080"
+    },
+    {
+     "name": "gpm5",
+     "pins": 1,
+     "offset": "0x0A0"
+    },
+    {
+     "name": "gpm6",
+     "pins": 1,
+     "offset": "0x0C0"
+    },
+    {
+     "name": "gpm7",
+     "pins": 1,
+     "offset": "0x0E0"
+    },
+    {
+     "name": "gpm8",
+     "pins": 1,
+     "offset": "0x100"
+    },
+    {
+     "name": "gpm9",
+     "pins": 1,
+     "offset": "0x120"
+    },
+    {
+     "name": "gpm10",
+     "pins": 1,
+     "offset": "0x140"
+    },
+    {
+     "name": "gpm11",
+     "pins": 1,
+     "offset": "0x160"
+    },
+    {
+     "name": "gpm12",
+     "pins": 1,
+     "offset": "0x180"
+    },
+    {
+     "name": "gpm13",
+     "pins": 1,
+     "offset": "0x1A0"
+    },
+    {
+     "name": "gpm14",
+     "pins": 1,
+     "offset": "0x1C0"
+    },
+    {
+     "name": "gpm15",
+     "pins": 1,
+     "offset": "0x1E0"
+    },
+    {
+     "name": "gpm16",
+     "pins": 1,
+     "offset": "0x200"
+    },
+    {
+     "name": "gpm17",
+     "pins": 1,
+     "offset": "0x220"
+    },
+    {
+     "name": "gpm18",
+     "pins": 1,
+     "offset": "0x240"
+    },
+    {
+     "name": "gpm19",
+     "pins": 1,
+     "offset": "0x260"
+    },
+    {
+     "name": "gpm20",
+     "pins": 1,
+     "offset": "0x280"
+    },
+    {
+     "name": "gpm21",
+     "pins": 1,
+     "offset": "0x2A0"
+    },
+    {
+     "name": "gpm22",
+     "pins": 1,
+     "offset": "0x2C0"
+    },
+    {
+     "name": "gpm23",
+     "pins": 1,
+     "offset": "0x2E0"
+    },
+    {
+     "name": "gpm24",
+     "pins": 1,
+     "offset": "0x300"
+    },
+    {
+     "name": "gpm25",
+     "pins": 1,
+     "offset": "0x320"
+    },
+    {
+     "name": "gpm26",
+     "pins": 1,
+     "offset": "0x340"
+    },
+    {
+     "name": "gpm27",
+     "pins": 1,
+     "offset": "0x360"
+    },
+    {
+     "name": "gpm28",
+     "pins": 1,
+     "offset": "0x380"
+    },
+    {
+     "name": "gpm29",
+     "pins": 1,
+     "offset": "0x3A0"
+    },
+    {
+     "name": "gpm30",
+     "pins": 1,
+     "offset": "0x3C0"
+    },
+    {
+     "name": "gpm31",
+     "pins": 1,
+     "offset": "0x3E0"
+    },
+    {
+     "name": "gpm32",
+     "pins": 1,
+     "offset": "0x400"
+    },
+    {
+     "name": "gpm33",
+     "pins": 1,
+     "offset": "0x420"
+    }
+   ],
+   "label": "pinctrl_cmgp",
+   "base": "0x15c30000"
+  },
+  {
+   "banks_array": "exynos990_pin_banks2",
+   "banks": [
+    {
+     "name": "gpf0",
+     "pins": 4,
+     "offset": "0x000"
+    },
+    {
+     "name": "gpf1",
+     "pins": 6,
+     "offset": "0x020"
+    },
+    {
+     "name": "gpf2",
+     "pins": 3,
+     "offset": "0x040"
+    }
+   ],
+   "label": "pinctrl_hsi1",
+   "base": "0x13040000"
+  },
+  {
+   "banks_array": "exynos990_pin_banks3",
+   "banks": [
+    {
+     "name": "gpf3",
+     "pins": 2,
+     "offset": "0x000"
+    }
+   ],
+   "label": "pinctrl_hsi2",
+   "base": "0x13c30000"
+  },
+  {
+   "banks_array": "exynos990_pin_banks4",
+   "banks": [
+    {
+     "name": "gpp0",
+     "pins": 8,
+     "offset": "0x000"
+    },
+    {
+     "name": "gpp1",
+     "pins": 8,
+     "offset": "0x020"
+    },
+    {
+     "name": "gpp2",
+     "pins": 8,
+     "offset": "0x040"
+    },
+    {
+     "name": "gpp3",
+     "pins": 8,
+     "offset": "0x060"
+    },
+    {
+     "name": "gpp4",
+     "pins": 8,
+     "offset": "0x080"
+    },
+    {
+     "name": "gpg0",
+     "pins": 2,
+     "offset": "0x0A0"
+    }
+   ],
+   "label": "pinctrl_peric0",
+   "base": "0x10430000"
+  },
+  {
+   "banks_array": "exynos990_pin_banks5",
+   "banks": [
+    {
+     "name": "gpp5",
+     "pins": 8,
+     "offset": "0x000"
+    },
+    {
+     "name": "gpp6",
+     "pins": 8,
+     "offset": "0x020"
+    },
+    {
+     "name": "gpp7",
+     "pins": 8,
+     "offset": "0x040"
+    },
+    {
+     "name": "gpp8",
+     "pins": 8,
+     "offset": "0x060"
+    },
+    {
+     "name": "gpp9",
+     "pins": 8,
+     "offset": "0x080"
+    },
+    {
+     "name": "gpc0",
+     "pins": 6,
+     "offset": "0x0A0"
+    },
+    {
+     "name": "gpg1",
+     "pins": 4,
+     "offset": "0x0C0"
+    },
+    {
+     "name": "gpb0",
+     "pins": 8,
+     "offset": "0x0E0"
+    },
+    {
+     "name": "gpb1",
+     "pins": 8,
+     "offset": "0x100"
+    },
+    {
+     "name": "gpb2",
+     "pins": 8,
+     "offset": "0x120"
+    }
+   ],
+   "label": "pinctrl_peric1",
+   "base": "0x10730000"
+  },
+  {
+   "banks_array": "exynos990_pin_banks6",
+   "banks": [
+    {
+     "name": "gpv0",
+     "pins": 7,
+     "offset": "0x000"
+    }
+   ],
+   "label": "pinctrl_vts",
+   "base": "0x15580000"
+  }
+ ],
+ "_note": "controller i = DT alias pinctrl<i> (the driver matches them in this order). "
+}
