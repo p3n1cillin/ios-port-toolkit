@@ -13,22 +13,49 @@ binaries, no build outputs and no phone backups are in this repository (see [the
 | `port/r5qfull/`, `port/testNN/` | the Mu-Silicium platform pieces per test |
 | `kernel-build/r5q-overlay/` | the r5q kernel drivers on top of the donor port's XNU: UFS, touch, buttons, cpufreq, framebuffer, battery and charger (S2MU106), the modem link (SMP2P, GLINK, QRTR, rmtfs, TFTP, pd-mapper, servreg) and Wi-Fi (WLFW) |
 | `kernel-build/r5q-overlay/bsd/dev/redwood_wlfw_ath10k*.h` | Linux ath10k's WLFW message tables and copy-engine tables (ISC), generated |
+| `kernel-build/r5q-overlay/bsd/dev/redwood_adsp.c` | the audio DSP and the sensors DSP (SLPI: FastRPC, the file server, SEE), the microphone's SLIMbus work |
+| `kernel-build/r5q-overlay/bsd/miscfs/apfs/apfs_vnops.c` | read-time patches to iOS's shared cache (with their code-signature page hashes) |
+| `wifi/inject_bbd.c`, `wifi/inject_app.c` | libraries inserted into backboardd and the apps: sensors as HID services, rotation, auto-brightness, magnetometer calibration, app fixes |
+| `wifi/r5qd.c`, `wifi/r5qd_client.py` | changes to the running iOS over Wi-Fi without a reboot (put, run, kill, reload a library) |
+| `wifi/*_test.*`, `wifi/magrec.c`, `wifi/cm_rate.m` | on-phone probes: CoreMotion, CoreLocation, orientation, video, the magnetometer |
+| `wifi/r5qsign.py`, `wifi/appinst.m`, `wifi/ipa_install.py` | signing and installing apps built here |
+| `pipeline/` | how a test is built now: the root volume, the test image, the run ([pipeline/README.md](pipeline/README.md)) |
 | `phone.py` | everything done with the phone from the PC: `cycle` (flash, restart, follow the log), `args`, `logs`, `smem`, `screenshot`, … |
 | `build_*.py`, `package_install_boot.py` | the build pipeline (kernel in a sandbox, loader, shim, BOOT image) |
-| `wifi/WIFI-PLAN.md` | the Wi-Fi bring-up, step by step, with what every test showed |
+| `wifi/WIFI-PLAN.md` | everything since Test 111, step by step with what every test showed: Wi-Fi, sound, GPU, apps, sensors, CoreMotion, the compass, the microphone |
 | `SESSION.md` | the test-by-test log of the earlier stages |
 
-## State (Test 110)
+## State (Test 243)
 
-- iOS boots from the phone's own storage, without a PC; data persists; the clock comes from the PMIC RTC.
-- Touch, display, buttons, all CPU cores, battery gauge.
-- **Charging:** the S2MU106's watchdog (which suspended charging with no driver) is switched off by the loader;
-  the kernel reads the charger's input type (wall / charging port / PC) and sets the input limit; iOS shows
-  the charging bolt and the battery's capacity.
-- **Modem:** booted through TrustZone; SMP2P, GLINK, QRTR, rmtfs, TFTP (Android's path rules), pd-mapper.
-- **Wi-Fi:** the WCN3990 firmware runs (the vendor partition's `wlanmdsp.mbn`), the WLFW handshake is done
-  (MSA memory assigned through TrustZone, board data sent), the firmware is ready and in mission mode.
-  Next: the host's copy engines, HTC/WMI, and a network interface.
+**Works:**
+
+- **Booting and storage:** iOS boots from the phone's own storage, without a PC. Data persists, and the clock comes
+  from the PMIC RTC.
+- **Basics:** touch, display (with brightness), buttons, all CPU cores, battery and charging.
+- **Wi-Fi and the network:** the kernel's own WLAN driver and WPA2. Safari loads pages. Location
+  works by Wi-Fi.
+- **Sound and media:** speaker sound, ringtones, video playback.
+- **Hardware:** vibration and the flashlight.
+- **Apps:** apps built here are installed by iOS's own installer.
+- **Sensors:** accelerometer, gyroscope, magnetometer, light and proximity, from the sensors DSP started by the
+  kernel. In iOS:
+  - rotation;
+  - smooth auto-brightness;
+  - CoreMotion's accelerometer, gyroscope, magnetometer and device motion in apps.
+
+  How it's done, generically: [docs/SENSORS.md](../../docs/SENSORS.md),
+  [docs/IOS-SENSORS.md](../../docs/IOS-SENSORS.md), [docs/SYSTEM-PATCHING.md](../../docs/SYSTEM-PATCHING.md).
+
+**Partly:**
+
+- **Compass:** the Compass app shows a heading, then freezes. Indoor interference is suspected; still being checked.
+
+**Not yet:**
+
+- **Microphone:** the WCD9340 codec never enumerates on SLIMbus. What is ruled out is in WIFI-PLAN, "Tests 237-240".
+- **Metal:** there is no GPU driver for iOS, so the map in Maps and live wallpapers are missing.
+- **Radios and camera:** Bluetooth, camera, cellular.
+- **FairPlay:** App Store apps won't run; this needs Apple's FairPlay kernel extension.
 
 Setting up a machine to build and run it: [docs/SETUP.md](../../docs/SETUP.md). Licences: the loader and the kernel
 drivers are Apple Public Source License 2.0 (modified from the donor port), the rest MIT; see

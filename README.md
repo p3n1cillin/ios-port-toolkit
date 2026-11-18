@@ -1,9 +1,10 @@
 # Native iOS porting toolkit (Android phones: Qualcomm first, MediaTek and Exynos/Tensor started)
 
 > **This repository** also carries the S10 Lite port's own working tree in [ports/r5q](ports/r5q/README.md)
-> (loader, kernel drivers, build pipeline, phone tool, notes; up to Test 110: charging and the Wi-Fi
-> firmware's handshake work). Set-up: [docs/SETUP.md](docs/SETUP.md). Licences: MIT, with the loader and kernel
-> drivers under the Apple Public Source License 2.0: [NOTICE.md](NOTICE.md).
+> (loader, kernel drivers, build pipeline, phone tool, iOS-side libraries and test tools, notes; up to Test 243:
+> Wi-Fi, sound, sensors with rotation, auto-brightness and CoreMotion device motion). Set-up:
+> [docs/SETUP.md](docs/SETUP.md). Licences: MIT, with the loader and kernel drivers under the Apple Public Source
+> License 2.0: [NOTICE.md](NOTICE.md).
 
 This toolkit captures how iOS 16.5 was made to boot natively on the **Samsung Galaxy S10 Lite** (SM-G770F,
 `r5q`, Snapdragon 855 / SM8150). As of Test 68 the phone runs to a usable home screen with:
@@ -93,7 +94,14 @@ toolkit/
                        run_native_test.py)
     fastboot_boot.py   one authorized RAM-only `fastboot boot` of a test image (fastboot-boot phones)
   skills/              ios-port-feasibility, ios-port-safety, ios-port-new-device, ios-port-next-test,
-                       ios-port-display, ios-port-peripherals, ios-port-log-triage
+                       ios-port-display, ios-port-peripherals, ios-port-sensors, ios-port-log-triage
+  docs/
+    SENSORS.md         the sensors DSP (SLPI) from the kernel: FastRPC, the file server, SEE; where each value is
+    IOS-SENSORS.md     iOS's side: virtual HID sensors, rotation, auto-brightness, CoreMotion, compass, magnetometer cal
+    SYSTEM-PATCHING.md changing Apple code without breaking code signing: page hashes, the kernel's read-time cache
+                       patch, patched daemons in /var, live reloads with r5qd
+  tools/ios/           dyld shared cache and Mach-O readers/patchers (find code by its strings, patch a word and its
+                       CodeDirectory hash), magfit.py (magnetometer offset, units and axes)
 ```
 
 ## Quick start
@@ -283,6 +291,40 @@ SM8150 uses OSM blocks per cluster (`qcom,clk-cpu-osm`): set the perf-state regi
 uses EPSS/cpufreq-hw with another layout (`cpufreq.*`). Boot-arg `cpufreq=1`. All 8 cores come up with
 `cpus=8` (loader `R5Q_LAB_SMP`).
 
+### 8. Sensors: the SLPI from the kernel
+
+The phone's sensors sit behind a Qualcomm DSP (the SLPI). With no Android, the kernel does what Android's daemons
+did:
+
+- it starts the SLPI and serves its file reads (the sensor registry and configs) over FastRPC;
+- it speaks the sensors framework's protocol (SEE, protobuf over QMI) to stream the accelerometer, gyroscope,
+  magnetometer, light and proximity.
+
+Every value comes from the phone's device tree, and the order matters. Details: [docs/SENSORS.md](docs/SENSORS.md).
+Skill: `ios-port-sensors`.
+
+### 9. Sensors in iOS
+
+A library in backboardd makes virtual HID services that look like an iPhone's accelerometer, gyroscope and compass,
+and drives:
+
+- rotation, through CoreMotion's orientation manager;
+- auto-brightness, through BackBoardServices. An Apple-style light service crashes CoreBrightness.
+
+CoreMotion device motion and the compass need two small patches to Apple's per-model tables. Details:
+[docs/IOS-SENSORS.md](docs/IOS-SENSORS.md).
+
+### 10. Changing Apple code safely
+
+When iOS decides something from a fixed per-model table:
+
+- patch the one instruction **and its page's hash** in the CodeDirectory;
+- for the shared cache, do it in the kernel's APFS reader as the file is read.
+
+A wrong page hash silently strips every process's entitlements; on the S10 Lite that meant no touch screen.
+`tools/ios/` finds code by its strings and computes the hash. r5qd's `reload` swaps an injected library without a
+reboot. Details: [docs/SYSTEM-PATCHING.md](docs/SYSTEM-PATCHING.md).
+
 ## What to gather for a new phone, in this order
 
 Everything is read-only until step 7. `validate_profile.py` shows what is still missing for each stage.
@@ -342,9 +384,18 @@ Everything is read-only until step 7. `validate_profile.py` shows what is still 
   before anything else.
 - **Runner wiring on the S10 Lite**: the generator emits the `run_stage_test_auto.ps1` case block, but
   `ValidateRange` and `$iosRuns` are still edited by hand. `runner/run_test.py` avoids that for other phones.
-- **Wi-Fi** on the S10 Lite is icnss, with both PCIe controllers disabled. It is in progress in
-  `work/ios-r5q/wifi/WIFI-PLAN.md`; its first stage is the read-only `wifi_survey` in `redwood_wifi.c`
-  (SMEM at 0x86000000).
+- **Wi-Fi, sound, sensors and the rest** on the S10 Lite:
+  - Wi-Fi: icnss with both PCIe controllers disabled, WLFW, HTC/WMI, WPA2 in the kernel, `en0`;
+  - sound through the ADSP;
+  - sensors through the SLPI.
+
+  They work, but the drivers are r5q's C. The step-by-step record, with every test's result, is
+  `ports/r5q/wifi/WIFI-PLAN.md`. The sensors part is written up generically in `docs/SENSORS.md` and
+  `docs/IOS-SENSORS.md`. Still blocked:
+  - the microphone: the WCD9340 codec never enumerates on SLIMbus; WIFI-PLAN "Tests 237-240" lists what is ruled out;
+  - Metal (no GPU driver for iOS);
+  - Bluetooth, camera, cellular;
+  - FairPlay (App Store apps).
 - **Installation to UFS** (the owner's end state: iOS on userdata) is not started here, and is gated by rule R7.
 
 **Not verified here:** `runner/run_test.py` and the rendered operator were not run against a phone (another

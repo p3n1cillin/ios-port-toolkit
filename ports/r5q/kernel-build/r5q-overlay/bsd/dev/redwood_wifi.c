@@ -168,6 +168,11 @@
 #include <sys/redwood_input.h>
 #include <sys/redwood_qrtr.h>
 #include <sys/redwood_sta.h>
+#include <sys/redwood_net.h>
+#include <sys/proc.h>
+#include <mach/task_info.h>
+#include <net/kpi_interface.h>
+#include <netinet/in.h>
 #include <sys/stat.h>
 #include <sys/systm.h>
 #include <vm/vm_kern.h>
@@ -5602,6 +5607,13 @@ pdmap_start(void)
  * 0x03 transaction), 0x23 set ack (0x01 path, 0x02 transaction). Boot-arg wifi_servreg=0 leaves it out.
  */
 #define SERVICE_SERVREG_NOTIFIER        0x42
+/*
+ * (r5q, Test 172) The Wi-Fi domain went down (Test 168: after ~18 MB uploaded, "msm/modem/wlan_pd" DOWN then UP by
+ * itself) and with it every ring and message the bring-up made: r5q_modem_link() does the bring-up again when it is
+ * back (r5q_wifi_again()).
+ */
+static volatile bool r5q_pd_down, r5q_pd_back;
+static volatile bool wlfw10_server;     /* (defined with its kin below; cleared here the moment the domain goes down) */
 static struct redwood_qrtr_port *servreg_port;
 static uint32_t servreg_node, servreg_where;
 static uint16_t servreg_txn = 1;
@@ -5672,15 +5684,52 @@ servreg_receive(__unused void *context, uint32_t node, uint32_t port, const void
 		}
 		printf("wifi: servreg: +%llu ms: \"%s\" IS NOW %#x (%s), transaction %u: acknowledged\n", (now_us() - tftp_began) / 1000,
 		    path, state, servreg_state(state), transaction);
+		if (strcmp(path, "msm/modem/wlan_pd") == 0) {
+			if (state == 0x0fffffff || state == 0x2fffffff) {
+				r5q_pd_down = true;
+				wlfw10_server = false;  /* (Test 181: here, before its service comes back -- Test 180 lost that race) */
+			} else if (state == 0x1fffffff && r5q_pd_down) {
+				r5q_pd_back = true;
+			}
+		}
 		servreg_send(0x23, path, true, transaction, true);
 	} else if (m[0] == 2 && msg == 0x23) {
 		if ((v = qmi_tlv(m + 7, length - 7, 0x02, &n)) != NULL && n == 4) {
 			memcpy(result, v, 4);
 		}
 		printf("wifi: servreg: our acknowledgement taken (result %u, error %#x)\n", result[0], result[1]);
+	} else if (m[0] == 2 && msg == 0x21) {
+		if ((v = qmi_tlv(m + 7, length - 7, 0x02, &n)) != NULL && n == 4) {
+			memcpy(result, v, 4);
+		}
+		printf("wifi: servreg: the restart asked for: result %u, error %#x%s\n", result[0], result[1],
+		    result[0] == 0 ? " (taken)" : " (REFUSED)");
 	} else {
 		printf("wifi: servreg: message %#x of type %u (%zu bytes)\n", msg, m[0], length);
 	}
+}
+
+/* (Test 172) Linux's pdr_restart_pd: ask the registry to restart a domain (message 0x21, its path), for a test of the above */
+static void
+servreg_restart(const char *path)
+{
+	uint8_t out[96];
+	size_t at = 7;
+	uint16_t txn = servreg_txn++;
+
+	if (servreg_port == NULL) {
+		return;
+	}
+	out[0] = 0;
+	out[1] = (uint8_t)txn;
+	out[2] = (uint8_t)(txn >> 8);
+	out[3] = 0x21;
+	out[4] = 0;
+	at = qmi_put(out, at, 0x01, path, (uint16_t)strlen(path));
+	out[5] = (uint8_t)(at - 7);
+	out[6] = (uint8_t)((at - 7) >> 8);
+	qrtr_send(servreg_port, servreg_node, servreg_where, out, at);
+	printf("wifi: servreg: asked to restart \"%s\" (wifi_pd_restart)\n", path);
 }
 
 static void
@@ -6159,8 +6208,51 @@ cmd_db_addr(const volatile uint8_t *db, const char *id)
 }
 
 /* one batch of RPMh writes through an active TCS, each waited for; false if the TCS is busy or a command does not complete */
+static bool rsc_write_one(vm_offset_t tcs_base, const uint32_t *addr, const uint32_t *data, unsigned n);
+static volatile uint32_t rsc_busy;      /* (Test 191: the microphones' clock vote may come from another thread) */
+
 static bool
 rsc_write(vm_offset_t tcs_base, const uint32_t *addr, const uint32_t *data, unsigned n)
+{
+	bool ok;
+
+	while (!__sync_bool_compare_and_swap(&rsc_busy, 0, 1)) {
+		delay_for_interval(1, NSEC_PER_MSEC);
+	}
+	ok = rsc_write_one(tcs_base, addr, data, n);
+	__sync_lock_release(&rsc_busy);
+	return ok;
+}
+
+/*
+ * (r5q, Test 191) For others in the kernel (the microphones' codec clock, redwood_adsp.c): an RPMh resource of
+ * cmd-db, by its name, enabled (+4 = 1: a VRM regulator's or clock's enable) through the same TCS. True if RPMh says done.
+ */
+bool
+redwood_r5q_rpmh_enable(const char *id)
+{
+	static const volatile uint8_t *db;
+	static vm_offset_t tcs;
+	uint32_t addr, one = 1;
+
+	if (db == NULL) {
+		db = (const volatile uint8_t *)ml_io_map_unmappable(R5Q_CMD_DB_PHYS, R5Q_CMD_DB_SIZE, VM_WIMG_WCOMB);
+	}
+	if (tcs == 0) {
+		tcs = ml_io_map(R5Q_RSC_TCS_PHYS, R5Q_RSC_TCS_SIZE);
+	}
+	addr = db != NULL ? cmd_db_addr(db, id) : 0;
+	if (addr == 0 || addr > 0xfffff || tcs == 0) {
+		printf("rpmh: %s is not in cmd-db: not enabled\n", id);
+		return false;
+	}
+	addr += 4;
+	printf("rpmh: %s at %#x: enable\n", id, addr - 4);
+	return rsc_write(tcs, &addr, &one, 1);
+}
+
+static bool
+rsc_write_one(vm_offset_t tcs_base, const uint32_t *addr, const uint32_t *data, unsigned n)
 {
 	vm_offset_t t = tcs_base + RSC_TCS_STRIDE * R5Q_RSC_TCS_ID;
 	uint32_t ctrl, mask = (1u << n) - 1, done = 0;
@@ -6416,6 +6508,83 @@ wlfw10_assign(uint64_t addr, uint32_t size, bool secure)
 	return -1;
 }
 
+/*
+ * (Test 113) One region of the kernel's memory shared by TrustZone with the WLAN and its copy engines (HLOS keeps it):
+ * assign_mem HLOS -> HLOS + WLAN 0x18 + WLAN_CE 0x19, read-write; as rmtfs's memory is shared with the modem.
+ */
+static int32_t
+r5q_share_wlan(uint64_t addr, uint32_t size)
+{
+	uint8_t *page = kalloc_data(PAGE_SIZE, Z_WAITOK | Z_ZERO);
+	uint64_t *map, *ext, session = 0;
+	uint32_t *src;
+	struct r5q_vmperm2 {
+		uint32_t vmid, perm;
+		uint64_t ctx;
+		uint32_t ctx_size, unused;
+	} *dest;
+	static const uint32_t vmids[3] = { 3, 0x18, 0x19 };     /* HLOS, WLAN, WLAN_CE */
+	uint64_t function = SCM_64 | SCM_SIP | SCM_CALL(0x0c, 0x16);
+
+	if (page == NULL || ((vm_offset_t)page & PAGE_MASK) != 0) {
+		return -1;
+	}
+	map = (uint64_t *)page;
+	src = (uint32_t *)(page + 64);
+	dest = (struct r5q_vmperm2 *)(page + 128);
+	ext = (uint64_t *)(page + 256);
+	map[0] = addr;
+	map[1] = size;
+	src[0] = 3;
+	for (uint32_t i = 0; i < 3; i++) {
+		dest[i].vmid = vmids[i];
+		dest[i].perm = 6;
+	}
+	ext[0] = 4;
+	ext[1] = kvtophys((vm_offset_t)dest);
+	ext[2] = sizeof(*dest) * 3;
+	ext[3] = 0;
+	FlushPoC_DcacheRegion((vm_offset_t)page, PAGE_SIZE);
+	for (int i = 0; i < 1000; i++) {
+		register uint64_t x0 __asm__("x0") = i == 0 ? function : SCM_INTERRUPTED;
+		register uint64_t x1 __asm__("x1") = 0x1117;
+		register uint64_t x2 __asm__("x2") = kvtophys((vm_offset_t)map);
+		register uint64_t x3 __asm__("x3") = 16;
+		register uint64_t x4 __asm__("x4") = kvtophys((vm_offset_t)src);
+		register uint64_t x5 __asm__("x5") = kvtophys((vm_offset_t)ext);
+		register uint64_t x6 __asm__("x6") = session;
+		register uint64_t x7 __asm__("x7") = 0;
+
+		__asm__ volatile ("smc #0" : "+r" (x0), "+r" (x1), "+r" (x2), "+r" (x3), "+r" (x4), "+r" (x5), "+r" (x6),
+		    "+r" (x7) : : "x8", "x9", "x10", "x11", "x12", "x13", "x14", "x15", "x16", "x17", "memory");
+		session = x6;
+		if (x0 != SCM_INTERRUPTED) {
+			kfree_data(page, PAGE_SIZE);
+			return (int32_t)x0 != 0 ? (int32_t)x0 : (int32_t)x1;
+		}
+	}
+	kfree_data(page, PAGE_SIZE);
+	return -1;
+}
+
+/* every 16 KB page of a stretch of the kernel's memory, shared so; the number refused */
+static uint32_t
+r5q_share_pages(const void *va, size_t bytes)
+{
+	uint32_t refused = 0;
+
+	for (size_t at = 0; at < bytes; at += PAGE_SIZE) {
+		int32_t r = r5q_share_wlan(kvtophys((vm_offset_t)va + at), PAGE_SIZE);
+
+		if (r != 0) {
+			if (refused++ == 0) {
+				printf("wifi: ce: TrustZone refuses to share %#llx with the WLAN: %d\n", kvtophys((vm_offset_t)va + at), r);
+			}
+		}
+	}
+	return refused;
+}
+
 static void
 wlfw10_board(void)
 {
@@ -6520,6 +6689,2797 @@ r5q_wlfw_enable(void)
 	}
 }
 
+/*
+ * r5q (Test 111): the host's side of the copy engines and HTC, a stand-in for ath10k's snoc.c/ce.c/htc.c (WCN3990,
+ * 64-bit descriptors, read indices in host memory "RRI", source write indices through shadow registers). The WLAN
+ * block's registers (live DT membase 0x18800000) are touched only after mission mode. Rings and buffers are 16 KB pages
+ * of the kernel (physically contiguous within one), cleaned/invalidated by hand around the engines' DMA; the engines see
+ * physical addresses (the apps SMMU is the boot chain's: qcom,skip-init; SID 0x640 is stage-1 bypass in the DT).
+ * Polled, no interrupts. CE0 HTC control out, CE3 WMI out, CE2 HTC/WMI in, CE1 HTT in (pipes as snoc.c's maps).
+ * Boot-arg wifi_wlfw=3. Wanted: HTC READY, the services connected, and WMI's first events (service ready).
+ */
+#define R5Q_WLAN_PHYS           0x18800000UL
+#define R5Q_WLAN_CE_OFF         0x240000UL      /* the copy engines: CE n at + n * 0x1000, the wrapper at + 0xc000 */
+#define R5Q_WLAN_SHADOW_OFF     0x32000UL       /* the shadow registers */
+#define CE_REG(n, r)            (0x1000u * (n) + (r))
+#define CE_SR_BASE_LO           0x00
+#define CE_SR_BASE_HI           0x04
+#define CE_SR_SIZE              0x08
+#define CE_DR_BASE_LO           0x0c
+#define CE_DR_BASE_HI           0x10
+#define CE_DR_SIZE              0x14
+#define CE_CTRL1                0x18
+#define CE_MISC_IS              0x38
+#define CE_SR_WR                0x3c
+#define CE_DST_WR               0x40
+#define CE_CUR_SRRI             0x44
+#define CE_CUR_DRRI             0x48
+#define CE_SRC_WM               0x4c
+#define CE_DST_WM               0x50
+#define CE_RRI_LOW              0xc004u
+#define CE_RRI_HIGH             0xc008u
+#define CE_BUF                  2048u
+
+struct r5q_ce {
+	uint32_t id, n, sw, wr;
+	bool dest;
+	uint8_t *ring;                  /* descriptors: 16 bytes each (addr 8, nbytes 2, flags 2, hash 4) */
+	uint64_t ring_pa;
+	uint8_t *bufs;                  /* n buffers of CE_BUF, slot k at k * CE_BUF */
+	uint64_t bufs_pa[8];            /* the physical address of each 16 KB page of them */
+};
+static uint8_t *wlan_rri;
+static vm_offset_t smmu_regs;           /* (Test 113: the apps SMMU, for its fault registers) */
+static uint32_t smmu_cb = ~0u;          /* the context bank given to SID 0x640 */
+static vm_offset_t wlan_regs, wlan_shadow;   /* (Test 111b: two small windows; 4 MB of I/O map panicked) */
+static struct r5q_ce ce0, ce1, ce2, ce3, ce4;
+static uint8_t htc_seq;
+
+static uint8_t *
+r5q_dma_page(uint64_t *pa, size_t bytes)
+{
+	uint8_t *p = kalloc_data(bytes, Z_WAITOK | Z_ZERO);
+
+	if (p == NULL || ((vm_offset_t)p & PAGE_MASK) != 0) {
+		return NULL;
+	}
+	for (size_t at = PAGE_SIZE; at < bytes; at += PAGE_SIZE) {
+		if (kvtophys((vm_offset_t)p + at) != kvtophys((vm_offset_t)p) + at) {
+			printf("wifi: ce: %zu bytes not contiguous at +%zu\n", bytes, at);
+		}
+	}
+	*pa = kvtophys((vm_offset_t)p);
+	FlushPoC_DcacheRegion((vm_offset_t)p, bytes);
+	return p;
+}
+
+static uint64_t
+ce_buf_pa(struct r5q_ce *c, uint32_t slot)
+{
+	uint64_t off = (uint64_t)slot * CE_BUF;
+
+	return kvtophys((vm_offset_t)c->bufs + off);
+}
+
+static bool
+ce_setup(struct r5q_ce *c, uint32_t id, uint32_t n, bool dest)
+{
+	uint32_t mask = n - 1, v;
+	uint64_t pa;
+
+	bool again = c->ring != NULL && c->bufs != NULL && c->n == n;  /* (Test 172) after the domain restarted */
+
+	c->id = id;
+	c->n = n;
+	c->dest = dest;
+	if (again) {
+		bzero(c->ring, PAGE_SIZE);
+	} else if ((c->ring = r5q_dma_page(&c->ring_pa, PAGE_SIZE)) == NULL ||
+	    (c->bufs = kalloc_data((size_t)n * CE_BUF, Z_WAITOK | Z_ZERO)) == NULL) {
+		return false;
+	}
+	if (((vm_offset_t)c->bufs & (CE_BUF - 1)) != 0) {
+		printf("wifi: ce: CE%u's buffers are not %u-aligned: some would cross a page\n", id, CE_BUF);
+		return false;
+	}
+	FlushPoC_DcacheRegion((vm_offset_t)c->bufs, (size_t)n * CE_BUF);
+	pa = c->ring_pa;
+	if (dest) {
+		/*
+		 * (Test 123) A receive ring is written by both sides: the engine fills in each descriptor's length, we give the
+		 * slot back. Four 16-byte descriptors share a 64-byte cache line, and cleaning our copy of a line put stale
+		 * lengths back over ones the engine had just written: a slot was missed and the ring stalled (Test 122, under
+		 * real traffic: CE1 stopped, then beacon misses). As ath10k's coherent rings: through an uncached
+		 * (write-combining) mapping of the same page; the cached one is not touched again.
+		 */
+		vm_offset_t nc = again ? 0 : ml_io_map_wcomb(pa, PAGE_SIZE);   /* (again: c->ring is that mapping) */
+
+		if (nc != 0) {
+			c->ring = (uint8_t *)nc;
+		}
+	}
+	if (dest) {
+		c->sw = rd(wlan_regs + CE_REG(id, CE_CUR_DRRI)) & mask;
+		c->wr = rd(wlan_regs + CE_REG(id, CE_DST_WR)) & mask;
+		wr(wlan_regs + CE_REG(id, CE_DR_BASE_LO), (uint32_t)pa);
+		v = rd(wlan_regs + CE_REG(id, CE_DR_BASE_HI));
+		wr(wlan_regs + CE_REG(id, CE_DR_BASE_HI), (v & ~0x1fu) | ((uint32_t)(pa >> 32) & 0x1f));
+		wr(wlan_regs + CE_REG(id, CE_DR_SIZE), n);
+		v = rd(wlan_regs + CE_REG(id, CE_CTRL1));
+		wr(wlan_regs + CE_REG(id, CE_CTRL1), v & ~(1u << 18));                 /* no byte swap */
+		v = rd(wlan_regs + CE_REG(id, CE_DST_WM));
+		wr(wlan_regs + CE_REG(id, CE_DST_WM), (v & ~0xffffffffu) | (0u << 16) | (n & 0xffff));
+	} else {
+		c->sw = rd(wlan_regs + CE_REG(id, CE_CUR_SRRI)) & mask;
+		c->wr = rd(wlan_regs + CE_REG(id, CE_SR_WR)) & mask;
+		wr(wlan_regs + CE_REG(id, CE_SR_BASE_LO), (uint32_t)pa);
+		wr(wlan_regs + CE_REG(id, CE_SR_BASE_HI), (uint32_t)(pa >> 32) & 0x1f);
+		wr(wlan_regs + CE_REG(id, CE_SR_SIZE), n);
+		v = rd(wlan_regs + CE_REG(id, CE_CTRL1));
+		wr(wlan_regs + CE_REG(id, CE_CTRL1), (v & ~0xffffu & ~(1u << 17)) | CE_BUF);   /* dmax, no byte swap */
+		v = rd(wlan_regs + CE_REG(id, CE_SRC_WM));
+		wr(wlan_regs + CE_REG(id, CE_SRC_WM), (0u << 16) | (n & 0xffff));
+	}
+	printf("wifi: ce: CE%u %s ring of %u at %#llx (indices sw %u wr %u), ctrl1 %#x\n", id, dest ? "receive" : "send", n, pa,
+	    c->sw, c->wr, rd(wlan_regs + CE_REG(id, CE_CTRL1)));
+	return true;
+}
+
+/* every slot but one gets its buffer, as ath10k_snoc_rx_post leaves one free */
+static void
+ce_post_all(struct r5q_ce *c)
+{
+	uint32_t mask = c->n - 1;
+
+	for (uint32_t k = 0; k + 1 < c->n; k++) {
+		uint8_t *d = c->ring + 16 * c->wr;
+		uint64_t pa = ce_buf_pa(c, c->wr) & 0x7ffffffffULL;
+
+		memcpy(d, &pa, 8);
+		bzero(d + 8, 8);
+		c->wr = (c->wr + 1) & mask;
+	}
+	FlushPoC_DcacheRegion((vm_offset_t)c->ring, 16 * c->n);
+	wr(wlan_regs + CE_REG(c->id, CE_DST_WR), c->wr);
+}
+
+/* the next received buffer, or NULL; *len its length. The slot is given back to the engine at once. */
+static const uint8_t *
+ce_recv(struct r5q_ce *c, uint32_t *len)
+{
+	uint8_t *d = c->ring + 16 * c->sw;
+	uint16_t nbytes;
+	uint32_t slot = c->sw, mask = c->n - 1;
+	uint64_t pa;
+
+	FlushPoC_DcacheRegion((vm_offset_t)d, 16);
+	memcpy(&nbytes, d + 8, 2);
+	if (nbytes == 0) {
+		return NULL;
+	}
+	FlushPoC_DcacheRegion((vm_offset_t)c->bufs + (size_t)slot * CE_BUF, CE_BUF);
+	*len = nbytes;
+	bzero(d + 8, 2);
+	c->sw = (c->sw + 1) & mask;
+	/* the same buffer goes back at the write index (which trails the read index by one) */
+	d = c->ring + 16 * c->wr;
+	pa = ce_buf_pa(c, c->wr) & 0x7ffffffffULL;
+	memcpy(d, &pa, 8);
+	bzero(d + 8, 8);
+	FlushPoC_DcacheRegion((vm_offset_t)c->ring, 16 * c->n);
+	c->wr = (c->wr + 1) & mask;
+	wr(wlan_regs + CE_REG(c->id, CE_DST_WR), c->wr);
+	return c->bufs + (size_t)slot * CE_BUF;
+}
+
+/* one HTC frame out on a send ring: the header (endpoint, length, sequence) and the payload */
+static void
+ce_send_htc(struct r5q_ce *c, uint32_t shadow, uint8_t eid, const void *payload, uint16_t len)
+{
+	uint32_t slot = c->wr, mask = c->n - 1;
+	uint8_t *buf = c->bufs + (size_t)slot * CE_BUF, *d = c->ring + 16 * slot;
+	uint64_t pa = ce_buf_pa(c, slot);
+	uint32_t lo = (uint32_t)pa, hi = (uint32_t)(pa >> 32) & 0x1f;
+	uint16_t total = (uint16_t)(8 + len), meta = (uint16_t)((eid << 4) & 0xfff0);
+
+	bzero(buf, 8);
+	buf[0] = eid;
+	buf[2] = (uint8_t)len;
+	buf[3] = (uint8_t)(len >> 8);
+	buf[5] = htc_seq++;
+	memcpy(buf + 8, payload, len);
+	FlushPoC_DcacheRegion((vm_offset_t)buf, total);
+	memcpy(d, &lo, 4);
+	memcpy(d + 4, &hi, 4);
+	memcpy(d + 8, &total, 2);
+	memcpy(d + 10, &meta, 2);
+	bzero(d + 12, 4);
+	FlushPoC_DcacheRegion((vm_offset_t)d, 16);
+	c->wr = (c->wr + 1) & mask;
+	wr(wlan_shadow + shadow, c->wr);
+}
+
+/* a line for the log, and time for the PC's live follow to fetch it before a step that might stop the machine */
+static void
+ce_mark(const char *what)
+{
+	printf("wifi: ce: %s\n", what);
+	{
+		static int slow = -1;
+
+		if (slow < 0) {
+			slow = 0;
+			PE_parse_boot_argn("wifi_slow", &slow, sizeof(slow));
+		}
+		if (slow) {                     /* (Test 125: only on request; the bring-up is known by now) */
+			delay_for_interval(4000, NSEC_PER_MSEC);
+		}
+	}
+}
+
+/*
+ * (Test 112) The apps SMMU (0x15000000, the boot chain's: qcom,skip-init) faults streams it has no match for (sCR0
+ * USFCFG), and has none for the WLAN's SID 0x640: its copy engines' first DMA reset the phone. As Linux's
+ * arm-smmu-qcom does where the hypervisor refuses S2CR "bypass" (SDM845 and kin): a context bank with translation off
+ * (SCTLR.M 0, CBAR "stage 1, stage 2 bypass") and a stream match for 0x640 (mask 1) whose S2CR translates through it --
+ * the WLAN then sees physical addresses, as Android's icnss has it (qcom,smmu-s1-bypass). wifi_smmu=1 looks only;
+ * wifi_smmu=2 also writes, choosing a context bank that no valid stream match's S2CR names, and a free SMR.
+ */
+static bool
+r5q_smmu_look(bool configure)
+{
+	vm_offset_t s = smmu_regs = ml_io_map(0x15000000UL, 0x100000);
+	uint32_t scr0 = rd(s), idr0 = rd(s + 0x20), idr1 = rd(s + 0x24), n = idr0 & 0xff, found = 0;
+	uint32_t numcb = idr1 & 0xff, page = (idr1 >> 31) ? 0x10000u : 0x1000u, numpage = 1u << (((idr1 >> 28) & 7) + 1);
+	uint32_t free_smr = ~0u, cb = ~0u;
+	uint8_t used[256];
+
+	bzero(used, sizeof(used));
+	printf("wifi: smmu: sCR0 %#x (client bypass %u, unmatched streams %s), %u stream matches, %u context banks, pages of %#x, "
+	    "%u global pages\n", scr0, scr0 & 1, (scr0 >> 10) & 1 ? "FAULT" : "bypass", n, numcb, page, numpage);
+	for (uint32_t i = 0; i < n && i < 128; i++) {
+		uint32_t smr = rd(s + 0x800 + 4 * i), id = smr & 0x7fff, m = (smr >> 16) & 0x7fff, s2cr = rd(s + 0xc00 + 4 * i);
+
+		if (!(smr & 0x80000000u)) {
+			if (free_smr == ~0u) {
+				free_smr = i;
+			}
+			continue;
+		}
+		if (((s2cr >> 16) & 3) == 0) {
+			used[s2cr & 0xff] = 1;
+		}
+		if ((0x640u & ~m) == (id & ~m)) {
+			printf("wifi: smmu: SMR%u %#x matches SID 0x640: S2CR %#x\n", i, smr, s2cr);
+			found++;
+		}
+	}
+	if ((uint64_t)numpage * page + (uint64_t)numcb * page > 0x100000) {
+		printf("wifi: smmu: the context banks lie past the 1 MB mapped: not looked at\n");
+		return false;
+	}
+	for (uint32_t k = numcb; k-- > 0;) {
+		vm_offset_t c = s + (vm_offset_t)numpage * page + (vm_offset_t)k * page;
+
+		(void)c;
+		if (!used[k]) {         /* no stream names it (the unused banks hold reset junk in SCTLR): the last such, as Linux */
+			cb = k;
+			break;
+		}
+	}
+	if (found == 0) {
+		printf("wifi: smmu: no stream match for SID 0x640; a free SMR: %u, an unused context bank: %u (CBAR %#x)\n",
+		    free_smr, cb, cb != ~0u ? rd(s + page + 4 * cb) : 0);
+	}
+	for (uint32_t k = 0; k < numcb; k += 8) {
+		char line[200];
+		int at = 0;
+
+		for (uint32_t j = k; j < k + 8 && j < numcb; j++) {
+			vm_offset_t c = s + (vm_offset_t)numpage * page + (vm_offset_t)j * page;
+
+			at += snprintf(line + at, sizeof(line) - (size_t)at, " %u:%x/%x%s", j, rd(c), rd(s + page + 4 * j),
+			    used[j] ? "*" : "");
+		}
+		printf("wifi: smmu: CB sctlr/cbar (* named by a stream):%s\n", line);
+	}
+	if (found != 0) {
+		return true;
+	}
+	if (!configure || free_smr == ~0u) {
+		return false;
+	}
+	/*
+	 * (Test 114) A bank of our own faulted at stage 2 (CB55 FSR 0x2 at a receive buffer): the hypervisor set nothing up
+	 * behind it. The boot chain's banks with translation off (SCTLR.M 0, CBAR "S1, S2 bypass"), which other streams'
+	 * DMA goes through every moment, are shared instead: SID 0x640's S2CR is made a copy of one that names such a bank.
+	 */
+	for (uint32_t i = 0; i < n && i < 128; i++) {
+		uint32_t smr = rd(s + 0x800 + 4 * i), s2cr = rd(s + 0xc00 + 4 * i), k = s2cr & 0xff;
+		vm_offset_t c = s + (vm_offset_t)numpage * page + (vm_offset_t)k * page;
+
+		if ((smr & 0x80000000u) && ((s2cr >> 16) & 3) == 0 && k < numcb && !(rd(c) & 1) && rd(s + page + 4 * k) == 0x1f000u) {
+			smmu_cb = k;
+			ce_mark("about to give SID 0x640 a stream match through a boot bank with translation off");
+			wr(s + 0xc00 + 4 * free_smr, s2cr);                             /* S2CR: as SMR i's, through bank k */
+			wr(s + 0x800 + 4 * free_smr, 0x80000000u | (1u << 16) | 0x640u);
+			__asm__ volatile ("dsb sy" ::: "memory");
+			printf("wifi: smmu: SMR%u now %#x, S2CR %#x (a copy of SMR%u %#x's); bank %u SCTLR %#x CBAR %#x\n", free_smr,
+			    rd(s + 0x800 + 4 * free_smr), rd(s + 0xc00 + 4 * free_smr), i, smr, k, rd(c), rd(s + page + 4 * k));
+			return rd(s + 0x800 + 4 * free_smr) == (0x80000000u | (1u << 16) | 0x640u);
+		}
+	}
+	printf("wifi: smmu: no boot bank with translation off to share\n");
+	if (cb == ~0u) {
+		return false;
+	}
+	smmu_cb = cb;
+	ce_mark("about to give SID 0x640 a stream match through a context bank with translation off");
+	wr(s + (vm_offset_t)numpage * page + (vm_offset_t)cb * page, 0);         /* CB SCTLR: M 0 */
+	wr(s + page + 4 * cb, 0x1f000u);        /* GR1 CBAR: S1 translation, S2 bypass -- as the boot chain's CB0-3 have it */
+	wr(s + 0xc00 + 4 * free_smr, cb);                                       /* S2CR: translate, through cb */
+	wr(s + 0x800 + 4 * free_smr, 0x80000000u | (1u << 16) | 0x640u);       /* SMR: valid, mask 1, id 0x640 */
+	__asm__ volatile ("dsb sy" ::: "memory");
+	printf("wifi: smmu: SMR%u now %#x, S2CR %#x; CB%u CBAR %#x SCTLR %#x\n", free_smr, rd(s + 0x800 + 4 * free_smr),
+	    rd(s + 0xc00 + 4 * free_smr), cb, rd(s + page + 4 * cb), rd(s + (vm_offset_t)numpage * page + (vm_offset_t)cb * page));
+	return rd(s + 0x800 + 4 * free_smr) == (0x80000000u | (1u << 16) | 0x640u);
+}
+
+static void
+htc_show(const char *what, const uint8_t *p, uint32_t len)
+{
+	char line[3 * 40 + 1];
+	size_t k = 0;
+
+	for (uint32_t i = 0; i < len && i < 40; i++) {
+		k += (size_t)snprintf(line + k, sizeof(line) - k, "%02x ", p[i]);
+	}
+	line[k] = 0;
+	printf("wifi: htc: %s (%u bytes): %s\n", what, len, line);
+}
+
+/*
+ * (Test 115) WMI, the TLV kind (ath10k wmi-tlv.c): a command is a 4-byte header (its id) and TLVs (le16 length, le16
+ * tag, the value), sent as an HTC frame on WMI's endpoint through CE3 (shadow register 0x3200c). On SERVICE_READY:
+ * WMI_INIT (0x1) with the resource configuration ath10k_wmi_tlv_op_gen_init gives a WCN3990 (TARGET_TLV / _HL_TLV
+ * values, native-wifi decap) and no host memory chunks; READY (0x2) then carries the MAC address.
+ */
+static bool wmi_init_sent;
+
+/*
+ * (Test 116) After READY, a scan as ath10k's hw_scan makes one: SCAN_CHAN_LIST (0x3003), a station vdev (VDEV_CREATE
+ * 0x5001, vdev 0, type STA 2, a locally administered address of our own -- READY's is all zeros, the host gives one),
+ * then a passive START_SCAN (0x3001) over every channel. WMI has HTC transmit credits (READY's count, given to it at
+ * connect): one per command, returned in received frames' trailers (flags 0x2: records {id 1, len, {eid, credits}..}).
+ * Scan events (0x3001) and the beacons / probe responses the firmware passes up as WMI management rx (0x7001) are logged,
+ * each network once.
+ */
+static uint8_t wmi_step;                 /* 1 HTT version, 2 HTT rx ring, 3 channel list, 4 vdev, 5 scan, 6 sent */
+static uint8_t htt_ep = 0xff;
+static bool htt_ver_ok;
+static uint8_t join_step;        /* 10 vdev start, 11 wait, 12 peer, 13 wait, 14 auth, 15 wait, 16 assoc, 17 wait, 18 peer assoc, 19 up, 20 joined,
+                                  * 21 PTK, 22 GTK, 23 authorize, 24 connected, 30 failed */
+static bool join_ev;             /* the event the step waits for came */
+static void r5q_join_next(uint8_t eid);
+static void r5q_eapol_rx(const uint8_t *e, uint32_t len);
+static uint8_t *dtx_page;        /* (Test 119) the fragment descriptor bank (32 x 72 bytes) */
+static uint64_t dtx_pa;
+static uint32_t dtx_slot, rx_data;
+/* (Test 120) 32 frames in flight at most, each slot free again at its TX_COMPL (or after 2 s) */
+#define R5Q_TXN 128u                     /* (Test 125: 32 dropped ~600 frames a minute in bursts) */
+#define TX_BUSY(k)      ((dtx_busy[(k) / 32] >> ((k) % 32)) & 1u)
+#define TX_SET(k)       (dtx_busy[(k) / 32] |= 1u << ((k) % 32))
+#define TX_CLEAR(k)     (dtx_busy[(k) / 32] &= ~(1u << ((k) % 32)))
+static uint8_t *dtx_frames;
+static uint64_t dtx_fpa[R5Q_TXN], dtx_sent_us[R5Q_TXN];
+static uint32_t dtx_busy[R5Q_TXN / 32], tx_drops, tx_compl, tx_compl_bad, tx_sent;
+static bool r5q_link_ready, r5q_keyed;     /* the net thread services the rings; the pairwise key is in */
+static uint8_t svc_wmi_eid = 0xff, svc_htt_eid = 0xff, svc_credits;
+static bool svc_ready;
+static uint64_t svc_t0, wpa_rekey_us;
+static uint32_t rx_to_net;
+static void r5q_rx_to_net(const uint8_t *f, uint32_t ml);
+static void r5q_en0_address(char *out, size_t size);
+static void r5q_flows_say(void);
+/* (Test 122) the station side for iOS's Wi-Fi (sys/redwood_sta.h) */
+static bool scan_running, r5q_sta_attached;
+static int join_error;
+#define R5Q_HEARD 64u
+static struct redwood_sta_bss *heard_tab;
+static void r5q_heard_add(const uint8_t *f, uint32_t flen, int rssi, uint32_t rx_chan);
+static void r5q_install_key(uint8_t eid, uint32_t idx, uint32_t flags, const uint8_t *key, uint32_t klen);
+
+/*
+ * (Test 117) Test 116's scan visited every channel and received nothing: on this "LL" design the MAC DMAs every frame
+ * it receives (beacons too) into host buffers named by HTT's rx ring, and the firmware only then turns management
+ * frames into WMI events -- no ring, no frames. ath10k_htt_setup after READY: VERSION_REQ (H2T 0) on HTT's endpoint
+ * (pipe CE4, shadow 0x10), VERSION_CONF (T2H 0) back on CE1, then RX_RING_CFG (H2T 2) with one 64-bit ring: the alloc
+ * index (in host memory, which the firmware reads), the ring of buffer addresses, 2048-byte buffers, every content flag
+ * and the WCN3990 descriptor offsets (struct htt_rx_desc_v2, 360 bytes, in words: header 74, payload 90, ppdu start 27,
+ * ppdu end 37, mpdu start 4, mpdu end 26, msdu start 7, msdu end 12, attention 1, frag info 2). Buffers the firmware
+ * hands back (RX_IN_ORD_PADDR_IND, T2H 0x12) go straight back on the ring. (FRAG_DESC_BANK_CFG is for transmit: later.)
+ */
+#define R5Q_RXR 256u
+static uint64_t *rxr_ring;
+static uint32_t *rxr_idx;
+static uint8_t *rxr_bufs;
+static uint64_t rxr_pa[R5Q_RXR], rxr_ring_pa, rxr_idx_pa;
+static uint32_t rxr_alloc, htt_inord, htt_msdus, htt_other, htt_lost;
+
+static bool
+r5q_rx_ring_alloc(void)
+{
+	static uint64_t pa;
+	static uint8_t *page;
+
+	if (page == NULL || rxr_bufs == NULL) {         /* (Test 172: again after a restart, the same memory) */
+		page = r5q_dma_page(&pa, PAGE_SIZE);
+		if (page == NULL || (rxr_bufs = kalloc_data((size_t)R5Q_RXR * 2048, Z_WAITOK | Z_ZERO)) == NULL ||
+		    ((vm_offset_t)rxr_bufs & 2047) != 0) {
+			printf("wifi: htt: no memory for the rx ring\n");
+			return false;
+		}
+	}
+	bzero(page, PAGE_SIZE);
+	if (heard_tab == NULL) {
+		heard_tab = kalloc_data(sizeof(struct redwood_sta_bss) * R5Q_HEARD, Z_WAITOK | Z_ZERO);
+	}
+	rxr_ring = (uint64_t *)(void *)page;
+	rxr_idx = (uint32_t *)(void *)(page + R5Q_RXR * 8);
+	rxr_ring_pa = pa;
+	rxr_idx_pa = pa + R5Q_RXR * 8;
+	for (uint32_t i = 0; i < R5Q_RXR; i++) {
+		rxr_pa[i] = kvtophys((vm_offset_t)rxr_bufs + (vm_offset_t)i * 2048);
+	}
+	FlushPoC_DcacheRegion((vm_offset_t)rxr_bufs, (size_t)R5Q_RXR * 2048);
+	for (rxr_alloc = 0; rxr_alloc < R5Q_RXR - 1; rxr_alloc++) {    /* fill level: all but one */
+		rxr_ring[rxr_alloc] = rxr_pa[rxr_alloc];
+	}
+	*rxr_idx = rxr_alloc;
+	FlushPoC_DcacheRegion((vm_offset_t)page, R5Q_RXR * 8 + 64);
+	return true;
+}
+
+/* a buffer the firmware is done with goes back on the ring, its attention word cleared */
+static void
+r5q_rx_recycle(uint64_t pa)
+{
+	uint32_t i;
+
+	for (i = 0; i < R5Q_RXR && rxr_pa[i] != pa; i++) {
+	}
+	if (i == R5Q_RXR) {
+		htt_lost++;
+		return;
+	}
+	bzero(rxr_bufs + (size_t)i * 2048, 64);
+	FlushPoC_DcacheRegion((vm_offset_t)rxr_bufs + (vm_offset_t)i * 2048, 64);
+	rxr_ring[rxr_alloc] = pa;
+	FlushPoC_DcacheRegion((vm_offset_t)&rxr_ring[rxr_alloc], 8);
+	rxr_alloc = (rxr_alloc + 1) & (R5Q_RXR - 1);
+	*rxr_idx = rxr_alloc;
+	FlushPoC_DcacheRegion((vm_offset_t)rxr_idx, 4);
+}
+
+static void
+r5q_htt_msg(const uint8_t *p, uint16_t pl)
+{
+	const uint8_t *m = p + 8;
+	uint8_t type = m[0];
+
+	if (type == 0x0) {
+		htt_ver_ok = true;
+		printf("wifi: htt: VERSION_CONF: %u.%u\n", m[2], m[1]);
+	} else if (type == 0x12 && pl >= 8) {
+		uint16_t n = (uint16_t)(m[6] | m[7] << 8);
+
+		htt_inord++;
+		if (htt_inord <= 3) {
+			printf("wifi: htt: RX_IN_ORD_PADDR_IND: %u buffers, peer %u, vdev %u\n", n, m[2] | m[3] << 8, m[4]);
+		}
+		for (uint32_t k = 0; k < n && 8u + 12u * (k + 1) <= pl; k++) {
+			uint64_t pa;
+			uint16_t ml;
+			uint32_t i;
+
+			memcpy(&pa, m + 8 + 12 * k, 8);
+			memcpy(&ml, m + 8 + 12 * k + 8, 2);
+			htt_msdus++;
+			for (i = 0; i < R5Q_RXR && rxr_pa[i] != pa; i++) {
+			}
+			if (i < R5Q_RXR && ml <= 2048 - 360) {
+				/* (Test 119) the frame: after the 360-byte WCN3990 rx descriptor, native-wifi decapsulated */
+				const uint8_t *b = rxr_bufs + (size_t)i * 2048, *f = b + 360;
+				static const uint8_t snap[8] = { 0xaa, 0xaa, 0x03, 0, 0, 0, 0x88, 0x8e };
+				bool eapol = false;
+
+				FlushPoC_DcacheRegion((vm_offset_t)b, 2048);
+				for (uint32_t at = 0; at + 8 <= ml && at < 64; at++) {
+					if (memcmp(f + at, snap, 8) == 0) {
+						r5q_eapol_rx(f + at + 8, ml - at - 8);
+						eapol = true;
+						break;
+					}
+				}
+				if (!eapol && join_step >= 24) {
+					r5q_rx_to_net(f, ml);
+				} else if (!eapol && ++rx_data <= 6) {
+					htc_show("rx frame (start of payload)", f, ml < 40 ? ml : 40);
+				}
+			}
+			r5q_rx_recycle(pa);
+		}
+	} else {
+		htt_other++;
+		if (type == 0x3 && join_step == 13) {   /* PEER_MAP: the firmware made the peer */
+			join_ev = true;
+		}
+		if (type == 0x7 && pl >= 6) {           /* TX_COMPL_IND: status (0 ok, 1 discard, 2 no ack), count, ids */
+			for (uint32_t k = 0; k < m[2] && 4u + 2u * (k + 1) <= pl; k++) {
+				uint16_t id = (uint16_t)(m[4 + 2 * k] | m[5 + 2 * k] << 8);
+
+				if (id < R5Q_TXN) {
+					TX_CLEAR(id);
+				}
+			}
+			tx_compl += m[2];
+			if (tx_compl <= 4 || ((m[1] & 7) != 0 && ++tx_compl_bad <= 10)) {
+				printf("wifi: htt: TX_COMPL: status %u, %u frame(s), id %u\n", m[1] & 7, m[2], m[4] | m[5] << 8);
+			}
+			return;
+		}
+		if (htt_other <= 40) {
+			htc_show(type == 0x3 ? "htt PEER_MAP" : type == 0x1 ? "htt RX_IND" : "htt message", m, pl);
+		}
+	}
+}
+
+static void
+r5q_htt_send(const void *msg, uint16_t len)
+{
+	if (htt_ep != 0xff) {
+		ce_send_htc(&ce4, 0x10, htt_ep, msg, len);
+	}
+}
+static int wmi_credits = -1;
+static uint64_t wmi_last_send_us, wmi_hold_us;
+static uint32_t scan_frames, scan_nets;
+static uint8_t scan_bss[64][6];
+static const uint8_t r5q_mac[6] = { 0x02, 0x52, 0x35, 0x51, 0x00, 0x01 };     /* locally administered: "R5Q" */
+
+static void
+r5q_wmi_send(uint8_t eid, uint32_t cmd_id, const void *tlvs, uint16_t len)
+{
+	static uint8_t buf[1600];
+
+	if (len + 4 > sizeof(buf)) {
+		printf("wifi: wmi: command %#x too long (%u bytes)\n", cmd_id, len);
+		return;
+	}
+	memcpy(buf, &cmd_id, 4);
+	memcpy(buf + 4, tlvs, len);
+	ce_send_htc(&ce3, 0xc, eid, buf, (uint16_t)(len + 4));
+	if (wmi_credits > 0) {
+		wmi_credits--;
+	}
+	wmi_last_send_us = now_us();
+}
+
+static uint32_t
+tlv_put(uint8_t *at, uint16_t tag, const void *v, uint16_t len)
+{
+	uint16_t h[2] = { len, tag };
+
+	memcpy(at, h, 4);
+	if (v != NULL && len != 0) {
+		memcpy(at + 4, v, len);
+	}
+	return 4u + len;
+}
+
+static const uint16_t r5q_scan_mhz[] = {
+	2412, 2417, 2422, 2427, 2432, 2437, 2442, 2447, 2452, 2457, 2462, 2467, 2472,
+	5180, 5200, 5220, 5240, 5260, 5280, 5300, 5320,
+	5500, 5520, 5540, 5560, 5580, 5600, 5620, 5640, 5660, 5680, 5700,
+	5745, 5765, 5785, 5805, 5825,
+};
+#define R5Q_SCAN_N (sizeof(r5q_scan_mhz) / sizeof(r5q_scan_mhz[0]))
+
+/* the next command of the scan, when WMI has a credit (or none came back in 700 ms: the engine then just holds it) */
+static void
+r5q_wmi_next(uint8_t eid)
+{
+	static uint8_t m[1200];
+	uint32_t n = 0;
+
+	if (wmi_step == 0 || (wmi_step >= 6 && (join_step < 10 || join_step == 20 || join_step >= 24))) {
+		return;
+	}
+	if (wmi_step >= 6) {
+		bool sends = join_step == 10 || join_step == 12 || join_step == 14 || join_step == 16 || join_step == 18 ||
+		    (join_step >= 19 && join_step <= 23);
+
+		if (sends && wmi_credits == 0 && now_us() - wmi_last_send_us < 700000) {
+			return;
+		}
+		if (sends && wmi_credits == 0) {
+			printf("wifi: wmi: no credit back after 700 ms: sending anyway\n");
+		}
+		r5q_join_next(eid);
+		return;
+	}
+	if (wmi_step == 1) {
+		uint8_t req[4] = { 0, 0, 0, 0 };                                 /* VERSION_REQ */
+
+		if (htt_ep == 0xff || !r5q_rx_ring_alloc()) {
+			wmi_step = 3;
+			return;
+		}
+		r5q_htt_send(req, sizeof(req));
+		wmi_last_send_us = now_us();
+		printf("wifi: htt: VERSION_REQ sent (endpoint %u, CE4)\n", htt_ep);
+		wmi_step = 2;
+		return;
+	}
+	if (wmi_step == 2) {
+		uint8_t c[48];
+		uint16_t w16[14] = {
+			R5Q_RXR, 2048, 0xffff, 0,        /* ring entries, buffer bytes, every content flag, fw index (set below) */
+			74, 90, 27, 37, 4, 26, 7, 12, 1, 2,
+		};
+
+		if (!htt_ver_ok && now_us() - wmi_last_send_us < 2000000) {
+			return;
+		}
+		if (!htt_ver_ok) {
+			printf("wifi: htt: no VERSION_CONF in 2 s: configuring the rx ring anyway\n");
+		}
+		/*
+		 * (Test 119) FRAG_DESC_BANK_CFG (H2T 6) first, as ath10k_htt_setup: WCN3990 transmits from "continuous" fragment
+		 * descriptors (struct htt_msdu_ext_desc_64, 72 bytes each) in a bank the host gives: one bank of 4 here, in the
+		 * same DMA page as the frames sent (r5q_htt_tx). info 0 (no peer flow control); q_state record size 1.
+		 */
+		if (dtx_frames == NULL && (dtx_frames = kalloc_data(R5Q_TXN * 2048, Z_WAITOK | Z_ZERO)) != NULL) {
+			for (uint32_t k = 0; k < R5Q_TXN; k++) {
+				dtx_fpa[k] = kvtophys((vm_offset_t)dtx_frames + 2048 * k);
+			}
+		}
+		if (dtx_page == NULL && dtx_frames != NULL && ((vm_offset_t)dtx_frames & 2047) == 0 &&
+		    (dtx_page = r5q_dma_page(&dtx_pa, (R5Q_TXN * 72 + PAGE_SIZE - 1) & ~(size_t)PAGE_MASK)) != NULL) {
+			uint8_t b[64];
+
+			bzero(b, sizeof(b));
+			b[0] = 6;
+			b[2] = 1;                       /* banks */
+			b[3] = 72;                      /* descriptor size */
+			memcpy(b + 4, &dtx_pa, 8);      /* bank 0 base */
+			b[38] = (uint8_t)(R5Q_TXN - 1); /* bank 0 ids 0..127 */
+			b[39] = (uint8_t)((R5Q_TXN - 1) >> 8);
+			b[60] = 1;                      /* q_state record size */
+			r5q_htt_send(b, sizeof(b));
+			printf("wifi: htt: FRAG_DESC_BANK_CFG sent: %u descriptors of 72 bytes at %#llx\n", R5Q_TXN, dtx_pa);
+		}
+		w16[3] = (uint16_t)rxr_alloc;
+		bzero(c, sizeof(c));
+		c[0] = 2;                       /* RX_RING_CFG */
+		c[1] = 1;                       /* one ring */
+		memcpy(c + 4, &rxr_idx_pa, 8);
+		memcpy(c + 12, &rxr_ring_pa, 8);
+		memcpy(c + 20, w16, sizeof(w16));
+		r5q_htt_send(c, sizeof(c));
+		wmi_last_send_us = now_us();
+		printf("wifi: htt: RX_RING_CFG sent: %u buffers of 2048 at ring %#llx, index %#llx (%u)\n", R5Q_RXR - 1,
+		    rxr_ring_pa, rxr_idx_pa, rxr_alloc);
+		wmi_step = 3;
+		return;
+	}
+	if (wmi_credits == 0 && now_us() - wmi_last_send_us < 700000) {
+		return;
+	}
+	if (wmi_credits == 0) {
+		printf("wifi: wmi: no credit back after 700 ms: sending anyway\n");
+	}
+	if (wmi_step == 3) {
+		uint32_t num = R5Q_SCAN_N, at;
+
+		n += tlv_put(m + n, 0x4f, &num, 4);                              /* SCAN_CHAN_LIST_CMD */
+		at = n;
+		n += 4;                                                          /* ARRAY_STRUCT, length below */
+		for (uint32_t i = 0; i < R5Q_SCAN_N; i++) {
+			uint32_t c[6], mhz = r5q_scan_mhz[i];
+
+			c[0] = mhz;
+			c[1] = mhz;                                              /* 20 MHz: centre = primary */
+			c[2] = 0;
+			c[3] = (mhz < 3000 ? 5u : 4u) | (1u << 7) | (1u << 11);   /* 11ng/11na HT20, PASSIVE, ALLOW_HT */
+			c[4] = 0 | (40u << 8) | (40u << 16);                     /* min 0, max 20 dBm, reg 20 dBm (0.5 dBm units) */
+			c[5] = 0 | (40u << 8);                                   /* antenna gain 0, max tx 20 dBm */
+			n += tlv_put(m + n, 0x50, c, sizeof(c));                 /* CHANNEL */
+		}
+		tlv_put(m + at, 0x12, NULL, (uint16_t)(n - at - 4));
+		r5q_wmi_send(eid, 0x3003, m, (uint16_t)n);
+		printf("wifi: wmi: SCAN_CHAN_LIST sent: %u channels (2.4 GHz 1-13, 5 GHz 36-64/100-140/149-165), all passive\n",
+		    (unsigned)R5Q_SCAN_N);
+	} else if (wmi_step == 4) {
+		uint32_t v[5] = { 0, 2, 0, 0, 0 };                               /* vdev 0, STA, no subtype */
+
+		memcpy(&v[3], r5q_mac, 6);
+		n += tlv_put(m + n, 0x56, v, sizeof(v));
+		r5q_wmi_send(eid, 0x5001, m, (uint16_t)n);
+		printf("wifi: wmi: VDEV_CREATE sent: vdev 0, station, %02x:%02x:%02x:%02x:%02x:%02x\n", r5q_mac[0], r5q_mac[1],
+		    r5q_mac[2], r5q_mac[3], r5q_mac[4], r5q_mac[5]);
+	} else {
+		uint32_t s[25], ch[R5Q_SCAN_N], bssid[2] = { 0xffffffffu, 0xffffu };
+
+		bzero(s, sizeof(s));
+		s[0] = 0xA000 | 1;              /* scan_id (WMI_HOST_SCAN_REQ_ID_PREFIX) */
+		s[1] = 0xA000 | 1;              /* scan_req_id */
+		s[2] = 0;                       /* vdev */
+		s[3] = 1;                       /* priority LOW */
+		s[4] = 0x1ff;                   /* every scan event */
+		s[5] = 50;                      /* dwell active */
+		s[6] = 150;                     /* dwell passive */
+		s[7] = 50;                      /* min rest */
+		s[8] = 500;                     /* max rest */
+		s[9] = 0;                       /* repeat probe */
+		s[10] = 0;                      /* probe spacing */
+		s[11] = 0;                      /* idle */
+		s[12] = 20000;                  /* max scan time */
+		s[13] = 5;                      /* probe delay */
+		s[14] = 0x1 ^ 0x20;             /* PASSIVE; FILTER_PROBE_REQ inverted on WMI-TLV, as ath10k does */
+		s[15] = 0;                      /* burst duration */
+		s[16] = R5Q_SCAN_N;             /* channels */
+		s[17] = 1;                      /* bssids */
+		s[18] = 0;                      /* ssids */
+		s[19] = 0;                      /* ie length */
+		s[20] = 3;                      /* probes */
+		/* s[21..24]: mac_addr / mac_mask (no randomisation) */
+		for (uint32_t i = 0; i < R5Q_SCAN_N; i++) {
+			ch[i] = r5q_scan_mhz[i];
+		}
+		n += tlv_put(m + n, 0x4d, s, sizeof(s));                         /* START_SCAN_CMD */
+		n += tlv_put(m + n, 0x10, ch, sizeof(ch));                       /* ARRAY_UINT32: the channels */
+		n += tlv_put(m + n, 0x13, NULL, 0);                              /* ARRAY_FIXED_STRUCT: no SSIDs */
+		n += tlv_put(m + n, 0x13, bssid, sizeof(bssid));                 /* ARRAY_FIXED_STRUCT: ff:ff:ff:ff:ff:ff */
+		n += tlv_put(m + n, 0x11, NULL, 0);                              /* ARRAY_BYTE: no IEs */
+		r5q_wmi_send(eid, 0x3001, m, (uint16_t)n);
+		wmi_hold_us = now_us() + 30000000;
+		printf("wifi: wmi: START_SCAN sent (passive, %u channels, 150 ms each); listening up to 30 s\n", (unsigned)R5Q_SCAN_N);
+	}
+	wmi_step++;
+}
+
+/* HTC trailer credit records for WMI's endpoint */
+static void
+htc_trailer(const uint8_t *p, uint16_t hl, uint8_t wmi_eid)
+{
+	uint8_t tl = p[4];
+	const uint8_t *t = p + 8 + hl - tl;
+
+	if (!(p[1] & 0x2) || tl == 0 || tl > hl) {
+		return;
+	}
+	for (uint32_t at = 0; at + 4 <= tl;) {          /* record: id, len, 2 pad, then len bytes (Test 116: 01 04 00 00 02 04 00 00) */
+		uint8_t id = t[at], rl = t[at + 1];
+
+		if (at + 4 + rl > tl) {
+			break;
+		}
+		if (id == 1) {
+			for (uint32_t k = 0; k + 4 <= rl; k += 4) {
+				const uint8_t *r = t + at + 4 + k;
+
+				if (r[0] == wmi_eid && wmi_credits >= 0) {
+					wmi_credits += r[1];
+				}
+				static uint32_t said;
+
+				if (++said <= 30) {
+					printf("wifi: htc: credit report: endpoint %u +%u (WMI now %d)\n", r[0], r[1], wmi_credits);
+				}
+			}
+		}
+		at += 4u + rl;
+	}
+}
+
+/*
+ * (Test 118) Joining: the network named by boot-arg wifi_ssid (hex, after an 'h': "wifi_ssid=h<ssid-hex>"), its
+ * strongest BSS from the scan. As ath10k + mac80211 for a station: VDEV_START_REQUEST (0x5003, tag 0x58 + CHANNEL
+ * 0x50 + empty ARRAY_STRUCT) and its response event (0x5001, tag 0x28); PEER_CREATE (0x6001, tag 0x61) for the BSSID,
+ * which HTT confirms with PEER_MAP (T2H 0x3); the 802.11 open-system authentication and the association request sent
+ * as management frames by reference (MGMT_TX_SEND 0x7008, tag 0x1a6: vdev, desc id, 0, frame address, length; then
+ * up to 64 bytes inline), their answers seen in WMI management rx; then PEER_ASSOC (0x6005, tag 0x65 + legacy rates +
+ * HT rates + VHT_RATE_SET 0x66) and VDEV_UP (0x5005, tag 0x5c). WPA2-PSK / CCMP is asked for in the RSN element; the
+ * 4-way handshake (needing the key) comes next: here the access point's first EAPOL message is only watched for.
+ */
+struct r5q_bss {
+	uint8_t bssid[6];
+	uint8_t chan;
+	int rssi;
+	uint16_t cap, bint, ielen;
+	uint8_t ies[700];
+};
+static struct r5q_bss join_bss;
+static bool join_have;
+static uint8_t join_ssid[32], join_ssid_len;
+static uint64_t join_t;
+static uint32_t join_tries, join_aid;
+static uint16_t join_seq;
+static uint8_t *mtx_page;
+static uint64_t mtx_pa;
+static uint32_t mtx_slot;
+
+static int
+hexval(char c)
+{
+	return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+}
+
+static void
+r5q_join_args(void)
+{
+	char h[80];
+
+	bzero(h, sizeof(h));
+	join_ssid_len = 0;
+	if (!PE_parse_boot_argn("wifi_ssid", h, sizeof(h)) || h[0] != 'h') {
+		return;
+	}
+	for (uint32_t i = 1; h[i] && h[i + 1] && join_ssid_len < 32; i += 2) {
+		int a = hexval(h[i]), b = hexval(h[i + 1]);
+
+		if (a < 0 || b < 0) {
+			break;
+		}
+		join_ssid[join_ssid_len++] = (uint8_t)(a << 4 | b);
+	}
+}
+
+static const uint8_t *
+ie_find(const uint8_t *ies, uint32_t len, uint8_t id)
+{
+	for (uint32_t at = 0; at + 2 <= len;) {
+		if (at + 2 + ies[at + 1] > len) {
+			break;
+		}
+		if (ies[at] == id) {
+			return ies + at;
+		}
+		at += 2u + ies[at + 1];
+	}
+	return NULL;
+}
+
+/* every beacon / probe response: the strongest BSS of the wanted network */
+static void
+r5q_join_consider(const uint8_t *f, uint32_t flen, int rssi, uint32_t rx_chan)
+{
+	const uint8_t *ies = f + 36, *e;
+	uint32_t il = flen - 36;
+
+	if (join_ssid_len == 0 || (e = ie_find(ies, il, 0)) == NULL || e[1] != join_ssid_len ||
+	    memcmp(e + 2, join_ssid, join_ssid_len) != 0 || il > sizeof(join_bss.ies)) {
+		return;
+	}
+	if (join_have && rssi <= join_bss.rssi && memcmp(join_bss.bssid, f + 16, 6) != 0) {
+		return;
+	}
+	memcpy(join_bss.bssid, f + 16, 6);
+	join_bss.rssi = rssi;
+	join_bss.bint = (uint16_t)(f[32] | f[33] << 8);
+	join_bss.cap = (uint16_t)(f[34] | f[35] << 8);
+	join_bss.ielen = (uint16_t)il;
+	memcpy(join_bss.ies, ies, il);
+	join_bss.chan = (uint8_t)rx_chan;
+	if ((e = ie_find(ies, il, 3)) != NULL && e[1] == 1) {
+		join_bss.chan = e[2];
+	} else if ((e = ie_find(ies, il, 61)) != NULL && e[1] >= 1) {
+		join_bss.chan = e[2];
+	}
+	join_have = true;
+}
+
+static uint32_t
+chan_mhz(uint32_t ch)
+{
+	return ch == 14 ? 2484 : ch < 14 ? 2407 + 5 * ch : 5000 + 5 * ch;
+}
+
+/* a management frame out by reference: the frame in a DMA page slot, its first 64 bytes inline as well */
+static void
+r5q_mgmt_tx(uint8_t eid, uint8_t subtype, const uint8_t *body, uint32_t blen)
+{
+	uint8_t *f, m[4 + 32 + 4 + 64];
+	uint32_t flen = 24 + blen, inl, c[8];
+	uint64_t pa;
+
+	if (mtx_page == NULL && (mtx_page = r5q_dma_page(&mtx_pa, PAGE_SIZE)) == NULL) {
+		return;
+	}
+	if (flen > 1024) {
+		return;
+	}
+	mtx_slot = (mtx_slot + 1) & 3;
+	f = mtx_page + 1024 * mtx_slot;
+	pa = mtx_pa + 1024 * mtx_slot;
+	bzero(f, 24);
+	f[0] = subtype;
+	memcpy(f + 4, join_bss.bssid, 6);
+	memcpy(f + 10, r5q_mac, 6);
+	memcpy(f + 16, join_bss.bssid, 6);
+	f[22] = (uint8_t)(join_seq << 4);
+	f[23] = (uint8_t)(join_seq >> 4);
+	join_seq++;
+	memcpy(f + 24, body, blen);
+	FlushPoC_DcacheRegion((vm_offset_t)f, flen);
+	inl = flen < 64 ? (flen + 3) & ~3u : 64;
+	c[0] = 0;                       /* vdev */
+	c[1] = mtx_slot;                /* desc id */
+	c[2] = 0;                       /* chanfreq */
+	memcpy(&c[3], &pa, 8);          /* paddr (packed: words 3-4) */
+	c[5] = flen;                    /* frame_len */
+	c[6] = inl;                     /* buf_len */
+	bzero(m, sizeof(m));
+	tlv_put(m, 0x1a6, c, 28);
+	tlv_put(m + 32, 0x11, f, (uint16_t)inl);
+	r5q_wmi_send(eid, 0x7008, m, (uint16_t)(36 + inl));
+}
+
+/*
+ * (Test 119) WPA2-PSK, the station's half of the 4-way handshake (IEEE 802.11-2016 12.7.6), in the kernel:
+ * - the PMK comes from USERDATA 4 GiB + 520 KiB ("R5Q-WIFI-KEY/1", written by `python phone.py wifi-join`, which derives
+ *   it on the PC from the name and password; the password is never stored). Without one, a dry run: message 2 is made
+ *   with an all-zero PMK, so the access point refuses its MIC, but the transmit path is exercised once.
+ * - EAPOL-Key frames arrive in HTT rx buffers (RX_IN_ORD_PADDR_IND) after the rx descriptor, native-wifi decapsulated
+ *   (802.11 header, LLC/SNAP 88-8e); answers leave as HTT TX_FRM (H2T 1) on CE4: the HTT tx descriptor, a fragment
+ *   descriptor in the bank pointing at the frame, and its first 52 bytes inline ("prefetch"), TID 7 as mac80211 does.
+ * - message 1: SNonce, PTK = PRF-384(PMK, "Pairwise key expansion", min/max(AA, SPA) || min/max(ANonce, SNonce)),
+ *   message 2 with our RSN element and MIC = HMAC-SHA1(KCK)[0:16]; message 3: MIC checked, the key data unwrapped with
+ *   the KEK (AES key wrap), the GTK KDE (00-0f-ac:1) taken, message 4 sent; then VDEV_INSTALL_KEY (0x5009, tag 0x60:
+ *   AES-CCM = 4) for the PTK's TK (pairwise, index 0) and the GTK (group, its index), and PEER_SET_PARAM (0x6004, tag
+ *   0x64) AUTHORIZE (3) = 1.
+ */
+#include "redwood_wpa.h"
+extern void read_random(void *buffer, u_int numBytes);
+
+#define R5Q_WIFI_KEY_AT ((4ULL << 30) + 520ULL * 1024)
+static uint8_t wpa_pmk[32], wpa_anonce[32], wpa_snonce[32], wpa_ptk[48], wpa_gtk[32];
+static uint8_t wpa_rsn[22];
+static bool wpa_have_pmk, wpa_have_snonce, wpa_dry_sent;
+static uint32_t wpa_gtk_len, wpa_gtk_idx, wpa_msg2s;
+static uint64_t wpa_msg4_us;
+
+static void
+r5q_wifi_key_load(void)
+{
+	static uint8_t blk[4096];
+	uint32_t sl, want, h = 2166136261u;
+
+	if (redwood_ufs_read_named("darwin", R5Q_WIFI_KEY_AT, blk, sizeof(blk), NULL) != 0 ||
+	    memcmp(blk, "R5Q-WIFI-KEY/1", 14) != 0) {
+		printf("wifi: wpa: no network key stored on the phone (python phone.py wifi-join): a dry run only\n");
+		return;
+	}
+	for (uint32_t k = 0; k < 84; k++) {
+		h = (h ^ blk[k]) * 16777619u;
+	}
+	memcpy(&sl, blk + 16, 4);
+	memcpy(&want, blk + 84, 4);
+	if (h != want || sl < 1 || sl > 32) {
+		printf("wifi: wpa: the stored network key record is damaged: not used\n");
+		bzero(blk, sizeof(blk));
+		return;
+	}
+	if (join_ssid_len == 0) {
+		memcpy(join_ssid, blk + 20, sl);
+		join_ssid_len = (uint8_t)sl;
+	} else if (sl != join_ssid_len || memcmp(join_ssid, blk + 20, sl) != 0) {
+		printf("wifi: wpa: the stored key is for another network name than wifi_ssid: not used\n");
+		bzero(blk, sizeof(blk));
+		return;
+	}
+	memcpy(wpa_pmk, blk + 52, 32);
+	wpa_have_pmk = true;
+	bzero(blk, sizeof(blk));
+	printf("wifi: wpa: a network key is stored (for a %u-byte network name): it will be used\n", sl);
+}
+
+/* a data frame (native wifi: 802.11 header + LLC/SNAP + payload) out through HTT; false: no room, dropped */
+static bool
+r5q_htt_tx(const uint8_t *frame, uint32_t len, uint8_t tid)
+{
+	uint8_t m[20 + 52], *f, *ext;
+	uint64_t fpa, epa, now = now_us();
+	uint32_t pf, lo, slot = 0, k, sr;
+	uint16_t hi, l16 = (uint16_t)len, fl1 = (uint16_t)((tid << 6) | (1u << 11));    /* vdev 0, TID, POSTPONED */
+
+	if (dtx_page == NULL || dtx_frames == NULL || htt_ep == 0xff || len > 2048) {
+		return false;
+	}
+	for (k = 0; k < R5Q_TXN; k++) {
+		if (TX_BUSY(k) && now - dtx_sent_us[k] > 2000000) {
+			TX_CLEAR(k);                    /* no completion in 2 s: taken back */
+		}
+	}
+	sr = rd(wlan_regs + CE_REG(4, CE_CUR_SRRI)) & (ce4.n - 1);
+	if (((ce4.wr + 1) & (ce4.n - 1)) == sr) {
+		tx_drops++;
+		return false;
+	}
+	for (k = 0; k < R5Q_TXN; k++) {
+		slot = (dtx_slot + 1 + k) % R5Q_TXN;
+		if (!TX_BUSY(slot)) {
+			break;
+		}
+	}
+	if (k == R5Q_TXN) {
+		tx_drops++;
+		return false;
+	}
+	dtx_slot = slot;
+	TX_SET(slot);
+	dtx_sent_us[slot] = now;
+	f = dtx_frames + 2048 * slot;
+	fpa = dtx_fpa[slot];
+	ext = dtx_page + 72 * slot;
+	epa = dtx_pa + 72 * slot;
+	memcpy(f, frame, len);
+	bzero(ext, 72);
+	lo = (uint32_t)fpa;
+	hi = (uint16_t)(fpa >> 32);
+	memcpy(ext + 24, &lo, 4);               /* frags[0]: paddr_lo, paddr_hi, len (frags[1] zero ends the list) */
+	memcpy(ext + 28, &hi, 2);
+	memcpy(ext + 30, &l16, 2);
+	FlushPoC_DcacheRegion((vm_offset_t)f, len);
+	FlushPoC_DcacheRegion((vm_offset_t)ext, 72);
+	bzero(m, sizeof(m));
+	m[0] = 1;                               /* TX_FRM */
+	m[1] = 0x21;                            /* MAC header present, packet type native wifi */
+	memcpy(m + 2, &fl1, 2);
+	memcpy(m + 4, &l16, 2);
+	m[6] = (uint8_t)slot;                   /* msdu id */
+	m[7] = (uint8_t)(slot >> 8);
+	memcpy(m + 8, &epa, 8);                 /* the fragment descriptor */
+	m[16] = 0xff;                           /* peer id: invalid (the firmware finds it) */
+	m[17] = 0xff;
+	pf = len < 50 ? len : 50;
+	memcpy(m + 20, frame, pf);
+	pf = (pf + 3) & ~3u;
+	ce_send_htc(&ce4, 0x10, htt_ep, m, (uint16_t)(20 + pf));
+	tx_sent++;
+	return true;
+}
+
+/* an EAPOL-Key frame to the access point: header, SNAP, EAPOL (MIC filled in with the KCK) */
+static void
+r5q_eapol_send(uint8_t ver, uint16_t info, const uint8_t replay[8], const uint8_t *nonce, const uint8_t *kd, uint16_t kdl)
+{
+	uint8_t f[24 + 8 + 99 + 64], *e = f + 32, mic[20];
+	uint16_t body = (uint16_t)(95 + kdl);
+	uint32_t el = 99u + kdl;
+	const uint8_t *d[1];
+	size_t dl[1];
+
+	if (kdl > 64) {
+		return;
+	}
+	bzero(f, sizeof(f));
+	f[0] = 0x08;                            /* data */
+	f[1] = (uint8_t)(0x01 | (r5q_keyed ? 0x40 : 0));        /* to DS; protected once the pairwise key is in */
+	memcpy(f + 4, join_bss.bssid, 6);
+	memcpy(f + 10, r5q_mac, 6);
+	memcpy(f + 16, join_bss.bssid, 6);
+	f[24] = 0xaa;
+	f[25] = 0xaa;
+	f[26] = 0x03;
+	f[30] = 0x88;
+	f[31] = 0x8e;
+	e[0] = ver;
+	e[1] = 3;                               /* EAPOL-Key */
+	e[2] = (uint8_t)(body >> 8);
+	e[3] = (uint8_t)body;
+	e[4] = 2;                               /* RSN key descriptor */
+	e[5] = (uint8_t)(info >> 8);
+	e[6] = (uint8_t)info;
+	memcpy(e + 9, replay, 8);
+	if (nonce != NULL) {
+		memcpy(e + 17, nonce, 32);
+	}
+	e[97] = (uint8_t)(kdl >> 8);
+	e[98] = (uint8_t)kdl;
+	if (kdl) {
+		memcpy(e + 99, kd, kdl);
+	}
+	d[0] = e;
+	dl[0] = el;
+	wpa_hmac_sha1(wpa_ptk, 16, d, dl, 1, mic);
+	memcpy(e + 81, mic, 16);
+	r5q_htt_tx(f, 32 + el, 7);
+}
+
+static void
+r5q_eapol_rx(const uint8_t *e, uint32_t len)
+{
+	uint16_t info, dl;
+
+	if (len < 99 || e[1] != 3) {
+		printf("wifi: wpa: an EAPOL frame of type %u (%u bytes)\n", len >= 2 ? e[1] : 0, len);
+		return;
+	}
+	info = (uint16_t)(e[5] << 8 | e[6]);
+	dl = (uint16_t)(e[97] << 8 | e[98]);
+	printf("wifi: wpa: EAPOL-Key from the access point: info %#x, replay %02x%02x, %u bytes of key data\n", info, e[15],
+	    e[16], dl);
+	if (join_step < 20 || 99u + dl > len) {
+		return;
+	}
+	if ((info & 0x0008) && (info & 0x0080) && !(info & 0x0100)) {          /* message 1 */
+		uint8_t data[76], *pmk = wpa_pmk, zero[32];
+		int c;
+
+		if (!wpa_have_pmk) {
+			if (wpa_dry_sent) {
+				return;
+			}
+			bzero(zero, sizeof(zero));
+			pmk = zero;
+		}
+		if (memcmp(wpa_anonce, e + 17, 32) != 0) {
+			wpa_have_snonce = false;        /* a new handshake (the access point renews the keys): a new SNonce */
+		}
+		memcpy(wpa_anonce, e + 17, 32);
+		if (!wpa_have_snonce) {
+			uint64_t t = mach_absolute_time();
+			struct wpa_sha1 s;
+			uint8_t r[32], hsh[20];
+
+			read_random(r, sizeof(r));
+			wpa_sha1_init(&s);
+			wpa_sha1_add(&s, r, sizeof(r));
+			wpa_sha1_add(&s, (const uint8_t *)&t, sizeof(t));
+			wpa_sha1_end(&s, hsh);
+			memcpy(wpa_snonce, r, 32);
+			for (int i = 0; i < 20; i++) {
+				wpa_snonce[i] ^= hsh[i];
+			}
+			wpa_have_snonce = true;
+		}
+		c = memcmp(join_bss.bssid, r5q_mac, 6);
+		memcpy(data, c < 0 ? join_bss.bssid : r5q_mac, 6);
+		memcpy(data + 6, c < 0 ? r5q_mac : join_bss.bssid, 6);
+		c = memcmp(wpa_anonce, wpa_snonce, 32);
+		memcpy(data + 12, c < 0 ? wpa_anonce : wpa_snonce, 32);
+		memcpy(data + 44, c < 0 ? wpa_snonce : wpa_anonce, 32);
+		wpa_prf(pmk, 32, "Pairwise key expansion", data, sizeof(data), wpa_ptk, 48);
+		r5q_eapol_send(e[0], 0x010a, e + 9, wpa_snonce, wpa_rsn, sizeof(wpa_rsn));
+		wpa_msg2s++;
+		printf("wifi: wpa: message 1 -> message 2 sent%s\n", wpa_have_pmk ? "" :
+		    " (DRY RUN: no key stored, made with a zero PMK -- the access point will refuse its MIC)");
+		if (!wpa_have_pmk) {
+			wpa_dry_sent = true;
+			bzero(wpa_ptk, sizeof(wpa_ptk));
+		}
+	} else if ((info & 0x0008) && (info & 0x01c0) == 0x01c0 && wpa_have_pmk) {     /* message 3 */
+		uint8_t copy[99 + 256], mic[20], plain[256];
+		const uint8_t *d[1];
+		size_t dlen[1];
+
+		if (dl > 256 || memcmp(e + 17, wpa_anonce, 32) != 0) {
+			printf("wifi: wpa: message 3 with another ANonce or too much key data: ignored\n");
+			return;
+		}
+		memcpy(copy, e, 99u + dl);
+		bzero(copy + 81, 16);
+		d[0] = copy;
+		dlen[0] = 99u + dl;
+		wpa_hmac_sha1(wpa_ptk, 16, d, dlen, 1, mic);
+		if (memcmp(mic, e + 81, 16) != 0) {
+			printf("wifi: wpa: message 3's MIC is WRONG: the key does not match this network's password\n");
+			join_error = EAUTH;
+			return;
+		}
+		wpa_gtk_len = 0;
+		if ((info & 0x1000) && dl >= 24 && (dl % 8) == 0 && wpa_aes_unwrap(wpa_ptk + 16, e + 99, dl / 8 - 1, plain) == 0) {
+			for (uint32_t at = 0; at + 2 <= dl - 8u;) {
+				uint8_t id = plain[at], l = plain[at + 1];
+
+				if (at + 2u + l > dl - 8u) {
+					break;
+				}
+				if (id == 0xdd && l >= 6 + 16 && plain[at + 2] == 0x00 && plain[at + 3] == 0x0f && plain[at + 4] == 0xac &&
+				    plain[at + 5] == 1 && (uint32_t)(l - 6) <= sizeof(wpa_gtk)) {
+					wpa_gtk_idx = plain[at + 6] & 3;
+					wpa_gtk_len = (uint32_t)l - 6;
+					memcpy(wpa_gtk, plain + at + 8, wpa_gtk_len);
+				}
+				at += 2u + l;
+			}
+		}
+		bzero(plain, sizeof(plain));
+		r5q_eapol_send(e[0], 0x030a, e + 9, NULL, NULL, 0);
+		wpa_msg4_us = now_us();
+		printf("wifi: wpa: message 3 (MIC good; group key %u bytes, index %u) -> message 4 sent: 4-WAY HANDSHAKE DONE\n",
+		    wpa_gtk_len, wpa_gtk_idx);
+		if (join_step == 20) {
+			join_step = 21;
+		} else if (join_step == 24) {
+			wpa_rekey_us = now_us();        /* renewed keys: installed once message 4 is out (r5q_service) */
+		}
+	} else if (!(info & 0x0008) && (info & 0x0180) == 0x0180 && wpa_have_pmk && join_step >= 24) {     /* group message 1 */
+		uint8_t copy[99 + 256], mic[20], plain[256];
+		const uint8_t *d[1];
+		size_t dlen[1];
+
+		if (dl > 256 || dl < 24 || (dl % 8) != 0) {
+			return;
+		}
+		memcpy(copy, e, 99u + dl);
+		bzero(copy + 81, 16);
+		d[0] = copy;
+		dlen[0] = 99u + dl;
+		wpa_hmac_sha1(wpa_ptk, 16, d, dlen, 1, mic);
+		if (memcmp(mic, e + 81, 16) != 0 || wpa_aes_unwrap(wpa_ptk + 16, e + 99, dl / 8 - 1, plain) != 0) {
+			printf("wifi: wpa: group key message with a bad MIC or key data: ignored\n");
+			return;
+		}
+		wpa_gtk_len = 0;
+		for (uint32_t at = 0; at + 2 <= dl - 8u;) {
+			uint8_t id = plain[at], l = plain[at + 1];
+
+			if (at + 2u + l > dl - 8u) {
+				break;
+			}
+			if (id == 0xdd && l >= 6 + 16 && plain[at + 2] == 0x00 && plain[at + 3] == 0x0f && plain[at + 4] == 0xac &&
+			    plain[at + 5] == 1 && (uint32_t)(l - 6) <= sizeof(wpa_gtk)) {
+				wpa_gtk_idx = plain[at + 6] & 3;
+				wpa_gtk_len = (uint32_t)l - 6;
+				memcpy(wpa_gtk, plain + at + 8, wpa_gtk_len);
+			}
+			at += 2u + l;
+		}
+		bzero(plain, sizeof(plain));
+		r5q_eapol_send(e[0], 0x0302, e + 9, NULL, NULL, 0);
+		if (wpa_gtk_len != 0 && svc_wmi_eid != 0xff) {
+			r5q_install_key(svc_wmi_eid, wpa_gtk_idx, 1, wpa_gtk, wpa_gtk_len);
+		}
+		bzero(wpa_gtk, sizeof(wpa_gtk));
+		printf("wifi: wpa: the access point renewed the group key (index %u): answered and installed\n", wpa_gtk_idx);
+	} else {
+		printf("wifi: wpa: EAPOL-Key not handled here (info %#x)\n", info);
+	}
+}
+
+static void
+r5q_install_key(uint8_t eid, uint32_t idx, uint32_t flags, const uint8_t *key, uint32_t klen)
+{
+	uint32_t v[23];
+	uint8_t m[4 + 92 + 4 + 32];
+	uint32_t n;
+
+	bzero(v, sizeof(v));
+	memcpy(&v[1], join_bss.bssid, 6);
+	v[3] = idx;
+	v[4] = flags;                           /* 0 pairwise, 1 group */
+	v[5] = 4;                               /* WMI_TLV_CIPHER_AES_CCM */
+	v[20] = klen;
+	n = tlv_put(m, 0x60, v, sizeof(v));
+	n += tlv_put(m + n, 0x11, key, (uint16_t)((klen + 3) & ~3u));
+	r5q_wmi_send(eid, 0x5009, m, (uint16_t)n);
+	bzero(m, sizeof(m));
+}
+
+static void
+r5q_join_next(uint8_t eid)
+{
+	uint8_t m[400];
+	uint32_t n = 0, mhz = chan_mhz(join_bss.chan);
+	const uint8_t *ht = ie_find(join_bss.ies, join_bss.ielen, 45), *rsn = ie_find(join_bss.ies, join_bss.ielen, 48);
+	uint64_t now = now_us();
+
+	switch (join_step) {
+	case 10: {
+		uint32_t v[18], c[6];                   /* wmi_tlv_vdev_start_cmd: 18 words */
+
+		bzero(v, sizeof(v));
+		v[0] = 0;                               /* vdev */
+		v[2] = join_bss.bint ? join_bss.bint : 100;
+		v[3] = 1;                               /* dtim */
+		/* v[5..13]: ssid (len + 32 bytes): empty for a station; bcn rate/power 0; noa 0; hw ack on */
+		c[0] = mhz;
+		c[1] = mhz;
+		c[2] = 0;
+		c[3] = (mhz < 3000 ? 5u : 4u) | (1u << 11);     /* HT20, ALLOW_HT, not passive */
+		c[4] = (40u << 8) | (40u << 16);
+		c[5] = (40u << 8);
+		n += tlv_put(m + n, 0x58, v, sizeof(v));
+		n += tlv_put(m + n, 0x50, c, sizeof(c));
+		n += tlv_put(m + n, 0x12, NULL, 0);
+		join_ev = false;
+		r5q_wmi_send(eid, 0x5003, m, (uint16_t)n);
+		printf("wifi: join: VDEV_START on %u MHz (channel %u) for %02x:%02x:%02x:%02x:%02x:%02x, %d dBm\n", mhz,
+		    join_bss.chan, join_bss.bssid[0], join_bss.bssid[1], join_bss.bssid[2], join_bss.bssid[3], join_bss.bssid[4],
+		    join_bss.bssid[5], join_bss.rssi);
+		join_step = 11;
+		join_t = now;
+		break;
+	}
+	case 11:
+	case 13:
+		if (join_ev || now - join_t > (join_step == 11 ? 2000000u : 1000000u)) {
+			if (!join_ev) {
+				printf("wifi: join: no %s in time: going on\n", join_step == 11 ? "VDEV_START response" : "PEER_MAP");
+			}
+			join_step++;
+		}
+		break;
+	case 12: {
+		uint32_t v[4] = { 0, 0, 0, 0 };
+
+		memcpy(&v[1], join_bss.bssid, 6);
+		join_ev = false;
+		n += tlv_put(m + n, 0x61, v, sizeof(v));
+		r5q_wmi_send(eid, 0x6001, m, (uint16_t)n);
+		printf("wifi: join: PEER_CREATE for the BSSID\n");
+		join_step = 13;
+		join_t = now;
+		break;
+	}
+	case 14: {
+		uint8_t a[6] = { 0, 0, 1, 0, 0, 0 };    /* open system, sequence 1, status 0 */
+
+		join_ev = false;
+		r5q_mgmt_tx(eid, 0xb0, a, sizeof(a));
+		printf("wifi: join: authentication (open system) sent, try %u\n", join_tries + 1);
+		join_step = 15;
+		join_t = now;
+		break;
+	}
+	case 15:
+	case 17:
+		if (join_ev) {
+			join_step++;
+			join_tries = 0;
+		} else if (now - join_t > 1000000) {
+			if (++join_tries >= 4) {
+				printf("wifi: join: no %s answer after 4 tries: giving up\n", join_step == 15 ? "authentication" :
+				    "association");
+				join_error = ETIMEDOUT;
+				join_step = 30;
+			} else {
+				join_step--;
+			}
+		}
+		break;
+	case 16: {
+		uint8_t b[300];
+		uint32_t k = 0;
+		const uint8_t rates5[8] = { 0x8c, 0x12, 0x98, 0x24, 0xb0, 0x48, 0x60, 0x6c };
+		const uint8_t rates2[8] = { 0x82, 0x84, 0x8b, 0x96, 0x0c, 0x12, 0x18, 0x24 };
+		const uint8_t rates2x[4] = { 0x30, 0x48, 0x60, 0x6c };
+
+		b[k++] = 0x01;                          /* capability: ESS */
+		b[k++] = 0x00;
+		b[k++] = 10;                            /* listen interval */
+		b[k++] = 0;
+		b[k++] = 0;                             /* SSID */
+		b[k++] = join_ssid_len;
+		memcpy(b + k, join_ssid, join_ssid_len);
+		k += join_ssid_len;
+		b[k++] = 1;
+		b[k++] = 8;
+		memcpy(b + k, mhz < 3000 ? rates2 : rates5, 8);
+		k += 8;
+		if (mhz < 3000) {
+			b[k++] = 50;
+			b[k++] = 4;
+			memcpy(b + k, rates2x, 4);
+			k += 4;
+		}
+		if (rsn != NULL && rsn[1] >= 8) {
+			/* version 1, the AP's group cipher, pairwise CCMP, AKM PSK, no capabilities */
+			const uint8_t r[] = { 48, 20, 1, 0, rsn[4], rsn[5], rsn[6], rsn[7], 1, 0, 0x00, 0x0f, 0xac, 4, 1, 0,
+				0x00, 0x0f, 0xac, 2, 0, 0 };
+
+			memcpy(b + k, r, sizeof(r));
+			memcpy(wpa_rsn, r, sizeof(r));          /* message 2 carries the same element */
+			k += sizeof(r);
+		}
+		if (ht != NULL) {
+			/* HT capabilities: SM power save off, 20 MHz; A-MPDU 64 KB; MCS 0-7 */
+			const uint8_t h[28] = { 45, 26, 0x0c, 0x00, 0x03, 0xff };
+
+			memcpy(b + k, h, sizeof(h));
+			k += sizeof(h);
+			{
+				const uint8_t w[9] = { 221, 7, 0x00, 0x50, 0xf2, 2, 0, 1, 0 };   /* WMM information */
+
+				memcpy(b + k, w, sizeof(w));
+				k += sizeof(w);
+			}
+		}
+		join_ev = false;
+		r5q_mgmt_tx(eid, 0x00, b, k);
+		printf("wifi: join: association request sent (%u bytes; RSN %s, HT %s), try %u\n", k, rsn ? "WPA2-PSK/CCMP" :
+		    "none (open)", ht ? "yes" : "no", join_tries + 1);
+		join_step = 17;
+		join_t = now;
+		break;
+	}
+	case 18: {
+		uint32_t v[19], vht[4] = { 0, 0, 0, 0 }, nl = 0;
+		uint8_t legacy[12], htr[8] = { 0, 1, 2, 3, 4, 5, 6, 7 };
+		const uint8_t *sr = ie_find(join_bss.ies, join_bss.ielen, 1), *xr = ie_find(join_bss.ies, join_bss.ielen, 50);
+
+		for (int pass = 0; pass < 2; pass++) {
+			const uint8_t *e = pass ? xr : sr;
+
+			for (uint32_t i = 0; e != NULL && i < e[1] && nl < sizeof(legacy); i++) {
+				uint8_t r = e[2 + i] & 0x7f;
+
+				if (r == 0x7f) {                /* (BSS membership selector) */
+					continue;
+				}
+				legacy[nl++] = (uint8_t)(r | ((r == 2 || r == 4 || r == 11 || r == 22) ? 0x80 : 0));
+			}
+		}
+		bzero(v, sizeof(v));
+		memcpy(&v[0], join_bss.bssid, 6);
+		v[2] = 0;                               /* vdev */
+		v[3] = 1;                               /* new association */
+		v[4] = join_aid;
+		v[5] = 0x1 | (rsn ? 0x4 : 0) | (ht ? (0x2 | 0x1000) : 0);     /* AUTH, NEED_PTK_4_WAY, QOS + HT */
+		v[6] = join_bss.cap;
+		v[7] = 1;                               /* listen interval */
+		if (ht != NULL && ht[1] >= 3) {
+			static const uint8_t dens[8] = { 0, 1, 1, 1, 2, 4, 8, 16 };
+
+			v[8] = (uint32_t)(ht[2] | ht[3] << 8);
+			v[9] = (1u << (13 + (ht[4] & 3))) - 1;
+			v[10] = dens[(ht[4] >> 2) & 7];
+			v[11] = 0x08;                   /* WMI_RC_HT_FLAG */
+		}
+		v[12] = 1;                              /* spatial streams */
+		v[14] = ht ? (mhz < 3000 ? 5u : 4u) : (mhz < 3000 ? 1u : 0u);
+		v[17] = nl;
+		v[18] = ht ? 8 : 0;
+		n += tlv_put(m + n, 0x65, v, sizeof(v));
+		n += tlv_put(m + n, 0x11, legacy, (uint16_t)((nl + 3) & ~3u));
+		n += tlv_put(m + n, 0x11, htr, ht ? 8 : 0);
+		n += tlv_put(m + n, 0x66, vht, sizeof(vht));
+		r5q_wmi_send(eid, 0x6005, m, (uint16_t)n);
+		printf("wifi: join: PEER_ASSOC sent (aid %u, flags %#x, %u legacy rates, phy mode %u)\n", join_aid, v[5], nl, v[14]);
+		join_step = 19;
+		break;
+	}
+	case 19: {
+		uint32_t v[4] = { 0, join_aid, 0, 0 };
+
+		memcpy(&v[2], join_bss.bssid, 6);
+		n += tlv_put(m + n, 0x5c, v, sizeof(v));
+		r5q_wmi_send(eid, 0x5005, m, (uint16_t)n);
+		printf("wifi: join: VDEV_UP: ASSOCIATED to the access point%s\n", rsn ? "; watching for its EAPOL message 1" :
+		    " (an open network: no keys)");
+		join_step = rsn ? 20 : 23;
+		wmi_hold_us = now + 15000000;
+		break;
+	}
+	case 21:
+		if (now - wpa_msg4_us < 60000) {        /* message 4 leaves unencrypted first */
+			break;
+		}
+		r5q_install_key(eid, 0, 0, wpa_ptk + 32, 16);
+		bzero(wpa_ptk + 32, 16);
+		r5q_keyed = true;
+		printf("wifi: wpa: pairwise key installed (AES-CCM)\n");
+		join_step = 22;
+		break;
+	case 22:
+		if (wpa_gtk_len != 0) {
+			r5q_install_key(eid, wpa_gtk_idx, 1, wpa_gtk, wpa_gtk_len);
+			printf("wifi: wpa: group key installed (index %u)\n", wpa_gtk_idx);
+		}
+		bzero(wpa_gtk, sizeof(wpa_gtk));
+		join_step = 23;
+		break;
+	case 23: {
+		uint32_t v[5] = { 0, 0, 0, 3, 1 };     /* vdev 0, the BSSID, AUTHORIZE = 1 */
+
+		memcpy(&v[1], join_bss.bssid, 6);
+		n += tlv_put(m + n, 0x64, v, sizeof(v));
+		r5q_wmi_send(eid, 0x6004, m, (uint16_t)n);
+		printf("wifi: join: CONNECTED: keys installed, the access point authorized as our peer\n");
+		join_step = 24;
+		wmi_hold_us = now + 1000000;            /* (Test 120) then the net thread takes the rings over */
+		break;
+	}
+	default:
+		break;
+	}
+}
+
+/* management frames for the join: authentication / association answers, and being sent away */
+static void
+r5q_join_rx(const uint8_t *f, uint32_t flen)
+{
+	uint8_t st = f[0];
+
+	if (join_step < 10 || flen < 24 || memcmp(f + 16, join_bss.bssid, 6) != 0) {
+		return;
+	}
+	if (st == 0xb0 && flen >= 30) {
+		uint16_t alg = (uint16_t)(f[24] | f[25] << 8), seq = (uint16_t)(f[26] | f[27] << 8), status = (uint16_t)(f[28] | f[29] << 8);
+
+		printf("wifi: join: authentication answer: algorithm %u, sequence %u, status %u\n", alg, seq, status);
+		if (join_step == 15 && status == 0 && seq == 2) {
+			join_ev = true;
+		}
+	} else if ((st == 0x10 || st == 0x30) && flen >= 30) {
+		uint16_t cap = (uint16_t)(f[24] | f[25] << 8), status = (uint16_t)(f[26] | f[27] << 8), aid = (uint16_t)(f[28] | f[29] << 8);
+
+		printf("wifi: join: association answer: status %u, aid %u, capability %#x\n", status, aid & 0x3fff, cap);
+		if (join_step == 17 && status == 0) {
+			join_aid = aid & 0x3fff;
+			join_ev = true;
+		} else if (join_step == 17) {
+			join_error = ECONNREFUSED;
+			join_step = 30;
+		}
+	} else if (st == 0xc0 || st == 0xa0) {
+		printf("wifi: join: %s by the access point, reason %u\n", st == 0xc0 ? "DEAUTHENTICATED" : "DISASSOCIATED",
+		    flen >= 26 ? (unsigned)(f[24] | f[25] << 8) : 0u);
+		{
+			unsigned why = flen >= 26 ? (unsigned)(f[24] | f[25] << 8) : 0u;
+
+			if (join_step == 24) {
+				redwood_net_link_state(false);
+				if (r5q_sta_attached) {
+					redwood_sta_lost(ECONNRESET);
+				}
+			} else if (join_step >= 20 && (why == 15 || why == 2)) {
+				join_error = EAUTH;             /* the handshake did not come through: most likely the passphrase */
+			} else if (join_error == 0) {
+				join_error = ECONNREFUSED;
+			}
+		}
+		r5q_keyed = false;
+		join_step = 30;
+	}
+}
+
+static void
+r5q_scan_event(const uint8_t *v, uint32_t len)
+{
+	for (uint32_t at = 0; at + 4 <= len;) {
+		uint16_t tl = (uint16_t)(v[at] | v[at + 1] << 8), tag = (uint16_t)(v[at + 2] | v[at + 3] << 8);
+
+		if (at + 4 + tl > len) {
+			break;
+		}
+		if (tag == 0x24 && tl >= 24) {
+			uint32_t e[6];
+
+			memcpy(e, v + at + 4, sizeof(e));
+			if (e[0] == 0x8) {
+				if (!r5q_link_ready) {
+					printf("wifi: scan: on %u MHz\n", e[2]);
+				}
+			} else if (e[0] != 0x100 && e[0] != 0x4 && (!r5q_link_ready || e[0] != 1)) {
+				printf("wifi: scan: event %#x%s, reason %u, %u MHz, scan id %#x\n", e[0],
+				    e[0] == 1 ? " STARTED" : e[0] == 2 ? " COMPLETED" : e[0] == 0x10 ? " DEQUEUED" : e[0] == 0x40 ?
+				    " START FAILED" : e[0] == 0x20 ? " PREEMPTED" : "", e[1], e[2], e[4]);
+			}
+			if ((e[0] == 2 || e[0] == 0x40) && r5q_link_ready) {
+				scan_running = false;           /* (a scan iOS asked for) */
+			} else if (e[0] == 2 || e[0] == 0x40) {
+				printf("wifi: scan: done: %u beacons / probe responses, %u networks\n", scan_frames, scan_nets);
+				wmi_hold_us = now_us() + 1500000;
+				if (join_ssid_len != 0 && !join_have) {
+					printf("wifi: join: the wanted network (%u-byte name) was not seen\n", join_ssid_len);
+				} else if (join_have && join_step == 0) {
+					const uint8_t *r = ie_find(join_bss.ies, join_bss.ielen, 48);
+
+					printf("wifi: join: best BSS of the wanted network: %02x:%02x:%02x:%02x:%02x:%02x, channel %u, %d dBm, "
+					    "capability %#x, beacon %u TU, RSN %s\n", join_bss.bssid[0], join_bss.bssid[1], join_bss.bssid[2],
+					    join_bss.bssid[3], join_bss.bssid[4], join_bss.bssid[5], join_bss.chan, join_bss.rssi, join_bss.cap,
+					    join_bss.bint, r ? "yes" : "no");
+					if (r != NULL) {
+						htc_show("its RSN element", r, (uint32_t)r[1] + 2);
+					}
+					join_step = 10;
+					wmi_hold_us = now_us() + 20000000;
+				}
+			}
+		}
+		at += 4u + tl;
+	}
+}
+
+static void
+r5q_mgmt_rx(const uint8_t *v, uint32_t len)
+{
+	const uint8_t *frame = NULL;
+	uint32_t hdr[10], flen = 0;
+	bool have_hdr = false;
+
+	for (uint32_t at = 0; at + 4 <= len;) {
+		uint16_t tl = (uint16_t)(v[at] | v[at + 1] << 8), tag = (uint16_t)(v[at + 2] | v[at + 3] << 8);
+
+		if (at + 4 + tl > len) {
+			break;
+		}
+		if (tag == 0x2c && tl >= 24) {
+			bzero(hdr, sizeof(hdr));
+			memcpy(hdr, v + at + 4, tl < sizeof(hdr) ? tl : sizeof(hdr));
+			have_hdr = true;
+		} else if (tag == 0x11) {
+			frame = v + at + 4;
+			flen = tl;
+		}
+		at += 4u + tl;
+	}
+	if (!have_hdr || frame == NULL) {
+		return;
+	}
+	if (hdr[4] < flen) {
+		flen = hdr[4];
+	}
+	scan_frames++;
+	r5q_join_rx(frame, flen);
+	if (flen < 36 || (frame[0] != 0x80 && frame[0] != 0x50)) {      /* beacon, probe response */
+		return;
+	}
+	if (!r5q_link_ready && join_step == 0) {
+		r5q_join_consider(frame, flen, (int)hdr[1] - 95, hdr[0]);      /* (never once a join has begun) */
+	}
+	r5q_heard_add(frame, flen, (int)hdr[1] - 95, hdr[0]);
+	if (r5q_link_ready) {
+		return;                                 /* (the bring-up's list of networks is not printed again) */
+	}
+	for (uint32_t i = 0; i < scan_nets && i < 64; i++) {
+		if (memcmp(scan_bss[i], frame + 16, 6) == 0) {
+			return;
+		}
+	}
+	{
+		char ssid[33];
+		uint32_t sl = 0, chan = 0;
+
+		for (uint32_t at = 36; at + 2 <= flen;) {
+			uint8_t id = frame[at], l = frame[at + 1];
+
+			if (at + 2 + l > flen) {
+				break;
+			}
+			if (id == 0 && l <= 32) {
+				for (uint32_t k = 0; k < l; k++) {
+					uint8_t c = frame[at + 2 + k];
+
+					ssid[k] = (c >= 0x20 && c < 0x7f) ? (char)c : '?';
+				}
+				sl = l;
+			} else if (id == 3 && l == 1) {
+				chan = frame[at + 2];
+			}
+			at += 2u + l;
+		}
+		ssid[sl] = 0;
+		if (scan_nets < 64) {
+			memcpy(scan_bss[scan_nets], frame + 16, 6);
+		}
+		scan_nets++;
+		printf("wifi: scan: network %u: %02x:%02x:%02x:%02x:%02x:%02x channel %u (rx channel %u), %d dBm, %s \"%s\"\n",
+		    scan_nets, frame[16], frame[17], frame[18], frame[19], frame[20], frame[21], chan, hdr[0], (int)hdr[1] - 95,
+		    frame[0] == 0x80 ? "beacon" : "probe response", sl && ssid[0] ? ssid : "(hidden)");
+	}
+}
+
+static void
+r5q_wmi_event(uint32_t id, const uint8_t *v, uint32_t len, uint8_t eid)
+{
+	if (id == 0x1) {
+		uint32_t mem_reqs = 0;
+
+		for (uint32_t at = 0; at + 4 <= len;) {
+			uint16_t tl = (uint16_t)(v[at] | v[at + 1] << 8), tag = (uint16_t)(v[at + 2] | v[at + 3] << 8);
+			const uint8_t *val = v + at + 4;
+
+			if (at + 4 + tl > len) {
+				break;
+			}
+			if (tag == 0x20 && tl >= 80) {          /* the service ready structure */
+				uint32_t w[20];
+
+				memcpy(w, val, sizeof(w));
+				mem_reqs = w[18];
+				printf("wifi: wmi: service ready: fw build %#x, abi %#x/%u, phy capability %#x, rf chains %u, ht %#x, vht %#x, "
+				    "tx power %u..%u, host memory requests %u, scan channels %u\n", w[0], w[1], w[2], w[7], w[9], w[10], w[11],
+				    w[13], w[14], w[18], w[19]);
+			} else if (tag == 0x22 && tl >= 16) {  /* a host memory request */
+				uint32_t r[4];
+
+				memcpy(r, val, sizeof(r));
+				printf("wifi: wmi: host memory request id %u: %u units of %u bytes\n", r[0], r[2], r[1]);
+			} else if (tag == 0x10 && tl == 128) {     /* the service bitmap (ath10k wmi_tlv_service) */
+				printf("wifi: wmi: services: RX_FULL_REORDER %u, MGMT_TX_WMI %u, STA_PMF_OFFLOAD %u\n", (val[65 / 8] >> (65 % 8)) & 1,
+				    (val[76 / 8] >> (76 % 8)) & 1, (val[81 / 8] >> (81 % 8)) & 1);
+			} else {
+				printf("wifi: wmi: service ready TLV tag %#x, %u bytes\n", tag, tl);
+			}
+			/* (an array's elements are TLVs of their own: walk into ARRAY_STRUCT 0x12) */
+			at += (tag == 0x12) ? 4 : 4 + tl;
+		}
+		if (!wmi_init_sent) {
+			static const uint32_t cfg[44] = {
+				4, 33, 0, 0, 2, 66, 16, 7, 7, 100, 100, 100, 40,       /* vdevs .. rx timeouts */
+				1, 4, 4, 4, 8, 0, 0, 0, 0x400, 2, 0, 0, 0, 0, 2,       /* decap native wifi .. gtk offload */
+				1056, 2, 1, 0x20, 2, 5, 0, 6, 0, 1, 1, 0, 0, 0, 0,    /* msdu descs .. ocb */
+				1u << 9,                                               /* host_capab: MGMT_BUNDLE_TX_COMPL */
+			};
+			uint8_t m[4 + 28 + 4 + 176 + 4];
+			uint32_t abi[7] = { 0x01000000, 53, 0x5f414351, 0x00004c4d, 0, 0, 0 };
+			uint16_t h[2];
+
+			h[0] = 28;
+			h[1] = 0x4a;
+			memcpy(m, h, 4);
+			memcpy(m + 4, abi, 28);
+			h[0] = 176;
+			h[1] = 0x4b;
+			memcpy(m + 32, h, 4);
+			memcpy(m + 36, cfg, 176);
+			h[0] = 0;
+			h[1] = 0x12;
+			memcpy(m + 212, h, 4);
+			wmi_init_sent = true;
+			r5q_wmi_send(eid, 0x1, m, sizeof(m));
+			printf("wifi: wmi: WMI_INIT sent (%zu bytes of TLVs; %u host memory requests left unanswered)\n", sizeof(m),
+			    mem_reqs);
+		}
+	} else if (id == 0x2) {
+		for (uint32_t at = 0; at + 4 <= len;) {
+			uint16_t tl = (uint16_t)(v[at] | v[at + 1] << 8), tag = (uint16_t)(v[at + 2] | v[at + 3] << 8);
+			const uint8_t *val = v + at + 4;
+
+			if (at + 4 + tl > len) {
+				break;
+			}
+			if (tag == 0x23 && tl >= 36) {
+				uint32_t status;
+
+				memcpy(&status, val + 32, 4);
+				printf("wifi: wmi: WMI READY: MAC %02x:%02x:%02x:%02x:%02x:%02x, status %u, abi %#x\n", val[24], val[25],
+				    val[26], val[27], val[28], val[29], status, val[0] | val[1] << 8 | val[2] << 16 | (uint32_t)val[3] << 24);
+				if (status == 0 && wmi_step == 0) {
+					uint32_t scan = 1;
+
+					PE_parse_boot_argn("wifi_scan", &scan, sizeof(scan));
+					if (scan) {
+						uint32_t htt = 1;
+
+						PE_parse_boot_argn("wifi_htt", &htt, sizeof(htt));
+						r5q_join_args();
+						r5q_wifi_key_load();
+						wmi_step = htt ? 1 : 3;
+						wmi_hold_us = now_us() + 15000000;
+						printf("wifi: wmi: %d WMI credit(s) left; scanning next (wifi_scan=0 stops here)\n", wmi_credits);
+					}
+				}
+			}
+			at += 4 + tl;
+		}
+	} else if (id == 0x3001) {
+		r5q_scan_event(v, len);
+	} else if (id == 0x7001) {
+		r5q_mgmt_rx(v, len);
+	} else if (id == 0x5001 && len >= 20) {         /* VDEV_START_RESP: tag 0x28 {vdev, req, type, status} */
+		uint32_t e[4];
+
+		memcpy(e, v + 4, sizeof(e));
+		printf("wifi: join: VDEV_START response: vdev %u, type %u, status %u\n", e[0], e[2], e[3]);
+		if (join_step == 11 && e[3] == 0) {
+			join_ev = true;
+		}
+	} else if (id == 0x7006 && len >= 12) {         /* MGMT_TX_COMPLETION: tag 0x1a7 {desc, status, ...} */
+		uint32_t e[2];
+
+		memcpy(e, v + 4, sizeof(e));
+		printf("wifi: join: frame %u sent: status %u%s\n", e[0], e[1], e[1] == 0 ? " (acknowledged)" : "");
+	} else if (id == 0x7007 || id == 0x6001) {
+		htc_show(id == 0x6001 ? "wmi PEER_STA_KICKOUT" : "wmi MGMT_TX_BUNDLE_COMPLETION", v, len);
+	} else if (id != 0x1 && id != 0x3 && id != 0x4009 && id != 0x4022 && id != 0x3a001) {
+		htc_show("wmi other event (TLVs)", v, len);
+	}
+}
+
+/*
+ * (Test 120) One look at the rings: what the bring-up loop did each millisecond, and from the moment the link is handed
+ * over what the net thread (redwood_net.c) has done every 2-10 ms: CE2 (HTC control, WMI events) and CE1 (HTT: rx
+ * indications, transmit completions), the next WMI step, renewed keys to install. Returns how many frames there were.
+ */
+static unsigned
+r5q_service(void)
+{
+	uint32_t len;
+	const uint8_t *p;
+	unsigned frames = 0;
+	struct r5q_ce *rings[2] = { &ce2, &ce1 };
+
+	for (int r = 0; r < 2; r++) {
+		while ((p = ce_recv(rings[r], &len)) != NULL) {
+			uint8_t eid = p[0];
+
+			frames++;
+			uint16_t hl = (uint16_t)(p[2] | p[3] << 8), msg = (uint16_t)(p[8] | p[9] << 8);
+
+			uint16_t pl = (uint16_t)((p[1] & 0x2) && p[4] <= hl ? hl - p[4] : hl);    /* payload without the trailer */
+			uint32_t evid = (uint32_t)(p[8] | p[9] << 8 | p[10] << 16);
+			bool quiet = (eid != 0 && eid == svc_wmi_eid && (evid == 0x7001 || evid == 0x3001)) || (eid != 0 && eid == svc_htt_eid);
+
+			if (!quiet) {
+				printf("wifi: htc: +%llu ms: CE%u frame, endpoint %u, flags %#x, length %u\n", (now_us() - svc_t0) / 1000,
+				    rings[r]->id, eid, p[1], hl);
+			}
+			htc_trailer(p, hl, svc_wmi_eid);
+			if (eid == 0 && msg == 1) {
+				printf("wifi: htc: HTC READY: credits %u of %u bytes, %u endpoints, version %u, bundle %u\n",
+				    p[10] | p[11] << 8, p[12] | p[13] << 8, p[14], len >= 18 ? p[16] : 0, len >= 18 ? p[17] : 0);
+				svc_ready = true;
+				svc_credits = p[10];
+			} else if (eid == 0 && msg == 3) {
+				uint16_t svc = (uint16_t)(p[10] | p[11] << 8);
+
+				printf("wifi: htc: connected service %#x: status %u, endpoint %u, max message %u\n", svc, p[12], p[13],
+				    p[14] | p[15] << 8);
+				if (p[12] == 0 && svc == 0x100) {
+					svc_wmi_eid = p[13];
+					wmi_credits = svc_credits;
+				} else if (p[12] == 0 && svc == 0x300) {
+					svc_htt_eid = p[13];
+					htt_ep = svc_htt_eid;
+				}
+			} else if (eid != 0 && eid == svc_htt_eid) {
+				r5q_htt_msg(p, pl);
+			} else if (eid != 0 && eid == svc_wmi_eid) {
+				uint32_t id = (uint32_t)(p[8] | p[9] << 8 | p[10] << 16);
+
+				if (!quiet) {
+					printf("wifi: wmi: +%llu ms: EVENT %#x%s (%u bytes)\n", (now_us() - svc_t0) / 1000, id,
+					    id == 0x1 ? " = SERVICE READY" : id == 0x2 ? " = READY" : id == 0x3 ? " = SERVICE AVAILABLE" : "",
+					    hl);        /* (ath10k wmi-tlv.h: WMI_TLV_SERVICE_READY_EVENTID 0x1, READY 0x2, ...) */
+					htc_show("wmi event", p + 8, pl);
+				}
+				r5q_wmi_event(id, p + 12, pl >= 4 ? pl - 4 : 0, svc_wmi_eid);
+			} else {
+				htc_show("frame", p, len);
+			}
+		}
+	}
+	if (svc_ready) {
+		uint8_t conn[8] = { 2, 0, 0x00, 0x03, 0, 0, 0, 0 };   /* CONNECT_SERVICE: HTT data (0x300) */
+		/*
+		 * ... WMI control (0x100), with all the transmit credits in RECV_ALLOC (flags bits 15:8), as ath10k's
+		 * ath10k_htc_get_credit_allocation: asked for with none (Test 115), the target posted no buffers for WMI's pipe
+		 */
+		uint8_t wmi[8] = { 2, 0, 0x00, 0x01, 0, svc_credits, 0, 0 };
+
+		svc_ready = false;
+		ce_send_htc(&ce0, 0x0, 0, conn, sizeof(conn));
+		ce_send_htc(&ce0, 0x0, 0, wmi, sizeof(wmi));
+		printf("wifi: htc: asked to connect HTT and WMI\n");
+	}
+	if (svc_wmi_eid != 0xff && svc_htt_eid != 0xff && htc_seq == 2) {
+		uint8_t setup[12] = { 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };     /* SETUP_COMPLETE_EX, no bundling */
+
+		ce_send_htc(&ce0, 0x0, 0, setup, sizeof(setup));
+		printf("wifi: htc: setup complete sent (WMI endpoint %u, HTT endpoint %u); waiting for WMI's events\n", svc_wmi_eid,
+		    svc_htt_eid);
+	}
+	if (svc_wmi_eid != 0xff) {
+		r5q_wmi_next(svc_wmi_eid);
+	}
+	if (wpa_rekey_us != 0 && now_us() - wpa_rekey_us > 60000 && svc_wmi_eid != 0xff) {
+		wpa_rekey_us = 0;
+		r5q_install_key(svc_wmi_eid, 0, 0, wpa_ptk + 32, 16);
+		bzero(wpa_ptk + 32, 16);
+		if (wpa_gtk_len != 0) {
+			r5q_install_key(svc_wmi_eid, wpa_gtk_idx, 1, wpa_gtk, wpa_gtk_len);
+		}
+		bzero(wpa_gtk, sizeof(wpa_gtk));
+		printf("wifi: wpa: renewed pairwise key installed\n");
+	}
+	if (r5q_link_ready) {
+		static uint64_t said_us;
+		uint64_t now = now_us();
+
+		if (now - said_us > 30000000) {
+			char a[24];
+
+			said_us = now;
+			r5q_en0_address(a, sizeof(a));
+			r5q_flows_say();
+			printf("wifi: net: frames sent %u (completed %u, %u not ok, dropped %u), received to en0 %u, rx buffers %u; "
+			    "step %u; en0's IPv4 address: %s\n", tx_sent, tx_compl, tx_compl_bad, tx_drops, rx_to_net, htt_msdus,
+			    join_step, a);
+			/* (Test 123) the receive rings: our read/write slots, the engine's write index, the next slot's length */
+			printf("wifi: net: CE1 sw %u wr %u hw %u len@sw %u; CE2 sw %u wr %u hw %u; CE4 wr %u read %u; rx ring %u\n",
+			    ce1.sw, ce1.wr, rd(wlan_regs + CE_REG(1, CE_CUR_DRRI)), ce1.ring[16 * ce1.sw + 8] | ce1.ring[16 * ce1.sw + 9] << 8,
+			    ce2.sw, ce2.wr, rd(wlan_regs + CE_REG(2, CE_CUR_DRRI)), ce4.wr, rd(wlan_regs + CE_REG(4, CE_CUR_SRRI)), rxr_alloc);
+		}
+	}
+	return frames;
+}
+
+/*
+ * (Test 120) en0 (bsd/dev/redwood_net.c, the donor's) on this radio: made as the kernel starts, as iOS looks for its
+ * Wi-Fi interface once (the address is ours, fixed), its link up once the keys are in. Frames are Ethernet there and
+ * native wifi here: out, an 802.11 data header (to DS, protected: the firmware encrypts with the installed key;
+ * addr1 the BSSID, addr2 us, addr3 the destination) and LLC/SNAP with the type; in, the reverse (from DS: addr1 the
+ * destination, addr3 the source). The rings are the net thread's from the handover on (r5q_link_ready); a lock keeps
+ * its poll and the stack's transmit apart.
+ */
+static LCK_GRP_DECLARE(r5q_net_grp, "r5q-wifi-net");
+static LCK_MTX_DECLARE(r5q_net_lock, &r5q_net_grp);
+static bool r5q_net_attached;
+
+/*
+ * (Test 121) What goes through en0, from here (bsd/dev/redwood_net.c's own trace is not switched on in this kernel):
+ * DHCP both ways (option 53's type, the address offered), the names asked of DNS and the TCP connections begun
+ * (the first 40), and en0's IPv4 address in the 30-second line.
+ */
+/*
+ * (Test 127) Each TCP connection through en0, summed: bytes and packets each way, what the client sent after the
+ * server's first data (a TLS client that stops there is waiting on its certificate check), and how it ended. Said
+ * when it ends (FIN / RST) and, for those still open, every 30 s (r5q_flows_say).
+ */
+struct r5q_flow {
+	uint8_t rip[4];
+	uint16_t lport, rport;
+	uint32_t out_b, in_b, out_p, in_p, out_after_in, first_out, first_in;
+	uint64_t t0, last;
+	uint8_t end;            /* 0 open, 'F' fin, 'R' rst */
+	bool said;
+};
+#define R5Q_FLOWS 48
+static struct r5q_flow flows[R5Q_FLOWS];
+static uint32_t flows_said;
+
+static void
+r5q_flow_say(struct r5q_flow *f, const char *why)
+{
+	if (flows_said >= 400) {
+		return;
+	}
+	flows_said++;
+	printf("wifi: tcp: %u.%u.%u.%u:%u <- :%u %s after %llu ms: out %u B / %u pkts (first data %u B), in %u B / %u pkts "
+	    "(first %u B), out after the first in: %u B\n", f->rip[0], f->rip[1], f->rip[2], f->rip[3], f->rport, f->lport, why,
+	    (f->last - f->t0) / 1000, f->out_b, f->out_p, f->first_out, f->in_b, f->in_p, f->first_in, f->out_after_in);
+}
+
+static void
+r5q_flows_say(void)
+{
+	for (int i = 0; i < R5Q_FLOWS; i++) {
+		if (flows[i].t0 != 0 && !flows[i].said && flows[i].end == 0) {
+			r5q_flow_say(&flows[i], "still open");
+		}
+	}
+}
+
+static void
+r5q_flow(const uint8_t *ip, const uint8_t *l4, const uint8_t *end, bool out)
+{
+	const uint8_t *rip = out ? ip + 16 : ip + 12;
+	uint16_t lport = out ? (uint16_t)(l4[0] << 8 | l4[1]) : (uint16_t)(l4[2] << 8 | l4[3]);
+	uint16_t rport = out ? (uint16_t)(l4[2] << 8 | l4[3]) : (uint16_t)(l4[0] << 8 | l4[1]);
+	uint32_t iplen = (uint32_t)(ip[2] << 8 | ip[3]), hl = 4u * (ip[0] & 0xf), th = 4u * (l4[12] >> 4), data;
+	uint8_t fl = l4[13];
+	struct r5q_flow *f = NULL, *old = NULL;
+	uint64_t now = now_us();
+
+	if (l4 + 20 > end || iplen < hl + th) {
+		return;
+	}
+	data = iplen - hl - th;
+	for (int i = 0; i < R5Q_FLOWS; i++) {
+		if (flows[i].t0 != 0 && flows[i].lport == lport && flows[i].rport == rport && memcmp(flows[i].rip, rip, 4) == 0) {
+			f = &flows[i];
+			break;
+		}
+		if (old == NULL || flows[i].t0 == 0 || (old->t0 != 0 && flows[i].last < old->last)) {
+			old = &flows[i];
+		}
+	}
+	if (f == NULL) {
+		if (!(out && (fl & 0x12) == 0x02)) {
+			return;                 /* only connections seen from their SYN */
+		}
+		f = old;
+		bzero(f, sizeof(*f));
+		memcpy(f->rip, rip, 4);
+		f->lport = lport;
+		f->rport = rport;
+		f->t0 = now;
+	}
+	f->last = now;
+	if (out) {
+		f->out_p++;
+		f->out_b += data;
+		if (data != 0 && f->first_out == 0) {
+			f->first_out = data;
+		}
+		if (f->in_b != 0) {
+			f->out_after_in += data;
+		}
+	} else {
+		f->in_p++;
+		f->in_b += data;
+		if (data != 0 && f->first_in == 0) {
+			f->first_in = data;
+		}
+	}
+	if ((fl & 0x05) != 0 && f->end == 0) {
+		f->end = (fl & 0x04) ? 'R' : 'F';
+		f->said = true;
+		r5q_flow_say(f, (fl & 0x04) ? (out ? "RESET by us" : "RESET by them") : (out ? "closed by us" : "closed by them"));
+	}
+}
+
+static void
+r5q_sniff(const uint8_t *e, size_t len, bool out)
+{
+	static uint32_t said;
+	const uint8_t *ip = e + 14, *l4, *end = e + len;
+	uint16_t sport, dport;
+
+	if (len < 14 + 28 || e[12] != 0x08 || e[13] != 0x00) {
+		return;
+	}
+	l4 = ip + 4 * (ip[0] & 0xf);
+	if (l4 + 8 > end) {
+		return;
+	}
+	sport = (uint16_t)(l4[0] << 8 | l4[1]);
+	dport = (uint16_t)(l4[2] << 8 | l4[3]);
+	if (ip[9] == 6) {
+		r5q_flow(ip, l4, end, out);
+	}
+	if (ip[9] == 17 && (sport == 67 || sport == 68) && (dport == 67 || dport == 68) && l4 + 8 + 240 <= end) {
+		const uint8_t *b = l4 + 8, *o = b + 240;
+		unsigned type = 0;
+
+		while (o + 2 <= end && o[0] != 255) {
+			if (o[0] == 0) {
+				o++;
+				continue;
+			}
+			if (o[0] == 53 && o[1] >= 1 && o + 3 <= end) {
+				type = o[2];
+			}
+			o += 2 + o[1];
+		}
+		printf("wifi: net: DHCP %s %s: your address %u.%u.%u.%u, server %u.%u.%u.%u\n", out ? "sent" : "received",
+		    type == 1 ? "DISCOVER" : type == 2 ? "OFFER" : type == 3 ? "REQUEST" : type == 5 ? "ACK" : type == 6 ? "NAK" :
+		    type == 7 ? "RELEASE" : type == 8 ? "INFORM" : "(other)", b[16], b[17], b[18], b[19], b[20], b[21], b[22], b[23]);
+		return;
+	}
+	if (!out || said >= 200) {
+		return;
+	}
+	if (ip[9] == 17 && dport == 53 && l4 + 8 + 12 < end) {
+		char name[96];
+		const uint8_t *label = l4 + 8 + 12;
+		size_t n = 0;
+
+		while (label < end && *label != 0 && *label < 64 && label + 1 + *label < end && n + *label + 2 < sizeof(name)) {
+			memcpy(name + n, label + 1, *label);
+			n += *label;
+			name[n++] = '.';
+			label += 1 + *label;
+		}
+		name[n ? n - 1 : 0] = 0;
+		said++;
+		printf("wifi: net: DNS: asks for %s (of %u.%u.%u.%u)\n", name, ip[16], ip[17], ip[18], ip[19]);
+	} else if (ip[9] == 6 && l4 + 14 <= end && (l4[13] & 0x12) == 0x02) {
+		said++;
+		printf("wifi: net: TCP: connects to %u.%u.%u.%u port %u\n", ip[16], ip[17], ip[18], ip[19], dport);
+	}
+}
+
+static void
+r5q_en0_address(char *out, size_t size)
+{
+	ifnet_t ifp = NULL;
+	ifaddr_t *list = NULL;
+
+	snprintf(out, size, "none");
+	if (ifnet_find_by_name("en0", &ifp) != 0 || ifp == NULL) {
+		snprintf(out, size, "no en0");
+		return;
+	}
+	if (ifnet_get_address_list_family(ifp, &list, AF_INET) == 0 && list != NULL) {
+		for (int i = 0; list[i] != NULL; i++) {
+			struct sockaddr_in sin;
+
+			if (ifaddr_address(list[i], (struct sockaddr *)&sin, sizeof(sin)) == 0 && sin.sin_family == AF_INET) {
+				const uint8_t *a = (const uint8_t *)&sin.sin_addr;
+
+				snprintf(out, size, "%u.%u.%u.%u", a[0], a[1], a[2], a[3]);
+				break;
+			}
+		}
+		ifnet_free_address_list(list);
+	}
+	ifnet_release(ifp);
+}
+
+static unsigned
+r5q_poll(void)
+{
+	unsigned n;
+
+	if (!r5q_link_ready) {
+		return 0;
+	}
+	lck_mtx_lock(&r5q_net_lock);
+	n = r5q_service();
+	lck_mtx_unlock(&r5q_net_lock);
+	return n;
+}
+
+static bool
+r5q_transmit(mbuf_t packet, size_t length)
+{
+	static uint8_t eth[REDWOOD_NET_FRAME_MAX], f[REDWOOD_NET_FRAME_MAX + 32];
+	bool ok;
+
+	if (!r5q_link_ready || join_step != 24 || length < 14 || length > REDWOOD_NET_FRAME_MAX ||
+	    mbuf_copydata(packet, 0, length, eth) != 0) {
+		return false;
+	}
+	bzero(f, 32);
+	f[0] = 0x08;                            /* data */
+	f[1] = 0x41;                            /* to DS, protected */
+	memcpy(f + 4, join_bss.bssid, 6);
+	memcpy(f + 10, r5q_mac, 6);
+	memcpy(f + 16, eth, 6);
+	f[24] = 0xaa;
+	f[25] = 0xaa;
+	f[26] = 0x03;
+	f[30] = eth[12];
+	f[31] = eth[13];
+	memcpy(f + 32, eth + 14, length - 14);
+	r5q_sniff(eth, length, true);
+	lck_mtx_lock(&r5q_net_lock);
+	ok = r5q_htt_tx(f, (uint32_t)(32 + length - 14), 0);
+	lck_mtx_unlock(&r5q_net_lock);
+	return ok;
+}
+
+static void
+r5q_rx_to_net(const uint8_t *f, uint32_t ml)
+{
+	static uint8_t eth[REDWOOD_NET_FRAME_MAX];
+	const uint8_t *da, *sa;
+
+	if (!r5q_net_attached || ml < 32 || ml - 32 + 14 > REDWOOD_NET_FRAME_MAX || (f[0] & 0x0c) != 0x08 ||
+	    f[24] != 0xaa || f[25] != 0xaa || f[26] != 0x03) {
+		return;
+	}
+	if ((f[1] & 3) == 2) {
+		da = f + 4;
+		sa = f + 16;
+	} else if ((f[1] & 3) == 0) {
+		da = f + 4;
+		sa = f + 10;
+	} else {
+		return;
+	}
+	if (memcmp(sa, r5q_mac, 6) == 0) {
+		return;                         /* our own multicast, back from the access point */
+	}
+	memcpy(eth, da, 6);
+	memcpy(eth + 6, sa, 6);
+	eth[12] = f[30];
+	eth[13] = f[31];
+	memcpy(eth + 14, f + 32, ml - 32);
+	rx_to_net++;
+	r5q_sniff(eth, ml - 32 + 14, false);
+	redwood_net_input(eth, ml - 32 + 14);
+}
+
+static struct redwood_net_link r5q_link = {
+	.name = "wcn3990",
+	.wireless = true,
+	.up = false,
+	.transmit = r5q_transmit,
+	.poll = r5q_poll,
+};
+
+static void
+r5q_net_early(void)
+{
+	memcpy(r5q_link.address, r5q_mac, 6);
+	r5q_net_attached = redwood_net_attach(&r5q_link);
+}
+
+/*
+ * (Test 122) The radio as iOS's Wi-Fi side wants it: the donor's station boundary (sys/redwood_sta.h,
+ * bsd/dev/redwood_sta.c) calls these on its own thread, one at a time, and turns the outcomes into Apple80211 events
+ * for wifid (bsd/dev/redwood_apple80211.c). A scan is a START_SCAN on the station vdev (off its channel while joined)
+ * whose beacons fill the list heard() gives; a join leaves whatever network there was (deauthentication, VDEV_DOWN
+ * 0x5007, PEER_DELETE 0x6002, VDEV_STOP 0x5006), takes the strongest access point of that name from the last scan
+ * (scanning first if it is not there) and runs the join of Tests 118-119 from VDEV_START on, the key made with
+ * PBKDF2 when a passphrase is given (Settings). The network joined at the start from the stored key is handed over as
+ * the "standing" network: asked for again, it is found joined already, and wifid hears it was joined.
+ */
+static uint64_t heard_us[R5Q_HEARD];
+static uint32_t heard_n, scan_seq = 1;
+
+static void
+r5q_heard_add(const uint8_t *f, uint32_t flen, int rssi, uint32_t rx_chan)
+{
+	struct redwood_sta_bss *b;
+	const uint8_t *e, *ies = f + 36;
+	uint32_t i, il = flen - 36, ch = rx_chan;
+
+	if (heard_tab == NULL || flen < 36) {
+		return;
+	}
+	for (i = 0; i < heard_n && memcmp(heard_tab[i].bssid, f + 16, 6) != 0; i++) {
+	}
+	if (i == heard_n) {
+		if (heard_n == R5Q_HEARD) {
+			return;
+		}
+		heard_n++;
+	}
+	b = &heard_tab[i];
+	bzero(b, sizeof(*b));
+	memcpy(b->bssid, f + 16, 6);
+	if ((e = ie_find(ies, il, 0)) != NULL && e[1] <= 32) {
+		memcpy(b->ssid, e + 2, e[1]);
+		b->ssid_length = e[1];
+	}
+	if ((e = ie_find(ies, il, 3)) != NULL && e[1] == 1) {
+		ch = e[2];
+	} else if ((e = ie_find(ies, il, 61)) != NULL && e[1] >= 1) {
+		ch = e[2];
+	}
+	b->frequency = (uint16_t)chan_mhz(ch);
+	b->rssi = (int16_t)rssi;
+	b->beacon_interval = (uint16_t)(f[32] | f[33] << 8);
+	b->capability = (uint16_t)(f[34] | f[35] << 8);
+	b->elements_length = (uint16_t)(il < REDWOOD_STA_ELEMENTS_MOST ? il : REDWOOD_STA_ELEMENTS_MOST);
+	memcpy(b->elements, ies, b->elements_length);
+	heard_us[i] = now_us();
+}
+
+/* START_SCAN again (the channel list went to the firmware at the start) */
+static void
+r5q_scan_send(uint8_t eid)
+{
+	static uint8_t m[600];
+	uint32_t s[25], ch[R5Q_SCAN_N], bssid[2] = { 0xffffffffu, 0xffffu }, n = 0;
+
+	bzero(s, sizeof(s));
+	scan_seq = (scan_seq + 1) & 0xfff;
+	s[0] = 0xA000 | scan_seq;
+	s[1] = 0xA000 | 1;
+	s[3] = 1;
+	s[4] = 0x1ff;
+	s[5] = 50;
+	s[6] = 110;                     /* passive dwell: a beacon interval and a bit */
+	s[7] = 50;
+	s[8] = 500;
+	s[12] = 20000;
+	s[13] = 5;
+	s[14] = 0x1 ^ 0x20;
+	s[16] = R5Q_SCAN_N;
+	s[17] = 1;
+	s[20] = 3;
+	for (uint32_t i = 0; i < R5Q_SCAN_N; i++) {
+		ch[i] = r5q_scan_mhz[i];
+	}
+	n += tlv_put(m + n, 0x4d, s, sizeof(s));
+	n += tlv_put(m + n, 0x10, ch, sizeof(ch));
+	n += tlv_put(m + n, 0x13, NULL, 0);
+	n += tlv_put(m + n, 0x13, bssid, sizeof(bssid));
+	n += tlv_put(m + n, 0x11, NULL, 0);
+	r5q_wmi_send(eid, 0x3001, m, (uint16_t)n);
+}
+
+static int
+r5q_sta_scan(__unused const struct redwood_sta_scan *what)
+{
+	uint64_t until;
+
+	if (!r5q_link_ready || svc_wmi_eid == 0xff) {
+		return ENXIO;
+	}
+	lck_mtx_lock(&r5q_net_lock);
+	heard_n = 0;
+	scan_running = true;
+	r5q_scan_send(svc_wmi_eid);
+	lck_mtx_unlock(&r5q_net_lock);
+	for (until = now_us() + 15000000; scan_running && now_us() < until;) {
+		delay_for_interval(50, NSEC_PER_MSEC);
+	}
+	printf("wifi: sta: scan %s: %u access points heard\n", scan_running ? "TIMED OUT" : "done", heard_n);
+	if (scan_running) {
+		scan_running = false;
+		return ETIMEDOUT;
+	}
+	return 0;
+}
+
+static void
+r5q_sta_heard(void (*each)(const struct redwood_sta_bss *bss, void *context), void *context)
+{
+	static struct redwood_sta_bss one;
+	uint64_t now = now_us();
+
+	for (uint32_t i = 0;; i++) {
+		lck_mtx_lock(&r5q_net_lock);
+		if (i >= heard_n) {
+			lck_mtx_unlock(&r5q_net_lock);
+			break;
+		}
+		one = heard_tab[i];
+		one.age_ms = (uint32_t)((now - heard_us[i]) / 1000);
+		lck_mtx_unlock(&r5q_net_lock);
+		each(&one, context);
+	}
+}
+
+static int
+r5q_sta_leave(void)
+{
+	uint8_t m[64], why[2] = { 3, 0 };       /* deauthentication: leaving */
+	uint32_t v[3] = { 0, 0, 0 }, n;
+	uint8_t was;
+
+	lck_mtx_lock(&r5q_net_lock);
+	was = join_step;
+	if (was == 0 || svc_wmi_eid == 0xff) {
+		lck_mtx_unlock(&r5q_net_lock);
+		return 0;
+	}
+	if (was >= 16 && was <= 24) {
+		r5q_mgmt_tx(svc_wmi_eid, 0xc0, why, sizeof(why));
+	}
+	if (was == 24) {
+		redwood_net_link_state(false);
+	}
+	n = tlv_put(m, 0x5e, v, 4);                     /* VDEV_DOWN */
+	r5q_wmi_send(svc_wmi_eid, 0x5007, m, (uint16_t)n);
+	memcpy(&v[1], join_bss.bssid, 6);
+	n = tlv_put(m, 0x62, v, 12);                    /* PEER_DELETE */
+	r5q_wmi_send(svc_wmi_eid, 0x6002, m, (uint16_t)n);
+	v[1] = v[2] = 0;
+	n = tlv_put(m, 0x5d, v, 4);                     /* VDEV_STOP */
+	r5q_wmi_send(svc_wmi_eid, 0x5006, m, (uint16_t)n);
+	join_step = 0;
+	r5q_keyed = false;
+	wpa_have_snonce = false;
+	lck_mtx_unlock(&r5q_net_lock);
+	delay_for_interval(300, NSEC_PER_MSEC);
+	printf("wifi: sta: left the network (it was at step %u)\n", was);
+	return 0;
+}
+
+static int
+r5q_sta_join(const struct redwood_sta_join *w)
+{
+	static uint8_t pmk[32];
+	bool psk = w->security == REDWOOD_STA_WPA2_PSK, again = false;
+	struct redwood_sta_bss *b = NULL;
+	uint64_t until;
+	int error;
+
+	if (!r5q_link_ready || svc_wmi_eid == 0xff) {
+		return ENXIO;
+	}
+	if (w->ssid_length == 0 || w->ssid_length > 32) {
+		return EINVAL;
+	}
+	if (psk && w->passphrase_length != 0) {
+		if (w->passphrase_length < 8 || w->passphrase_length > 63) {
+			return EAUTH;
+		}
+		wpa_pbkdf2_sha1(w->passphrase, w->passphrase_length, w->ssid, w->ssid_length, 4096, pmk, 32);
+	} else if (psk) {
+		memcpy(pmk, w->pmk, 32);
+	}
+	lck_mtx_lock(&r5q_net_lock);
+	again = join_step == 24 && w->ssid_length == join_ssid_len && memcmp(w->ssid, join_ssid, join_ssid_len) == 0 &&
+	    (!psk || (wpa_have_pmk && memcmp(pmk, wpa_pmk, 32) == 0));
+	lck_mtx_unlock(&r5q_net_lock);
+	if (again) {
+		bzero(pmk, sizeof(pmk));
+		printf("wifi: sta: asked to join the network it is on: it is joined\n");
+		return 0;
+	}
+	r5q_sta_leave();
+	for (int pass = 0; pass < 2 && b == NULL; pass++) {
+		if (pass == 1 && r5q_sta_scan(NULL) != 0) {
+			break;
+		}
+		lck_mtx_lock(&r5q_net_lock);
+		for (uint32_t i = 0; i < heard_n; i++) {
+			struct redwood_sta_bss *h = &heard_tab[i];
+
+			if (h->ssid_length == w->ssid_length && memcmp(h->ssid, w->ssid, w->ssid_length) == 0 &&
+			    now_us() - heard_us[i] < 120000000ull && (b == NULL || h->rssi > b->rssi)) {
+				b = h;
+			}
+		}
+		if (b != NULL) {
+			bzero(&join_bss, sizeof(join_bss));
+			memcpy(join_bss.bssid, b->bssid, 6);
+			join_bss.chan = (uint8_t)(b->frequency < 3000 ? (b->frequency == 2484 ? 14 : (b->frequency - 2407) / 5) :
+			    (b->frequency - 5000) / 5);
+			join_bss.rssi = b->rssi;
+			join_bss.cap = b->capability;
+			join_bss.bint = b->beacon_interval;
+			join_bss.ielen = (uint16_t)(b->elements_length < sizeof(join_bss.ies) ? b->elements_length : sizeof(join_bss.ies));
+			memcpy(join_bss.ies, b->elements, join_bss.ielen);
+			memcpy(join_ssid, w->ssid, w->ssid_length);
+			join_ssid_len = w->ssid_length;
+			bzero(wpa_pmk, sizeof(wpa_pmk));
+			if (psk) {
+				memcpy(wpa_pmk, pmk, 32);
+			}
+			wpa_have_pmk = psk;
+			wpa_have_snonce = false;
+			wpa_dry_sent = false;
+			r5q_keyed = false;
+			join_error = 0;
+			join_tries = 0;
+			join_have = true;
+			join_step = 10;
+		}
+		lck_mtx_unlock(&r5q_net_lock);
+	}
+	bzero(pmk, sizeof(pmk));
+	if (b == NULL) {
+		printf("wifi: sta: the network asked for was not heard\n");
+		return ENOENT;
+	}
+	for (until = now_us() + 25000000; now_us() < until && join_step != 24 && join_step != 30;) {
+		delay_for_interval(50, NSEC_PER_MSEC);
+	}
+	if (join_step == 24) {
+		redwood_net_link_state(true);
+		printf("wifi: sta: JOINED (asked by iOS); en0's link is up\n");
+		return 0;
+	}
+	error = join_step == 30 ? (join_error != 0 ? join_error : ECONNREFUSED) : ETIMEDOUT;
+	printf("wifi: sta: the join failed at step %u: error %d\n", join_step, error);
+	r5q_sta_leave();
+	return error;
+}
+
+static int
+r5q_sta_power(bool on)
+{
+	if (!on) {
+		r5q_sta_leave();
+	}
+	printf("wifi: sta: power %s asked\n", on ? "on" : "off");
+	return 0;
+}
+
+static void
+r5q_sta_state(struct redwood_sta_state *st)
+{
+	uint8_t step = join_step;
+
+	bzero(st, sizeof(*st));
+	st->phase = step == 24 ? REDWOOD_STA_JOINED : (step >= 10 && step < 24) ? REDWOOD_STA_JOINING : REDWOOD_STA_IDLE;
+	st->last_error = join_error;
+	if (step >= 10 && step <= 24) {
+		memcpy(st->bss.bssid, join_bss.bssid, 6);
+		memcpy(st->bss.ssid, join_ssid, join_ssid_len);
+		st->bss.ssid_length = join_ssid_len;
+		st->bss.frequency = (uint16_t)chan_mhz(join_bss.chan);
+		st->bss.rssi = (int16_t)join_bss.rssi;
+		st->bss.beacon_interval = join_bss.bint;
+		st->bss.capability = join_bss.cap;
+		st->bss.elements_length = join_bss.ielen;
+		memcpy(st->bss.elements, join_bss.ies, join_bss.ielen);
+	}
+}
+
+static unsigned
+r5q_sta_channels(struct redwood_sta_channel *c, unsigned most)
+{
+	unsigned n = 0;
+
+	for (uint32_t i = 0; i < R5Q_SCAN_N && n < most; i++, n++) {
+		uint16_t f = r5q_scan_mhz[i];
+
+		c[n].frequency = f;
+		c[n].flags = (f >= 5260 && f <= 5700) ? (REDWOOD_STA_CHANNEL_PASSIVE | REDWOOD_STA_CHANNEL_RADAR) : 0;
+	}
+	return n;
+}
+
+static struct redwood_sta_ops r5q_sta_ops = {
+	.power = r5q_sta_power,
+	.scan = r5q_sta_scan,
+	.heard = r5q_sta_heard,
+	.join = r5q_sta_join,
+	.leave = r5q_sta_leave,
+	.state = r5q_sta_state,
+	.channels = r5q_sta_channels,
+};
+
+/*
+ * (Test 128) Safari's page comes in over Wi-Fi (Test 127: example.com's 2.5 KB) and is never drawn, while
+ * Settings works. What its processes are doing, from here: every 30 s, for MobileSafari, the WebKit helpers,
+ * trustd, apsd and runningboardd -- the task's suspend count (RunningBoard suspends what it does not keep
+ * running), its threads' states, CPU time (busy or idle), and the main thread's state and priority.
+ */
+struct r5q_pti {
+	uint64_t ut, st;
+	int32_t cpu, policy, run_state, flags, sleep, curpri, pri, maxpri;
+	char name[64];
+};
+extern int fill_taskthreadinfo(task_t task, uint64_t thaddr, bool thuniqueid, struct r5q_pti *ptinfo, void *vpp, int *vidp);
+extern int fill_taskthreadlist(task_t task, void *buffer, int thcount, bool thuniqueid);
+extern task_t proc_task(proc_t proc);
+extern char *proc_best_name(proc_t p);
+extern kern_return_t task_info(task_t task, task_flavor_t flavor, task_info_t out, mach_msg_type_number_t *count);
+
+static bool
+r5q_has(const char *s, const char *w)
+{
+	size_t n = strlen(w);
+
+	for (; *s; s++) {
+		if (strncmp(s, w, n) == 0) {
+			return true;
+		}
+	}
+	return false;
+}
+
+static void
+r5q_procs_say(void)
+{
+	static const char *const want[] = { "MobileSafari", "WebKit", "WebContent", "trustd", "apsd", "runningboardd" };
+	static uint64_t ids[256];
+
+	for (int pid = 1; pid < 2000; pid++) {
+		proc_t p = proc_find(pid);
+		const char *name;
+		bool match = false;
+
+		if (p == NULL) {
+			continue;
+		}
+		name = proc_best_name(p);
+		for (unsigned i = 0; name != NULL && i < sizeof(want) / sizeof(want[0]); i++) {
+			match |= r5q_has(name, want[i]);
+		}
+		if (match) {
+			task_t task = proc_task(p);
+			struct mach_task_basic_info bi;
+			mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
+			int n, states[6] = { 0 };
+			uint64_t cpu = 0;
+			struct r5q_pti main_t, t;
+
+			bzero(&bi, sizeof(bi));
+			bzero(&main_t, sizeof(main_t));
+			task_info(task, MACH_TASK_BASIC_INFO, (task_info_t)&bi, &count);
+			n = fill_taskthreadlist(task, ids, 256, true) / (int)sizeof(uint64_t);
+			for (int k = 0; k < n; k++) {
+				bzero(&t, sizeof(t));
+				if (fill_taskthreadinfo(task, ids[k], true, &t, NULL, NULL) == 0) {
+					states[t.run_state >= 1 && t.run_state <= 5 ? t.run_state : 0]++;
+					cpu += t.ut + t.st;
+					if (k == 0) {
+						main_t = t;
+					}
+				}
+			}
+			printf("wifi: proc: %d %s: suspend %d, %d threads (run %d wait %d stop %d unint %d halt %d), cpu %llu ms; "
+			    "main: state %d, sleep %d s, pri %d, cpu %llu ms\n", pid, name, bi.suspend_count, n, states[1], states[3],
+			    states[2], states[4], states[5], cpu / 1000000, main_t.run_state, main_t.sleep, main_t.curpri,
+			    (main_t.ut + main_t.st) / 1000000);
+		}
+		proc_rele(p);
+	}
+}
+
+static void
+r5q_procs_thread(__unused void *param, __unused wait_result_t wr)
+{
+	for (int i = 0; i < 40; i++) {
+		delay_for_interval(30000, NSEC_PER_MSEC);
+		printf("wifi: proc: --- %d s after the link ---\n", 30 * (i + 1));
+		r5q_procs_say();
+	}
+	thread_terminate(current_thread());
+}
+
+static void
+r5q_sta_start(void)
+{
+	{
+		thread_t th;
+		uint32_t watch = 0;             /* (Test 137: a diagnostic, now on request only: wifi_procs=1) */
+
+		if (PE_parse_boot_argn("wifi_procs", &watch, sizeof(watch)) && watch != 0 &&
+		    kernel_thread_start(r5q_procs_thread, NULL, &th) == KERN_SUCCESS) {
+			thread_deallocate(th);
+		}
+	}
+	uint32_t on = 1;
+
+	if (PE_parse_boot_argn("wifi_sta", &on, sizeof(on)) && on == 0) {
+		return;
+	}
+	if (r5q_sta_attached) {
+		printf("wifi: sta: (again after a restart: the station stays attached)\n");
+		return;
+	}
+	memcpy(r5q_sta_ops.address, r5q_mac, 6);
+	redwood_sta_attach(&r5q_sta_ops);
+	r5q_sta_attached = true;
+	printf("wifi: sta: the radio is the station for iOS's Wi-Fi (redwood_sta)\n");
+	if (join_step == 24 && wpa_have_pmk) {
+		static struct redwood_sta_join j;
+
+		bzero(&j, sizeof(j));
+		memcpy(j.ssid, join_ssid, join_ssid_len);
+		j.ssid_length = join_ssid_len;
+		j.security = REDWOOD_STA_WPA2_PSK;
+		memcpy(j.pmk, wpa_pmk, 32);
+		printf("wifi: sta: the network joined at the start is the standing one: %d\n", redwood_sta_ask_join_standing(&j));
+		bzero(&j, sizeof(j));
+	}
+}
+
+static void
+r5q_htc_bringup(void)
+{
+	uint32_t misc;
+
+	uint32_t smmu = 0;
+	static bool smmu_ok;
+	bool again = wlan_regs != 0;            /* (Test 172) after the Wi-Fi domain restarted */
+
+	svc_t0 = now_us();
+	if (!again) {
+		wlan_regs = ml_io_map(R5Q_WLAN_PHYS + R5Q_WLAN_CE_OFF, 0x10000);
+		wlan_shadow = ml_io_map(R5Q_WLAN_PHYS + R5Q_WLAN_SHADOW_OFF, 0x1000);
+	}
+	if (!again && PE_parse_boot_argn("wifi_smmu", &smmu, sizeof(smmu)) && smmu) {
+		ce_mark("about to read the apps SMMU's registers");
+		smmu_ok = r5q_smmu_look(smmu >= 2);
+	}
+	ce_mark("about to read CE0's control register");
+	printf("wifi: ce: CE0 ctrl1 %#x, CE2 ctrl1 %#x, CE2 drri %#x\n", rd(wlan_regs + CE_REG(0, CE_CTRL1)),
+	    rd(wlan_regs + CE_REG(2, CE_CTRL1)), rd(wlan_regs + CE_REG(2, CE_CUR_DRRI)));
+	ce_mark("about to write the RRI address and the update bits");
+	{
+		static uint64_t rri_pa;
+		uint8_t *rri = wlan_rri != NULL ? wlan_rri : r5q_dma_page(&rri_pa, PAGE_SIZE);
+
+		wlan_rri = rri;
+		if (rri != NULL) {
+			bzero(rri, PAGE_SIZE);
+		}
+
+		if (rri == NULL) {
+			return;
+		}
+		wr(wlan_regs + CE_RRI_LOW, (uint32_t)rri_pa);
+		wr(wlan_regs + CE_RRI_HIGH, (uint32_t)(rri_pa >> 32) & 0x1f);
+		for (uint32_t i = 0; i < 12; i++) {
+			wr(wlan_regs + CE_REG(i, CE_CTRL1), rd(wlan_regs + CE_REG(i, CE_CTRL1)) | 0x80000u);
+		}
+		printf("wifi: ce: read indices into host memory at %#llx\n", rri_pa);
+	}
+	ce_mark("about to set up the rings");
+	if (!ce_setup(&ce0, 0, 16, false) || !ce_setup(&ce3, 3, 32, false) || !ce_setup(&ce2, 2, 64, true) ||
+	    !ce_setup(&ce1, 1, 32, true) || !ce_setup(&ce4, 4, 256, false)) {
+		printf("wifi: ce: no memory for the rings\n");
+		return;
+	}
+	{
+		uint32_t post = 1;
+
+		if (!smmu_ok) {
+			printf("wifi: ce: the WLAN's stream (SID 0x640) has no SMMU match (wifi_smmu=2 makes one): no buffers posted, "
+			    "as their DMA would fault and reset the phone\n");
+			return;
+		}
+		{
+			uint32_t share = 0, refused = 0;      /* (Test 113: TrustZone refuses, -2: off unless wifi_share=1) */
+
+			PE_parse_boot_argn("wifi_share", &share, sizeof(share));
+			if (share) {
+				struct r5q_ce *all[4] = { &ce0, &ce1, &ce2, &ce3 };
+
+				ce_mark("about to share the rings and buffers with the WLAN (TrustZone assign_mem)");
+				refused += r5q_share_pages(wlan_rri, PAGE_SIZE);
+				for (int i = 0; i < 4; i++) {
+					refused += r5q_share_pages(all[i]->ring, PAGE_SIZE);
+					refused += r5q_share_pages(all[i]->bufs, (size_t)all[i]->n * CE_BUF);
+				}
+				printf("wifi: ce: rings and buffers shared with WLAN + WLAN_CE (%u pages refused)\n", refused);
+			}
+		}
+		if (PE_parse_boot_argn("wifi_ce_post", &post, sizeof(post)) && post == 0) {
+			printf("wifi: ce: wifi_ce_post=0: rings set up, no buffers posted (no DMA): stopping here\n");
+			return;
+		}
+	}
+	ce_mark("about to post the receive buffers");
+	ce_post_all(&ce2);
+	ce_post_all(&ce1);
+	printf("wifi: ce: receive buffers posted (CE2 %u, CE1 %u); waiting for HTC READY\n", ce2.n - 1, ce1.n - 1);
+	for (uint64_t until = now_us() + 10000000; now_us() < until || now_us() < wmi_hold_us;) {
+		r5q_service();
+		delay_for_interval(1, NSEC_PER_MSEC);
+	}
+	if (wmi_step != 0) {
+		printf("wifi: scan: listened until +%llu ms: %u management frames, %u networks (WMI credits %d)\n",
+		    (now_us() - svc_t0) / 1000, scan_frames, scan_nets, wmi_credits);
+		printf("wifi: htt: %u in-order indications (%u buffers returned, %u unknown addresses), %u other messages; "
+		    "ring index %u, CE4 write %u read %u\n", htt_inord, htt_msdus, htt_lost, htt_other, rxr_alloc, ce4.wr,
+		    rd(wlan_regs + CE_REG(4, CE_CUR_SRRI)));
+		printf("wifi: join: ended at step %u (20 = associated, 30 = refused / no answer)\n", join_step);
+	}
+	FlushPoC_DcacheRegion((vm_offset_t)ce2.ring, 16 * ce2.n);
+	FlushPoC_DcacheRegion((vm_offset_t)ce2.bufs, 2 * CE_BUF);
+	htc_show("CE2 descriptor 0", ce2.ring, 16);
+	htc_show("CE2 descriptor 1", ce2.ring + 16, 16);
+	htc_show("CE2 buffer 0", ce2.bufs, 40);
+	htc_show("CE2 buffer 1", ce2.bufs + CE_BUF, 40);
+	htc_show("CE1 descriptor 0", ce1.ring, 16);
+	if (wlan_rri != NULL) {
+		FlushPoC_DcacheRegion((vm_offset_t)wlan_rri, 64);
+		htc_show("read indices in host memory (CE0..CE11, 4 bytes each)", wlan_rri, 48);
+	}
+	if (smmu_regs != 0) {
+		/* global fault: sGFSR 0x48, sGFSYNR0/1/2 0x50/0x54/0x58 (SYNR1: the stream id), sGFAR 0x40 */
+		printf("wifi: smmu: global fault status %#x, syndromes %#x %#x %#x, address %#x%08x\n", rd(smmu_regs + 0x48),
+		    rd(smmu_regs + 0x50), rd(smmu_regs + 0x54), rd(smmu_regs + 0x58), rd(smmu_regs + 0x44), rd(smmu_regs + 0x40));
+		if (smmu_cb != ~0u) {
+			vm_offset_t c = smmu_regs + 0x80000 + (vm_offset_t)smmu_cb * 0x1000;   /* 128 global pages of 4 KB */
+
+			printf("wifi: smmu: CB%u SCTLR %#x FSR %#x FSYNR0 %#x FAR %#x%08x\n", smmu_cb, rd(c), rd(c + 0x58), rd(c + 0x68),
+			    rd(c + 0x64), rd(c + 0x60));
+		}
+	}
+	printf("wifi: ce: CE3 (WMI out): our write index %u, its read index %u (register), source write index register %u, "
+	    "errors %#x; CE0: write %u read %u\n", ce3.wr, rd(wlan_regs + CE_REG(3, CE_CUR_SRRI)), rd(wlan_regs + CE_REG(3, CE_SR_WR)),
+	    rd(wlan_regs + CE_REG(3, CE_MISC_IS)), ce0.wr, rd(wlan_regs + CE_REG(0, CE_CUR_SRRI)));
+	htc_show("CE3 descriptor 0", ce3.ring, 16);
+	htc_show("CE3 buffer 0", ce3.bufs, 40);
+	misc = rd(wlan_regs + CE_REG(2, CE_MISC_IS));
+	printf("wifi: ce: after 5 s: CE2 sw %u wr %u (hardware read index %u), CE0 hw read index %u, CE2 errors %#x\n", ce2.sw,
+	    ce2.wr, rd(wlan_regs + CE_REG(2, CE_CUR_DRRI)), rd(wlan_regs + CE_REG(0, CE_CUR_SRRI)), misc);
+	/* (Test 120) the rings are the net thread's from here on */
+	r5q_link_ready = true;
+	if (join_step == 24 && r5q_net_attached) {
+		redwood_net_link_state(true);
+		printf("wifi: net: en0's link is UP (the radio carries its frames; configd's DHCP can start)\n");
+	} else {
+		printf("wifi: net: not connected (step %u): en0's link stays down\n", join_step);
+	}
+	if (wmi_step >= 6) {
+		r5q_sta_start();
+	}
+}
+
+static bool wlfw_again;                 /* (Test 172) the handshake once more, after the Wi-Fi domain restarted */
+
 static void
 r5q_wlfw_handshake(void)
 {
@@ -6539,12 +9499,12 @@ r5q_wlfw_handshake(void)
 		return;
 	}
 	wlfw10_began = now_us();
-	if (qmi_handle_init(&wlfw10, WLFW_BDF_DOWNLOAD_REQ_MSG_V01_MAX_MSG_LEN + 64, &wlfw10_ops, wlfw10_handlers) < 0 ||
-	    qmi_add_lookup(&wlfw10, 0x45, WLFW_SERVICE_VERS_V01, 0) < 0) {
+	if (!wlfw_again && (qmi_handle_init(&wlfw10, WLFW_BDF_DOWNLOAD_REQ_MSG_V01_MAX_MSG_LEN + 64, &wlfw10_ops,
+	    wlfw10_handlers) < 0 || qmi_add_lookup(&wlfw10, 0x45, WLFW_SERVICE_VERS_V01, 0) < 0)) {
 		printf("wifi: wlfw: no QMI handle\n");
 		return;
 	}
-	for (unsigned ms = 0; ms < 3000 && !wlfw10_server; ms += 10) {
+	for (unsigned ms = 0; ms < (wlfw_again ? 30000u : 3000u) && !wlfw10_server; ms += 10) {
 		sleep_ms(10);
 	}
 	if (!wlfw10_server) {
@@ -6593,8 +9553,11 @@ r5q_wlfw_handshake(void)
 			return;
 		}
 		if (wlfw10_assign(r->region_addr, r->size, r->secure_flag != 0) != 0) {
-			printf("wifi: wlfw: TrustZone refused the region: stopping\n");
-			return;
+			if (!wlfw_again) {
+				printf("wifi: wlfw: TrustZone refused the region: stopping\n");
+				return;
+			}
+			printf("wifi: wlfw: (again: the region is still the modem's from the first time; going on)\n");
 		}
 	}
 	bzero(&ready, sizeof(ready));
@@ -6629,6 +9592,9 @@ r5q_wlfw_handshake(void)
 	    "the firmware has not said \"ready\" in 10 s");
 	if (wlfw10_fw_ready && on >= 2) {
 		r5q_wlfw_enable();              /* (Test 110: wifi_wlfw=2) */
+		if (on >= 3) {
+			r5q_htc_bringup();      /* (Test 111: wifi_wlfw=3) */
+		}
 	}
 }
 
@@ -6639,6 +9605,48 @@ r5q_wlfw_handshake(void)
  * here), the modem's SMP2P item watched, then GLINK's versions and the channel IPCRTR, then QRTR. Doorbells: APCS IPC
  * bits 14 (SMP2P) and 12 (GLINK). Boot-arg wifi_modem=1; on a thread of its own, beside the system's start.
  */
+/*
+ * (Test 172) Everything the first bring-up set up for the rings, HTC, WMI, the join and the keys, back to how it was
+ * before it; then the handshake and the bring-up once more. Its memory is reused (ce_setup, r5q_rx_ring_alloc), the
+ * TrustZone assignment of the MSA regions stays, iOS's station stays attached.
+ */
+static void
+r5q_wifi_again(void)
+{
+	uint64_t began = now_us();
+
+	r5q_pd_back = false;
+	r5q_pd_down = false;
+	printf("wifi: THE WI-FI DOMAIN IS BACK: the bring-up again\n");
+	lck_mtx_lock(&r5q_net_lock);
+	r5q_link_ready = false;
+	htc_seq = 0;
+	svc_ready = false;
+	svc_wmi_eid = svc_htt_eid = 0xff;
+	svc_credits = 0;
+	htt_ep = 0xff;
+	htt_ver_ok = false;
+	wmi_step = 0;
+	wmi_init_sent = false;
+	wmi_credits = -1;
+	wmi_hold_us = 0;
+	join_step = 0;
+	join_ev = false;
+	join_have = false;
+	r5q_keyed = false;
+	wpa_have_snonce = false;
+	wpa_rekey_us = 0;
+	scan_running = false;
+	bzero(dtx_busy, sizeof(dtx_busy));
+	lck_mtx_unlock(&r5q_net_lock);
+	wlfw10_msa_ready = false;
+	wlfw10_fw_ready = false;
+	wlfw_again = true;
+	r5q_wlfw_handshake();
+	printf("wifi: the bring-up again: done in %llu ms; join step %u, en0's link %s\n", (now_us() - began) / 1000, join_step,
+	    join_step == 24 ? "UP" : "down");
+}
+
 static void
 r5q_modem_link(__unused void *parameter, __unused wait_result_t result)
 {
@@ -6741,8 +9749,55 @@ r5q_modem_link(__unused void *parameter, __unused wait_result_t result)
 	    "firmware's service %s\n", rmtfs_requests, rmtfs_files[0].reads, rmtfs_files[0].writes, rmtfs_files[1].reads,
 	    rmtfs_files[1].writes, rmtfs_files[2].reads, rmtfs_files[3].reads, wlfw_port ? "IS THERE" : "is not there");
 	if (wlfw_port != 0) {
+		uint32_t restart_at = 0, crash_at = 0;
+		uint64_t up_us;
+
 		redwood_qmi_set_transport(&qrtr_ops);   /* (Test 109: the QMI helpers over this link) */
 		r5q_wlfw_handshake();
+		/*
+		 * (Test 172) From here on: when the Wi-Fi domain goes down the link goes down, and when it is back the
+		 * bring-up is done again (r5q_wifi_again). Boot-arg wifi_pd_restart=S asks the registry to restart the
+		 * domain S seconds after the first bring-up, to see this work.
+		 */
+		PE_parse_boot_argn("wifi_pd_restart", &restart_at, sizeof(restart_at));
+		PE_parse_boot_argn("wifi_fw_crash", &crash_at, sizeof(crash_at));
+		up_us = now_us();
+		for (;;) {
+			sleep_ms(100);
+			/*
+			 * (Test 180) Boot-arg wifi_fw_crash=S: S seconds on, the Wi-Fi firmware is made to assert, as ath10k's
+			 * simulate_fw_crash "assert" does (WMI_TLV_FORCE_FW_HANG_CMDID 0x1d008, TLV 0x98 {type 1 assert, delay 0}):
+			 * the domain goes down and comes back, and r5q_wifi_again() is seen to bring Wi-Fi back.
+			 */
+			if (crash_at != 0 && now_us() - up_us > (uint64_t)crash_at * 1000000 && r5q_link_ready && svc_wmi_eid != 0xff) {
+				uint32_t hang[2] = { 1, 0 };
+				uint8_t m[16];
+				uint32_t n = tlv_put(m, 0x98, hang, sizeof(hang));
+
+				crash_at = 0;
+				lck_mtx_lock(&r5q_net_lock);
+				r5q_wmi_send(svc_wmi_eid, 0x1d008, m, (uint16_t)n);
+				lck_mtx_unlock(&r5q_net_lock);
+				printf("wifi: the Wi-Fi firmware told to assert (wifi_fw_crash): the recovery is to be seen\n");
+			}
+			if (restart_at != 0 && now_us() - up_us > (uint64_t)restart_at * 1000000) {
+				restart_at = 0;
+				servreg_restart("msm/modem/wlan_pd");
+			}
+			if (r5q_pd_down && r5q_link_ready) {
+				lck_mtx_lock(&r5q_net_lock);
+				r5q_link_ready = false;
+				lck_mtx_unlock(&r5q_net_lock);
+				if (join_step == 24) {
+					redwood_net_link_state(false);
+				}
+				printf("wifi: THE WI-FI DOMAIN WENT DOWN: en0's link is down until it is back\n");
+			}
+			if (r5q_pd_back) {
+				r5q_wifi_again();
+				up_us = now_us();
+			}
+		}
 	}
 	show_crash_reason();
 out:
@@ -6764,6 +9819,11 @@ redwood_wifi_init(void)
 	if (redwood_platform_is("r5q")) {
 		if (PE_parse_boot_argn("wifi_survey", &on, sizeof(on)) && on != 0) {
 			r5q_wifi_survey();
+		}
+		on = 0;
+		if (PE_parse_boot_argn("wifi_wlfw", &on, sizeof(on)) && on >= 3 &&
+		    !(PE_parse_boot_argn("wifi_net", &back, sizeof(back)) && back == 0)) {
+			r5q_net_early();                /* (Test 120) en0 now, its link up once joined */
 		}
 		on = 0;
 		if (PE_parse_boot_argn("wifi_modem", &on, sizeof(on)) && on != 0) {

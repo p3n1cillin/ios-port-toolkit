@@ -280,6 +280,37 @@ find_channel(struct peripheral *p, uint32_t channels)
 	}
 }
 
+/*
+ * (r5q Test 239) Read-only, for diagnostics elsewhere in the kernel: up to 8 registers of any PMIC peripheral
+ * (id = slave << 8 | peripheral), through the observer channel as the keys are read. Never a write.
+ */
+bool redwood_spmi_peek(uint16_t id, uint8_t reg, uint8_t *bytes, uint32_t count);
+
+bool
+redwood_spmi_peek(uint16_t id, uint8_t reg, uint8_t *bytes, uint32_t count)
+{
+	struct peripheral p = { .name = "a peripheral looked at", .id = id };
+	uint32_t channels;
+
+	if (arb_core == 0 || arb_observer == 0 || count == 0 || count > 8) {
+		return false;
+	}
+	channels = rd(arb_core + ARB_FEATURES) & 0x7ff;
+	if (channels == 0 || channels > ARB_MAX_CHANNELS) {
+		channels = ARB_MAX_CHANNELS;
+	}
+	for (uint32_t n = 0; n < channels; n++) {
+		uint32_t map = rd(arb_core + ARB_CHANNEL(n));
+
+		if (map != 0 && ((map >> 8) & 0xfff) == id) {
+			p.found = true;
+			p.channel = (uint16_t)n;
+			break;
+		}
+	}
+	return p.found && spmi_read(&p, reg, bytes, count) == NULL;
+}
+
 /* ---- the two peripherals ------------------------------------------------------------------------- */
 
 /* every peripheral of these PMICs */

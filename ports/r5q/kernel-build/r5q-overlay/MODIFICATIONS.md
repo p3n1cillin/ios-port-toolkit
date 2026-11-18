@@ -3,7 +3,7 @@
 This directory is derived from [G986N-iOS](https://github.com/leh0726/G986N-iOS) (commit 946de0fed8e5), itself a
 port of [HackiOS](https://github.com/oosexgang/hackios-xnu-kernel) by OOSEX GANG, whose kernel side is under the
 Apple Public Source License 2.0 ([LICENSE](LICENSE)). It was changed for the Samsung Galaxy S10 Lite (r5q)
-native iOS port between November 1 and November 17, 2026; the git history of this repository has the details.
+native iOS port between November 1 and November 18, 2026; the git history of this repository has the details.
 
 These files replace the donor's files of the same path in its `xnu/files/` tree when the kernel is built
 (`kernel-build/build-xnu-sandbox.sh` copies them over it). What changed, broadly:
@@ -18,5 +18,22 @@ These files replace the donor's files of the same path in its `xnu/files/` tree 
   Android's path rules), pd-mapper, servreg, DIAG and memshare probes, the WCN3990 supplies, and the Wi-Fi
   firmware's WLFW handshake (MSA assignment through TrustZone, board data, WLAN configuration and mission mode).
 
+- `bsd/dev/redwood_wifi.c` (Tests 111-243): the WLAN host side on top of WLFW (copy engines, HTC/WMI, scans,
+  joining with WPA2 in the kernel, the network interface `en0`), and an RPMh resource vote helper used by sound and
+  sensors.
+- `bsd/dev/redwood_adsp.c`: the r5q's audio DSP (ADSP) start and its services, the sensors DSP (SLPI) started from the
+  kernel with FastRPC (its file server) and the SEE sensors protocol (accelerometer, gyroscope, magnetometer, light,
+  proximity; `kern.redwood.motion`), and the microphone's SLIMbus work (not working yet).
+- `bsd/dev/redwood_sound.c`, `redwood_haptic.c`, `redwood_torch.c`, `redwood_adreno.c`: the r5q's speaker path,
+  vibration motor, flashlight and GPU bring-up steps.
+- `bsd/dev/redwood_buttons.c`: a read-only PMIC peek for diagnostics (`redwood_spmi_peek`).
+- `bsd/miscfs/apfs/apfs_vnops.c`: fixed changes to what a file reads, made as it is read, each only where the file's
+  name, size and old bytes match (iOS's CoreMotion motion capabilities and compass factory in the dyld shared cache,
+  with the matching code-signature page hashes); see docs/SYSTEM-PATCHING.md.
+
+`bsd/kern/kern_exec.c` is Apple's open-source XNU file (xnu-8796.121.2) as the donor's patch changes it (library
+insertion by program name, `kern.exec_inject`); here its setting holds 2048 bytes instead of 512.
+
 New in this directory (not the donor's): `bsd/dev/redwood_wlfw_ath10k.h` and `redwood_wlfw_ath10k_ce.h`, generated
-from Linux's ath10k (ISC, see their headers).
+from Linux's ath10k (ISC, see their headers); `bsd/dev/redwood_wpa.h` (WPA2's key handling for the kernel's
+supplicant).

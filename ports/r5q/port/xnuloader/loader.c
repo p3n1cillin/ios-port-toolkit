@@ -1353,6 +1353,16 @@ static int wdt_armed;
  * for the commands that the host sends meanwhile (usb_poll_command).
  */
 static const struct kernel_live *running_live;
+/*
+ * (Test 126) touches from the PC: struct r5q_touch_mailbox in the kernel's redwood_sec_ts.c, found in the loaded
+ * kernel by its first word like kernel_live; "oem touch KIND X0 Y0 X1 Y1 MS" (hex) fills it while iOS runs.
+ */
+struct kernel_touch {
+	uint64_t magic;                 /* "XNUTOUCH" */
+	volatile uint32_t seq, done, kind, x0, y0, x1, y1, ms;
+};
+#define KERNEL_TOUCH_MAGIC      0x484355544f554e58ULL
+static struct kernel_touch *kernel_touch_box;
 static uint64_t running_slide;
 static void usb_poll_command(void);
 
@@ -1818,6 +1828,8 @@ ufs_dump_super(efi_block_io *bio)
 	}
 }
 
+static int block_probe_requested;       /* (declared here too: ufs_survey() looks at it) */
+
 static void
 ufs_survey(void)
 {
@@ -1826,6 +1838,10 @@ ufs_survey(void)
 	efi_handle *handles;
 	uint64_t count, units = 0, partitions = 0;
 
+	if (!block_probe_requested) {
+		return;         /* (Test 153: a survey for bring-up only -- hashes of dsp/xbl/tz/..., the GPT, super, userdata:
+		                 * half a second of every start. ufs_probe=1 brings it back.) */
+	}
 	/* the raw logical units: the block devices that are not partitions of another */
 	if (!EFI_ERROR(BS->locate_handle_buffer(ByProtocol, &blk_guid, NULL, &count, &handles))) {
 		for (uint64_t i = 0; i < count; i++) {
@@ -2001,7 +2017,7 @@ _Static_assert(__builtin_offsetof(struct loader_block, ask) == 128,
 /* (8 KB is as far as this target aligns; the kernel maps whole 16 KB pages around both) */
 static struct loader_block block_shared __attribute__((aligned(0x2000)));
 static void block_io2_probe(efi_handle h, efi_block_io *bio);
-static int block_probe_requested;       /* ufs_probe=1: block_io2_probe() at block_start() */
+static int block_probe_requested;       /* ufs_probe=1: block_io2_probe() at block_start(); ufs_survey() */
 static efi_block_io *block_bios[BLOCK_MAX_PARTS];
 static int block_enabled;
 static int block_write_requested;       /* ufs_write=1 on the command line */
@@ -3306,6 +3322,8 @@ static void r5q_clock_patch(char *cmdline);
 static int r5q_args_load(void);
 static const char *r5q_args_merge(const char *base);
 static void r5q_modem_boot(int start);
+static void r5q_adsp_boot(int start);
+static void r5q_slpi_boot(int start);
 static uint64_t r5q_rmtfs_pa;                  /* (Test 88: tentative; set by r5q_rmtfs_setup) */
 #endif
 static int
@@ -3438,8 +3456,18 @@ run_kernel(int have_checkpoint, uint64_t checkpoint)
 			}
 		}
 		for (const char *c = pi.cmdline; *c; c++) {     /* (Test 83: modem=1 reads the modem's image, modem=2 starts it) */
-			if (starts_with(c, "modem=") && (c == pi.cmdline || c[-1] == ' ') && (c[6] == '1' || c[6] == '2')) {
-				r5q_modem_boot(c[6] == '2');
+			if (starts_with(c, "modem=") && (c == pi.cmdline || c[-1] == ' ') && (c[6] == '1' || c[6] == '2' || c[6] == '3')) {
+				r5q_modem_boot(c[6] == '1' ? 0 : c[6] == '2' ? 1 : 2);
+			}
+		}
+		for (const char *c = pi.cmdline; *c; c++) {     /* (Test 139: adsp=1 reads the audio DSP's image, adsp=2 starts it) */
+			if (starts_with(c, "adsp=") && (c == pi.cmdline || c[-1] == ' ') && (c[5] == '1' || c[5] == '2')) {
+				r5q_adsp_boot(c[5] == '2');
+			}
+		}
+		for (const char *c = pi.cmdline; *c; c++) {     /* (Test 200: slpi=1 reads the sensors' DSP image, slpi=2 starts it) */
+			if (starts_with(c, "slpi=") && (c == pi.cmdline || c[-1] == ' ') && c[5] >= '1' && c[5] <= '9') {
+				r5q_slpi_boot(c[5] >= '5' ? 5 : c[5] >= '2');   /* (2-4: started; 5: loaded, the kernel releases it) */
 			}
 		}
 	}
@@ -3568,6 +3596,9 @@ run_kernel(int have_checkpoint, uint64_t checkpoint)
 		block_write_requested |= starts_with(c, "ufs_write=1") && (c == pi.cmdline || c[-1] == ' ') &&
 		    (c[11] == 0 || c[11] == ' ');
 #endif
+		/* r5q (Test 179): "torch=N" here too -- the flash said to be there (MobileGestalt's camera-flash: Control Center's
+		 * flashlight), the light the kernel's (bsd/dev/redwood_torch.c, the PM8150L's flash module) */
+		torch_requested |= starts_with(c, "torch=") && (c == pi.cmdline || c[-1] == ' ') && c[6] >= '1' && c[6] <= '9';
 	}
 #ifdef R5Q_LAB_TIMED
 	if (lab_ufs && kernel_mpidr != this_mpidr) {
@@ -3628,6 +3659,13 @@ run_kernel(int have_checkpoint, uint64_t checkpoint)
 	for (uint64_t *q = (uint64_t *)kern_lo; q < (uint64_t *)kern_hi; q++) {
 		if (*q == KERNEL_LIVE_MAGIC) {
 			kernel_live = (const struct kernel_live *)q;
+			break;
+		}
+	}
+	kernel_touch_box = NULL;
+	for (uint64_t *q = (uint64_t *)kern_lo; q < (uint64_t *)kern_hi; q++) {
+		if (*q == KERNEL_TOUCH_MAGIC) {
+			kernel_touch_box = (struct kernel_touch *)q;
 			break;
 		}
 	}
@@ -3747,6 +3785,34 @@ run_kernel(int have_checkpoint, uint64_t checkpoint)
 			ba->commandLine[n++] = hex[(address >> shift) & 0xf];
 		}
 		if (n < BOOT_LINE_LENGTH - 1) ba->commandLine[n++] = ' ';
+	}
+	{
+		/*
+		 * r5q (Test 189): 64 KB below 4 GB for DMA engines that take 32-bit addresses (the SLIMbus BAM's message
+		 * queues, bsd/dev/redwood_adsp.c): iOS gets no RAM below 4 GB. Once per loader (it stays across runs).
+		 */
+		static uint64_t lowdma;
+		static const char prefix[] = "lowdma_pa=0x";
+		static const char hex[] = "0123456789abcdef";
+
+		if (lowdma == 0) {
+			uint64_t a = 0xffffffffULL;
+
+			if (!EFI_ERROR(BS->allocate_pages(AllocateMaxAddress, EfiLoaderData, 0x10000 >> 12, &a))) {
+				lowdma = a;
+				memset((void *)(uintptr_t)lowdma, 0, 0x10000);
+				clean_dcache(lowdma, lowdma + 0x10000);
+			}
+		}
+		if (lowdma != 0) {
+			for (const char *c = prefix; *c && n < BOOT_LINE_LENGTH - 1; c++) {
+				ba->commandLine[n++] = *c;
+			}
+			for (int shift = 28; shift >= 0 && n < BOOT_LINE_LENGTH - 1; shift -= 4) {
+				ba->commandLine[n++] = hex[(lowdma >> shift) & 0xf];
+			}
+			if (n < BOOT_LINE_LENGTH - 1) ba->commandLine[n++] = ' ';
+		}
 	}
 	if (r5q_rmtfs_pa != 0) {
 		static const char prefix[] = "rmtfs_pa=0x";
@@ -5208,6 +5274,105 @@ fat_find(struct fat16 *f, uint32_t dir_cluster, const char name83[11], struct fa
 	}
 }
 
+/*
+ * (Test 139) The same by the long (VFAT) name, case ignored: apnhlos, where the audio DSP's image is, was made by a
+ * tool that gives every name a made-up 8.3 alias ("PCAFUI~2" for image/), so only the long names say what is what.
+ * A long name is the LFN entries before its short entry (13 UCS-2 characters each, ordinal in bits 4:0), kept across
+ * sectors and clusters; ASCII only.
+ */
+static int
+fat_find_long(struct fat16 *f, uint32_t dir_cluster, const char *want, struct fat_file *out)
+{
+	uint32_t cluster = dir_cluster, sectors = dir_cluster == 0 ? f->root_sectors : f->spc;
+	static const uint8_t at[13] = { 1, 3, 5, 7, 9, 14, 16, 18, 20, 22, 24, 28, 30 };
+	char name[260];
+	int have = 0;
+
+	for (;;) {
+		for (uint32_t s = 0; s < sectors; s++) {
+			uint64_t lba = dir_cluster == 0 ? f->root_start + s : f->data_start + (uint64_t)(cluster - 2) * f->spc + s;
+
+			if (EFI_ERROR(f->bio->read_blocks(f->bio, f->bio->media->media_id, lba, f->bs, fat_bounce))) {
+				return 0;
+			}
+			for (uint32_t e = 0; e < f->bs; e += 32) {
+				const uint8_t *d = fat_bounce + e;
+
+				if (d[0] == 0) {
+					return 0;
+				}
+				if (d[0] == 0xe5) {
+					have = 0;
+					continue;
+				}
+				if ((d[11] & 0x3f) == 0x0f) {           /* a piece of a long name */
+					uint32_t ord = d[0] & 0x1f;
+
+					if (d[0] & 0x40) {
+						memset(name, 0, sizeof(name));
+					}
+					if (ord == 0 || ord > 19) {
+						have = 0;
+						continue;
+					}
+					for (uint32_t k = 0; k < 13; k++) {
+						uint16_t c = d[at[k]] | d[at[k] + 1] << 8;
+
+						name[(ord - 1) * 13 + k] = (c == 0 || c == 0xffff) ? 0 : (c < 128 ? (char)c : '?');
+					}
+					have = 1;
+					continue;
+				}
+				if (have) {
+					uint32_t k = 0;
+
+					while (want[k] && name[k] && (want[k] | 0x20) == (name[k] | 0x20)) {
+						k++;
+					}
+					if (want[k] == 0 && name[k] == 0) {
+						out->cluster = d[26] | d[27] << 8;
+						out->size = d[28] | d[29] << 8 | d[30] << 16 | (uint32_t)d[31] << 24;
+						return 1;
+					}
+				}
+				have = 0;
+			}
+		}
+		if (dir_cluster == 0) {
+			return 0;
+		}
+		cluster = fat_next(f, cluster);
+		if (cluster < 2 || cluster >= 0xfff8) {
+			return 0;
+		}
+	}
+}
+
+/* by the 8.3 name, or else by the long one ("base.ext", or "base" when ext is empty) */
+static void name83(const char *base, const char *ext, char out[11]);
+static int
+fat_find_name(struct fat16 *f, uint32_t dir_cluster, const char *base, const char *ext, struct fat_file *out)
+{
+	char n83[11], longname[64];
+	uint32_t k = 0;
+
+	name83(base, ext, n83);
+	if (fat_find(f, dir_cluster, n83, out)) {
+		return 1;
+	}
+	for (uint32_t j = 0; base[j] && k < 40; j++) {
+		longname[k++] = base[j];
+	}
+	if (ext[0]) {
+		longname[k++] = '.';
+		for (uint32_t j = 0; ext[j] && k < 60; j++) {
+			longname[k++] = ext[j];
+		}
+	}
+	longname[k] = 0;
+	return fat_find_long(f, dir_cluster, longname, out);
+}
+
 /* a file's first `len` bytes (at most its size) to `dest`: runs of clusters read whole, the last partial one bounced */
 static int
 fat_read(struct fat16 *f, const struct fat_file *file, uint8_t *dest, uint32_t len)
@@ -5481,10 +5646,16 @@ struct elf32_phdr {
 	uint32_t type, offset, vaddr, paddr, filesz, memsz, flags, align;
 };
 
-/* modem=1: read and check; modem=2: and start it */
+/*
+ * A DSP of the SoC's, started through TrustZone's PAS from its signed image in the modem partition's image/ (Test 83 for
+ * the modem; Test 139 the same for the audio DSP: sound's first step). who: the file name and the AOP's name for it
+ * ("modem", "adsp"); pas_id: TrustZone's number for the image (4 the modem, 1 the audio DSP); mem, mem_size: its
+ * reserved memory (the live DT's no-map region). start 0: read and check only; 1/2: and start it.
+ */
 static void
-r5q_modem_boot(int start)
+r5q_pas_boot(const char *who, const char *partition, uint32_t pas_id, uint64_t mem, uint64_t mem_size, int start)
 {
+	static char aop_on[80], aop_off[80];
 	static char mdt_name[11];
 	struct fat16 f;
 	struct fat_file image_dir, mdt, seg;
@@ -5495,23 +5666,60 @@ r5q_modem_boot(int start)
 	int relocatable = 0;
 	int64_t r;
 
-	print("modem: %s\n", start ? "STARTING THE MODEM (modem=2)" : "reading the modem's image (modem=1: a check only)");
-	if (start && !usb_connected) {
+	/*
+	 * (Test 124) modem=3: started with or without a PC on the cable -- for Wi-Fi on a phone in a pocket. Tests 85-123
+	 * started it every time without a fault; a start that went wrong is still undone from the next start's listening
+	 * window with a PC (it comes before this), or from Download Mode.
+	 */
+	print("%s: %s\n", who, start == 2 ? "STARTING IT (with or without a PC)" : start ? "STARTING IT (only with a PC)" :
+	    "reading its image (a check only)");
+	if (start == 1 && !usb_connected) {
 		print("modem: not started: modem=2 runs only with a PC on the cable (so a bad start can be undone)\n");
 		start = 0;
 	}
+	{
+		const char *head = "{class: image, res: load_state, name: ", *on = ", val: on}", *off = ", val: off}";
+		uint32_t k = 0, j;
+
+		for (j = 0; head[j]; j++) {
+			aop_on[k] = aop_off[k] = head[j];
+			k++;
+		}
+		for (j = 0; who[j] && k < 60; j++) {
+			aop_on[k] = aop_off[k] = who[j];
+			k++;
+		}
+		for (j = 0; on[j]; j++) {
+			aop_on[k + j] = on[j];
+		}
+		aop_on[k + j] = 0;
+		for (j = 0; off[j]; j++) {
+			aop_off[k + j] = off[j];
+		}
+		aop_off[k + j] = 0;
+	}
 	name83("image", "", mdt_name);
-	if (!fat_open(&f, "modem") || !fat_find(&f, 0, mdt_name, &image_dir)) {
+	if (!fat_open(&f, partition) || !fat_find_name(&f, 0, "image", "", &image_dir)) {
 		print("modem: no image/ directory in the modem partition\n");
 		return;
 	}
-	name83("modem", "mdt", mdt_name);
+	name83(who, "mdt", mdt_name);
 	a = 0xffffffffULL;                      /* (TrustZone reads the metadata: below 4 GB, in one piece) */
-	if (!fat_find(&f, image_dir.cluster, mdt_name, &mdt) || mdt.size < 52 || mdt.size > 1024 * 1024 ||
-	    EFI_ERROR(BS->allocate_pages(AllocateAnyPages, EfiLoaderData, (mdt.size + 4095) >> 12, &fa)) ||
-	    EFI_ERROR(BS->allocate_pages(AllocateMaxAddress, EfiLoaderData, (1024 * 1024) >> 12, &a)) ||
-	    !fat_read(&f, &mdt, (file = (uint8_t *)(uintptr_t)fa), mdt.size)) {
-		print("modem: image/modem.mdt not read\n");
+	if (!fat_find_name(&f, image_dir.cluster, who, "mdt", &mdt)) {
+		print("%s: image/%s.mdt not found in the modem partition\n", who, who);
+		return;
+	}
+	if (mdt.size < 52 || mdt.size > 1024 * 1024) {
+		print("%s: its .mdt has an odd size (%d bytes)\n", who, (uint64_t)mdt.size);
+		return;
+	}
+	if (EFI_ERROR(BS->allocate_pages(AllocateAnyPages, EfiLoaderData, (mdt.size + 4095) >> 12, &fa)) ||
+	    EFI_ERROR(BS->allocate_pages(AllocateMaxAddress, EfiLoaderData, (1024 * 1024) >> 12, &a))) {
+		print("%s: no memory for its .mdt and metadata\n", who);
+		return;
+	}
+	if (!fat_read(&f, &mdt, (file = (uint8_t *)(uintptr_t)fa), mdt.size)) {
+		print("%s: its .mdt (%d bytes) not read\n", who, (uint64_t)mdt.size);
 		return;
 	}
 	meta = (uint8_t *)(uintptr_t)a;
@@ -5546,8 +5754,8 @@ r5q_modem_boot(int start)
 		} else {
 			char n[11], e[4] = { 'b', (char)('0' + hash / 10), (char)('0' + hash % 10), 0 };
 
-			name83("modem", e, n);
-			if (!fat_find(&f, image_dir.cluster, n, &seg) || !fat_read(&f, &seg, meta + meta_len, ph[hash].filesz)) {
+			name83(who, e, n);
+			if (!fat_find_name(&f, image_dir.cluster, who, e, &seg) || !fat_read(&f, &seg, meta + meta_len, ph[hash].filesz)) {
 				print("modem: the hash segment's file is missing\n");
 				return;
 			}
@@ -5557,30 +5765,30 @@ r5q_modem_boot(int start)
 	print("modem: modem.mdt: %d bytes, %d segments, hash segment %d (%d bytes), %s; loadable %x..%x (%d MB)\n",
 	    (uint64_t)mdt.size, (uint64_t)count, (uint64_t)hash, (uint64_t)(hash != ~0u ? ph[hash].filesz : 0),
 	    relocatable ? "relocatable" : "fixed", lo, hi, (hi - lo) >> 20);
-	if (hi - lo > MPSS_MEM_SIZE || (!relocatable && (lo < MPSS_MEM || hi > MPSS_MEM + MPSS_MEM_SIZE))) {
-		print("modem: the image does not fit the modem's memory (%x, %x bytes)\n", MPSS_MEM, MPSS_MEM_SIZE);
+	if (hi - lo > mem_size || (!relocatable && (lo < mem || hi > mem + mem_size))) {
+		print("modem: the image does not fit the modem's memory (%x, %x bytes)\n", mem, mem_size);
 		return;
 	}
 	clean_dcache(a, a + ((meta_len + 4095) & ~4095u));
 
 	if (start) {
-		if (!qmp_open() || !qmp_send("{class: image, res: load_state, name: modem, val: on}")) {
+		if (!qmp_open() || !qmp_send(aop_on)) {
 			print("modem: not started: the AOP was not told\n");
 			return;
 		}
-		r = scm_call("init_image (the header and its signature)", 0x201, 2 | (2 << 6), MPSS_PAS_ID, a, 0, &answer);
+		r = scm_call("init_image (the header and its signature)", 0x201, 2 | (2 << 6), pas_id, a, 0, &answer);
 		if (r != 0 || answer != 0) {
 			print("modem: TRUSTZONE REFUSES THE MODEM'S HEADER (%x, %x)\n", (uint64_t)r, answer);
-			qmp_send("{class: image, res: load_state, name: modem, val: off}");
+			qmp_send(aop_off);
 			return;
 		}
 		print("modem: TRUSTZONE ACCEPTS THE MODEM'S SIGNATURE\n");
 		if (relocatable) {
-			r = scm_call("mem_setup (where it goes)", 0x202, 3, MPSS_PAS_ID, MPSS_MEM, hi - lo, &answer);
+			r = scm_call("mem_setup (where it goes)", 0x202, 3, pas_id, mem, hi - lo, &answer);
 			if (r != 0 || answer != 0) {
 				print("modem: TRUSTZONE REFUSES THE PLACE (%x, %x)\n", (uint64_t)r, answer);
-				scm_call("shutdown", 0x206, 1, MPSS_PAS_ID, 0, 0, &answer);
-				qmp_send("{class: image, res: load_state, name: modem, val: off}");
+				scm_call("shutdown", 0x206, 1, pas_id, 0, 0, &answer);
+				qmp_send(aop_off);
 				return;
 			}
 		}
@@ -5593,7 +5801,7 @@ r5q_modem_boot(int start)
 		if (ph[i].type != 1 || ((ph[i].flags >> 24) & 7) == 2 || ph[i].memsz == 0) {
 			continue;
 		}
-		at = relocatable ? MPSS_MEM + (ph[i].paddr - lo) : ph[i].paddr;
+		at = relocatable ? mem + (ph[i].paddr - lo) : ph[i].paddr;
 		if (ph[i].filesz > ph[i].memsz) {
 			print("modem: segment %d: more in the file than in memory\n", (uint64_t)i);
 			return;
@@ -5602,8 +5810,8 @@ r5q_modem_boot(int start)
 			if ((uint64_t)ph[i].offset + ph[i].filesz <= mdt.size) {
 				memcpy((void *)(uintptr_t)at, file + ph[i].offset, ph[i].filesz);   /* (an .mdt that is the whole ELF) */
 			} else {
-				name83("modem", e, n);
-				if (!fat_find(&f, image_dir.cluster, n, &seg) || seg.size < ph[i].filesz ||
+				name83(who, e, n);
+				if (!fat_find_name(&f, image_dir.cluster, who, e, &seg) || seg.size < ph[i].filesz ||
 				    !fat_read(&f, &seg, (uint8_t *)(uintptr_t)at, ph[i].filesz)) {
 					print("modem: segment %d: modem.%s missing or short\n", (uint64_t)i, e);
 					return;
@@ -5622,19 +5830,66 @@ r5q_modem_boot(int start)
 	if (!start) {
 		return;
 	}
-	r5q_rmtfs_setup();                      /* (Test 88: its EFS memory, before it starts and asks for it) */
+	if (pas_id == MPSS_PAS_ID) {
+		r5q_rmtfs_setup();                      /* (Test 88: its EFS memory, before it starts and asks for it) */
 	/* (Test 96) the QDSS (debug trace) clock the Wi-Fi firmware writes to, voted with the AOP as Linux's sm8150 wifi node
 	 * asks for it ("qdss" from aoss_qmp; qcom_aoss.c's clock message): a request to the AOP, no register of ours */
 	print("modem: the QDSS clock asked of the AOP: %s\n", qmp_send("{class: clock, res: qdss, val: 1}") ? "taken" : "NOT TAKEN");
-	r = scm_call("auth_and_reset (check it all, let it out of reset)", 0x205, 1, MPSS_PAS_ID, 0, 0, &answer);
-	if (r != 0 || answer != 0) {
-		print("modem: TRUSTZONE DOES NOT START THE MODEM (%x, %x)\n", (uint64_t)r, answer);
-		scm_call("shutdown", 0x206, 1, MPSS_PAS_ID, 0, 0, &answer);
-		qmp_send("{class: image, res: load_state, name: modem, val: off}");
+	}
+	if (start == 3) {
+		/* (Test 212) slpi=5: everything but the release -- the kernel calls auth_and_reset itself once its FastRPC
+		 * listener is ready to serve the SLPI's start-up (its sensor registry is read through it then, and only then) */
+		print("%s: image in place and accepted; NOT released: the kernel will (auth_and_reset, PAS %d)\n", who,
+		    (uint64_t)pas_id);
 		return;
 	}
-	print("modem: THE MODEM IS OUT OF RESET (TrustZone checked its image); the kernel looks for its SMP2P item 428\n");
-	modem_running = 1;
+	r = scm_call("auth_and_reset (check it all, let it out of reset)", 0x205, 1, pas_id, 0, 0, &answer);
+	if (r != 0 || answer != 0) {
+		print("modem: TRUSTZONE DOES NOT START THE MODEM (%x, %x)\n", (uint64_t)r, answer);
+		scm_call("shutdown", 0x206, 1, pas_id, 0, 0, &answer);
+		qmp_send(aop_off);
+		return;
+	}
+	if (pas_id == MPSS_PAS_ID) {
+		print("modem: THE MODEM IS OUT OF RESET (TrustZone checked its image); the kernel looks for its SMP2P item 428\n");
+		modem_running = 1;
+	} else {
+		print("%s: OUT OF RESET (TrustZone checked its image, PAS %d)\n", who, (uint64_t)pas_id);
+	}
+}
+
+/* modem=1: read and check; modem=2: and start it (modem=3: without a PC as well) */
+static void
+r5q_modem_boot(int start)
+{
+	r5q_pas_boot("modem", "modem", MPSS_PAS_ID, MPSS_MEM, MPSS_MEM_SIZE, start);
+}
+
+/* (Test 139) adsp=1: the audio DSP's image read and checked; adsp=2: and started (live DT pil_adsp_region) */
+#define ADSP_PAS_ID             1
+#define ADSP_MEM                0x99300000ULL
+#define ADSP_MEM_SIZE           0x02700000ULL
+
+static void
+r5q_adsp_boot(int start)
+{
+	r5q_pas_boot("adsp", "apnhlos", ADSP_PAS_ID, ADSP_MEM, ADSP_MEM_SIZE, start ? 2 : 0);
+}
+
+/*
+ * (Test 200) slpi=1: the sensors' DSP image (image/slpi.mdt in the apnhlos partition) read and checked; slpi=2: and
+ * started. Live DT qcom,ssc@5c00000: "qcom,pil-tz-generic", pas-id 12, firmware "slpi", memory pil_slpi_region
+ * 0x8c400000 + 20 MB, its rails vdd_cx/vdd_mx (on while the system runs) and sensor_vdd (1.8 V, the sensors').
+ * The motion sensors are behind it (qcom,msm-ssc-sensors: Qualcomm's SEE); nothing on the AP's own buses.
+ */
+#define SLPI_PAS_ID             12
+#define SLPI_MEM                0x8c400000ULL
+#define SLPI_MEM_SIZE           0x01400000ULL
+
+static void
+r5q_slpi_boot(int start)
+{
+	r5q_pas_boot("slpi", "apnhlos", SLPI_PAS_ID, SLPI_MEM, SLPI_MEM_SIZE, start >= 5 ? 3 : start ? 2 : 0);
 }
 
 /*
@@ -6137,6 +6392,28 @@ fb_command(char *cmd)
 		    starts_with(cmd, "oem selftest") || starts_with(cmd, "oem hang") || starts_with(cmd, "oem recording") ||
 		    starts_with(cmd, "oem sound") || starts_with(cmd, "oem clearscreen") || starts_with(cmd, "oem memmap"))) {
 			fb_reply("FAIL", "a kernel is running (oem stop ends it)");
+		} else if (starts_with(cmd, "oem touch ")) {
+			/* (Test 126) a gesture for iOS: KIND X0 Y0 X1 Y1 MS, hex; seq written last */
+			const char *p = cmd + 10;
+			uint32_t k = (uint32_t)maint_hex(&p), x0 = (uint32_t)maint_hex(&p), y0 = (uint32_t)maint_hex(&p);
+			uint32_t x1 = (uint32_t)maint_hex(&p), y1 = (uint32_t)maint_hex(&p), ms = (uint32_t)maint_hex(&p);
+
+			if (!busy || kernel_touch_box == NULL) {
+				fb_reply("FAIL", "no running kernel with a touch mailbox");
+			} else if (kernel_touch_box->seq != kernel_touch_box->done) {
+				fb_reply("FAIL", "the last gesture is still being played");
+			} else {
+				kernel_touch_box->kind = k;
+				kernel_touch_box->x0 = x0;
+				kernel_touch_box->y0 = y0;
+				kernel_touch_box->x1 = x1;
+				kernel_touch_box->y1 = y1;
+				kernel_touch_box->ms = ms;
+				__asm__ volatile ("dsb sy" ::: "memory");
+				kernel_touch_box->seq = kernel_touch_box->seq + 1;
+				__asm__ volatile ("dsb sy" ::: "memory");
+				fb_reply("OKAY", "");
+			}
 		} else if (starts_with(cmd, "oem stop")) {
 			/* the kernel looks at this once a second and comes back as it does when its time is up */
 			if (busy) {
@@ -6479,7 +6756,7 @@ ramfb_phone_screen(void)
 	SCREEN.stride = PHONE_WIDTH * 4;
 }
 
-#define AUTOBOOT_WAIT_MS        2000
+#define AUTOBOOT_WAIT_MS        500     /* (Test 153: was 2000; a key held from the start is seen at once) */
 
 #ifdef R5Q_LAB_TIMED
 /*
@@ -6501,7 +6778,12 @@ r5q_volume_key(void)
 	for (uint64_t i = 0; i < count; i++) {
 		efi_text_input *in;
 
-		if (EFI_ERROR(BS->handle_protocol(handles[i], &sti_guid, (void **)&in)) || in == NULL) {
+		/*
+		 * (Test 159) not the console's own input: reading it makes BDS try to connect ConIn on demand, which fails on
+		 * this phone and says "[Bds] Connect ConIn failed - Unsupported" on the screen. The keys are ButtonsDxe's.
+		 */
+		if (handles[i] == ST->con_in_handle ||
+		    EFI_ERROR(BS->handle_protocol(handles[i], &sti_guid, (void **)&in)) || in == NULL || in == ST->con_in) {
 			continue;
 		}
 		while (in->read_key_stroke(in, &key) == 0) {
@@ -6585,7 +6867,7 @@ r5q_maintenance(int keep_usb)
 		flush_log();
 		maint_probe = 1;
 		t0 = READ_SYSREG(CNTVCT_EL0);
-		while (!maint_mode && READ_SYSREG(CNTVCT_EL0) - t0 < (usb_connected ? 15 : 5) * freq) {
+		while (!maint_mode && READ_SYSREG(CNTVCT_EL0) - t0 < (usb_connected ? 15 * freq : 3 * freq / 2)) {   /* (Test 153: 1.5 s, was 5, without a PC) */
 			usb_poll_command();
 			BS->stall(1000);
 		}

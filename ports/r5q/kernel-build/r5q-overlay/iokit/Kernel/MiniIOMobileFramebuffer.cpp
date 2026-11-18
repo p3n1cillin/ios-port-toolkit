@@ -21,6 +21,8 @@
 #include <libkern/c++/OSNumber.h>
 #include <libkern/c++/OSDictionary.h>
 #include <libkern/c++/OSArray.h>
+#include <libkern/c++/OSCollectionIterator.h>
+#include <libkern/c++/OSBoolean.h>
 #include <libkern/c++/OSBoolean.h>
 #include <libkern/c++/OSString.h>
 #include <libkern/c++/OSSymbol.h>
@@ -297,6 +299,7 @@ public:
 	bool            fRecWrapped;            /* (rec_ring) the memory has been full once: frames go over the oldest */
 
 	virtual bool start(IOService * provider) APPLE_KEXT_OVERRIDE;
+	virtual IOReturn setProperties(OSObject * properties) APPLE_KEXT_OVERRIDE;
 	void publishModes(void);
 	MiniIOSurface * defaultSurface(void);
 	void present(const uint8_t * swap);
@@ -488,6 +491,215 @@ static inline void
 mdssWrite(uint32_t offset, uint32_t value)
 {
 	*(volatile uint32_t *) (gMdss + offset) = value;
+}
+
+/*
+ * (r5q, Test 144) The panel's own power: DCS commands sent through DSI0's command DMA as our firmware sends its window
+ * commands (Mu-Silicium r5qfullPkg R5qPanelSync.c, R5qDsiSend: Linux msm's in-memory packet -- header bytes 1, 2, 0,
+ * then flags, bit 7 last --, the page 0x9E200000 at the top of Display Reserved, which the buffers stay below;
+ * DMA_BASE 0x48, DMA_LEN 0x4C, TRIG_DMA 0x90, INTR_CTRL 0x110 bit 0 CMD_DMA_DONE). Off: the interface's autorefresh
+ * off and the transfer in flight let go, display off (0x28), sleep in (0x10); on: sleep out (0x11), 120 ms, display on
+ * (0x29), autorefresh back. Whether the panel slept is seen on its TE line (GPIO8, function mdp_vsync, NORTH tile
+ * 0x03900000): a sleeping panel scans nothing and sends no TE. Single pages are mapped (Test 143: an early 1 MB mapping
+ * left the Wi-Fi start without room for its rings).
+ *   fb_power=1       what iOS asks through selector 12 (RequestPowerChange) is done; by default only logged
+ *   fb_sleeptest=N   N seconds after the panel is taken over: off, 3 s, on, the TE counted each time (a test)
+ */
+static TUNABLE(uint32_t, gPowerArg, "fb_power", 0);
+static TUNABLE(uint32_t, gSleepTest, "fb_sleeptest", 0);
+#define R5Q_DSI0                0x0ae94000ull
+#define R5Q_DSI_CMDBUF          0x9e200000ull
+#define R5Q_TE_PAGE             (0x03900000ull + 8 * 0x1000ull)
+static volatile uint32_t *      gDsi;
+static volatile uint8_t *       gDsiBuf;
+static volatile uint32_t *      gTePin;
+static bool                     gPanelAsleep;
+static uint32_t                 gSavedAutorefresh;
+static IOLock *                 gPowerLock;
+
+/*
+ * One DSI packet through the command DMA: `bytes' as the firmware lays them out (header bytes 1, 2, 0, flags, then
+ * a long packet's payload padded with 0xFF to 4 bytes).
+ */
+static bool panelPacket(const uint8_t * bytes, uint32_t length, const char * name, uint8_t command);
+
+static bool
+panelDcs(uint8_t command, const char * name)
+{
+	const uint8_t packet[4] = { command, 0, 0x05, 0x80 };   /* a DCS short write without a parameter, the last packet */
+
+	return panelPacket(packet, 4, name, command);
+}
+
+/* (Test 148) a DCS short write with one parameter (data type 0x15) */
+static bool
+panelDcs1(uint8_t command, uint8_t value, const char * name)
+{
+	const uint8_t packet[4] = { command, value, 0x15, 0x80 };
+
+	return panelPacket(packet, 4, name, command);
+}
+
+/* (Test 148) a DCS long write of the command and two bytes (data type 0x39, word count 3) */
+static bool
+panelDcs2(uint8_t command, uint8_t high, uint8_t low, const char * name)
+{
+	const uint8_t packet[8] = { 3, 0, 0x39, 0xc0, command, high, low, 0xff };
+
+	return panelPacket(packet, 8, name, command);
+}
+
+static bool
+panelPacket(const uint8_t * bytes, uint32_t length, const char * name, uint8_t command)
+{
+	uint64_t until;
+	bool done;
+
+	if (gDsi == NULL || gDsiBuf == NULL || length > 64) {
+		return false;
+	}
+	for (uint32_t i = 0; i < length; i++) {
+		gDsiBuf[i] = bytes[i];
+	}
+	__asm__ volatile ("dsb sy" ::: "memory");
+	gDsi[0x110 / 4] = (gDsi[0x110 / 4] & 0xaaaaaaaau) | 3u;
+	gDsi[0x48 / 4] = (uint32_t) R5Q_DSI_CMDBUF;
+	gDsi[0x4c / 4] = length;
+	__asm__ volatile ("dsb sy" ::: "memory");
+	gDsi[0x90 / 4] = 1;
+	__asm__ volatile ("dsb sy" ::: "memory");
+	clock_interval_to_deadline(20, kMillisecondScale, &until);
+	while (!(gDsi[0x110 / 4] & 1) && mach_absolute_time() < until) {
+	}
+	done = (gDsi[0x110 / 4] & 1) != 0;
+	gDsi[0x110 / 4] = (gDsi[0x110 / 4] & 0xaaaaaaaau) | 1u;
+	redwood_tl("fb: panel: DCS %02x %s: %s (ack_err %#x)\n", command, name, done ? "sent" : "NO DMA DONE in 20 ms",
+	    gDsi[0x68 / 4]);
+	return done;
+}
+
+/*
+ * (Test 148) The panel's brightness: what CoreBrightness asks of the AppleARMBacklight service below, as a fraction
+ * (of 65536), sent as DCS 0x51 (WRDISBV, two bytes: 0..0x3ff here) after 0x53 0x20 (WRCTRLD: brightness control on).
+ * Never under 10 % (a dark screen nobody can read to put right). Only with boot-arg fb_bright=1 until it is seen to work.
+ */
+static TUNABLE(uint32_t, gBrightArg, "fb_bright", 0);
+static uint32_t gBrightSent = ~0u;
+
+static void
+panelBrightness(uint32_t fraction, const char * why)
+{
+	uint32_t level;
+
+	if (fraction > 65536) {
+		fraction = 65536;
+	}
+	level = fraction * 0x3ff / 65536;
+	if (level < 0x3ff / 10) {
+		level = 0x3ff / 10;
+	}
+	if (!gBrightArg || gDsi == NULL || gPowerLock == NULL || level == gBrightSent) {
+		return;
+	}
+	IOLockLock(gPowerLock);
+	if (!gPanelAsleep) {
+		if (gBrightSent == ~0u) {
+			panelDcs1(0x53, 0x20, "brightness control on");
+		}
+		panelDcs2(0x51, (uint8_t) (level >> 8), (uint8_t) level, why);
+		gBrightSent = level;
+	}
+	IOLockUnlock(gPowerLock);
+}
+
+/* the TE line's edges in so many milliseconds (60 Hz: two a frame) */
+static uint32_t
+panelTeEdges(uint32_t ms)
+{
+	uint64_t until;
+	uint32_t last, now, edges = 0;
+
+	if (gTePin == NULL) {
+		return 0;
+	}
+	last = gTePin[1] & 1;
+	clock_interval_to_deadline(ms, kMillisecondScale, &until);
+	while (mach_absolute_time() < until) {
+		now = gTePin[1] & 1;
+		edges += now != last;
+		last = now;
+		IODelay(20);
+	}
+	return edges;
+}
+
+static void
+panelPower(bool on, const char * why)
+{
+	uint32_t before, after;
+
+	if (gDsi == NULL || gMdss == NULL || gPowerLock == NULL) {
+		return;
+	}
+	IOLockLock(gPowerLock);
+	if (on == !gPanelAsleep) {
+		IOLockUnlock(gPowerLock);
+		return;
+	}
+	before = panelTeEdges(100);
+	if (!on) {
+		gSavedAutorefresh = mdssRead(MDSS_INTF1 + INTF_TEAR_AUTOREFRESH);
+		mdssWrite(MDSS_INTF1 + INTF_TEAR_AUTOREFRESH, 0);
+		IOSleep(40);                    /* (two frames: the one in flight is sent whole) */
+		panelDcs(0x28, "display off");
+		IOSleep(20);
+		panelDcs(0x10, "sleep in");
+		IOSleep(120);
+		gPanelAsleep = true;
+	} else {
+		panelDcs(0x11, "sleep out");
+		IOSleep(120);
+		panelDcs(0x29, "display on");
+		IOSleep(20);
+		mdssWrite(MDSS_INTF1 + INTF_TEAR_AUTOREFRESH, gSavedAutorefresh ? gSavedAutorefresh : (AUTOREFRESH_ON | 1));
+		gPanelAsleep = false;
+	}
+	after = panelTeEdges(100);
+	redwood_tl("fb: panel: %s (%s): TE edges in 100 ms %u before, %u after; autorefresh %#x\n", on ? "ON" : "OFF", why, before,
+	    after, mdssRead(MDSS_INTF1 + INTF_TEAR_AUTOREFRESH));
+	IOLockUnlock(gPowerLock);
+}
+
+static void
+panelSleepTest(void * unused __unused, wait_result_t result __unused)
+{
+	IOSleep(gSleepTest * 1000);
+	redwood_tl("fb: panel: sleep test: the panel off for 3 s, then on\n");
+	panelPower(false, "the sleep test");
+	IOSleep(3000);
+	redwood_tl("fb: panel: sleep test: asleep, TE edges in 500 ms: %u\n", panelTeEdges(500));
+	panelPower(true, "the sleep test");
+	IOSleep(500);
+	redwood_tl("fb: panel: sleep test: awake, TE edges in 500 ms: %u; the interface's frame count %u\n", panelTeEdges(500),
+	    mdssRead(MDSS_INTF1 + INTF_FRAME_COUNT));
+	thread_terminate(current_thread());
+}
+
+static void
+panelPowerSetup(void)
+{
+	thread_t thread;
+
+	gDsi = (volatile uint32_t *) ml_io_map(R5Q_DSI0, PAGE_SIZE);
+	gDsiBuf = (volatile uint8_t *) ml_io_map(R5Q_DSI_CMDBUF, PAGE_SIZE);
+	gTePin = (volatile uint32_t *) ml_io_map(R5Q_TE_PAGE, PAGE_SIZE);
+	gPowerLock = IOLockAlloc();
+	redwood_tl("fb: panel: power: dsi0 dma_ctrl %#x dma_base %#x intr %#x; te gpio8 cfg %#x, edges in 100 ms %u; selector 12 %s\n",
+	    gDsi[0x3c / 4], gDsi[0x48 / 4], gDsi[0x110 / 4], gTePin[0], panelTeEdges(100), gPowerArg ? "acted on (fb_power=1)" :
+	    "only logged");
+	if (gSleepTest != 0 && kernel_thread_start(panelSleepTest, NULL, &thread) == KERN_SUCCESS) {
+		thread_deallocate(thread);
+	}
 }
 
 /*
@@ -1057,6 +1269,9 @@ panelInit(uint32_t rowBytes, uint32_t width, uint32_t height, uint32_t displayWi
 	}
 	gShown = gNewest = 0;
 	gPending = -1;
+	if (redwood_platform_is("r5q")) {
+		panelPowerSetup();
+	}
 	redwood_tl("fb: panel: the framebuffer is fetched by pipes %#x (ctl%d, flush bits %#x); %s (%u buffers%s%llx)\n", gPipes, gCtl,
 	    gPipeFlush, gFlip ? "frames are drawn into another buffer and flipped to at a frame's start" : "one buffer (fb_flip=0)",
 	    gPanelBuffers, gPanelBuffers > 2 ? ", the third at " : "", gPanelBuffers > 2 ? gPanelPhys[2] : 0);
@@ -1158,6 +1373,154 @@ IOMobileFramebuffer::publishModes(void)
 	OSSafeReleaseNULL(color);
 }
 
+/*
+ * (Test 148) The display's backlight as CoreBrightness looks for it on an iPhone: a service of the class
+ * AppleARMBacklight (its strings: "AppleARMBacklight", "IODisplayParameters", "brightness", "backlight-level",
+ * "brightness-nits"). Published under disp0 with IODisplayParameters -> brightness {min 0, max 65536, value}; what
+ * CoreBrightness then sets is logged and, where it is a brightness, sent to the panel (panelBrightness()).
+ */
+class AppleARMBacklight : public IOService
+{
+	OSDeclareDefaultStructors(AppleARMBacklight);
+public:
+	virtual IOReturn setProperties(OSObject * properties) APPLE_KEXT_OVERRIDE;
+	void publishBrightness(uint32_t value);
+};
+
+OSDefineMetaClassAndStructors(AppleARMBacklight, IOService);
+
+void
+AppleARMBacklight::publishBrightness(uint32_t value)
+{
+	OSDictionary * params = OSDictionary::withCapacity(1), * brightness = OSDictionary::withCapacity(3);
+	OSNumber * n;
+
+	if (params == NULL || brightness == NULL) {
+		OSSafeReleaseNULL(params);
+		OSSafeReleaseNULL(brightness);
+		return;
+	}
+	n = OSNumber::withNumber(0ULL, 32);
+	brightness->setObject("min", n);
+	OSSafeReleaseNULL(n);
+	n = OSNumber::withNumber(65536ULL, 32);
+	brightness->setObject("max", n);
+	OSSafeReleaseNULL(n);
+	n = OSNumber::withNumber((unsigned long long) value, 32);
+	brightness->setObject("value", n);
+	OSSafeReleaseNULL(n);
+	params->setObject("brightness", brightness);
+	setProperty("IODisplayParameters", params);
+	params->release();
+	brightness->release();
+}
+
+/* a number anywhere in what is set: brightness itself, or IODisplayParameters -> brightness -> value */
+static bool
+backlightValue(OSObject * value, uint64_t * out)
+{
+	OSNumber * n = OSDynamicCast(OSNumber, value);
+	OSDictionary * d = OSDynamicCast(OSDictionary, value);
+
+	if (n != NULL) {
+		*out = n->unsigned64BitValue();
+		return true;
+	}
+	if (d != NULL) {
+		return backlightValue(d->getObject("value"), out) || backlightValue(d->getObject("brightness"), out);
+	}
+	return false;
+}
+
+IOReturn
+AppleARMBacklight::setProperties(OSObject * properties)
+{
+	OSDictionary * dict = OSDynamicCast(OSDictionary, properties);
+	static unsigned told;
+	char who[24] = "?";
+
+	if (dict == NULL) {
+		return kIOReturnBadArgument;
+	}
+	proc_selfname(who, sizeof(who));
+	OSCollectionIterator * it = OSCollectionIterator::withCollection(dict);
+	if (it != NULL) {
+		OSSymbol * key;
+
+		while ((key = OSDynamicCast(OSSymbol, it->getNextObject())) != NULL) {
+			OSObject * value = dict->getObject(key);
+			uint64_t v = 0;
+			bool number = backlightValue(value, &v);
+
+			if (told++ < 300) {
+				redwood_tl("fb: backlight: %s sets %s = %s%llu\n", who, key->getCStringNoCopy(), number ? "" :
+				    value ? value->getMetaClass()->getClassName() : "null", number ? v : 0);
+			}
+			if (number && (key->isEqualTo("brightness") || key->isEqualTo("IODisplayParameters"))) {
+				panelBrightness((uint32_t) (v > 65536 ? 65536 : v), "brightness from CoreBrightness");
+				publishBrightness((uint32_t) (v > 65536 ? 65536 : v));
+			} else {
+				setProperty(key, value);
+			}
+		}
+		it->release();
+	}
+	return kIOReturnSuccess;
+}
+
+static void
+backlightPublish(IOService * framebuffer)
+{
+	AppleARMBacklight * backlight = new AppleARMBacklight;
+
+	if (backlight == NULL || !backlight->init()) {
+		OSSafeReleaseNULL(backlight);
+		return;
+	}
+	backlight->setName("backlight");
+	backlight->setProperty("backlight-control", kOSBooleanTrue);
+	backlight->publishBrightness(32768);
+	if (backlight->attach(framebuffer)) {
+		backlight->registerService();
+		redwood_tl("fb: backlight: AppleARMBacklight published under disp0 (brightness to the panel: %s)\n",
+		    gBrightArg ? "yes, fb_bright=1" : "no, logged only");
+	}
+	backlight->release();
+}
+
+/* (Test 148) what user space sets on the framebuffer service (CoreBrightness's way to the panel?): logged, kept */
+IOReturn
+IOMobileFramebuffer::setProperties(OSObject * properties)
+{
+	OSDictionary * dict = OSDynamicCast(OSDictionary, properties);
+	static unsigned told;
+	char who[24] = "?";
+
+	if (dict == NULL) {
+		return kIOReturnBadArgument;
+	}
+	proc_selfname(who, sizeof(who));
+	OSCollectionIterator * it = OSCollectionIterator::withCollection(dict);
+	if (it != NULL) {
+		OSSymbol * key;
+
+		while ((key = OSDynamicCast(OSSymbol, it->getNextObject())) != NULL) {
+			OSObject * value = dict->getObject(key);
+			OSNumber * n = OSDynamicCast(OSNumber, value);
+			OSBoolean * b = OSDynamicCast(OSBoolean, value);
+
+			if (told++ < 200) {
+				redwood_tl("fb: property from %s: %s = %s%llu\n", who, key->getCStringNoCopy(),
+				    n ? "" : b ? (b->isTrue() ? "true " : "false ") : value ? value->getMetaClass()->getClassName() : "null ",
+				    n ? n->unsigned64BitValue() : 0);
+			}
+			setProperty(key, value);
+		}
+		it->release();
+	}
+	return kIOReturnSuccess;
+}
+
 bool
 IOMobileFramebuffer::start(IOService * provider)
 {
@@ -1257,6 +1620,9 @@ IOMobileFramebuffer::start(IOService * provider)
 	publishModes();
 	setName("disp0");
 	registerService();
+	if (redwood_platform_is("r5q")) {
+		backlightPublish(this);
+	}
 	return true;
 }
 
@@ -2214,10 +2580,21 @@ IOMobileFramebufferUserClient::externalMethod(uint32_t selector, IOExternalMetho
 			    args->scalarInputCount > 1 ? in[1] : 0, args->scalarInputCount > 2 ? in[2] : 0, micros(mach_absolute_time()));
 		}
 		return kIOReturnSuccess;
+	case kFBMethodRequestPowerChange: {
+		char who[32] = "?";
+
+		proc_selfname(who, sizeof(who));
+		redwood_tl("fb: selector 12 (power change) from %s: scalars %u in [%#llx %#llx %#llx]\n", who,
+		    args->scalarInputCount, args->scalarInputCount > 0 ? in[0] : 0, args->scalarInputCount > 1 ? in[1] : 0,
+		    args->scalarInputCount > 2 ? in[2] : 0);
+		if (gPowerArg && args->scalarInputCount > 0) {
+			panelPower(in[0] != 0, "iOS asks");
+		}
+		return kIOReturnSuccess;
+	}
 	case kFBMethodSwapSignal:
 	case kFBMethodSwapCancel:
 	case kFBMethodSwapCancelAll:
-	case kFBMethodRequestPowerChange:
 	case kFBMethodChangeFrameInfo:
 		return kIOReturnSuccess;
 
@@ -2276,6 +2653,27 @@ IOMobileFramebufferUserClient::externalMethod(uint32_t selector, IOExternalMetho
 		    "structure %u in, %u out)\n", selector, args->scalarInputCount, args->scalarInputCount > 0 ? in[0] : 0,
 		    args->scalarInputCount > 1 ? in[1] : 0, args->scalarInputCount > 2 ? in[2] : 0, args->scalarOutputCount,
 		    args->structureInputSize, args->structureOutputSize);
+	}
+	{
+		/* (Test 148) what iOS asks that is not done, into the loader's log: the first 40 calls of each, with values */
+		static uint8_t told[128];
+
+		if (selector < 128 && told[selector] < 40) {
+			char who[24] = "?";
+			const uint8_t * s = (const uint8_t *) args->structureInput;
+
+			told[selector]++;
+			proc_selfname(who, sizeof(who));
+			redwood_tl("fb: unimplemented selector %u from %s: scalars %u [%#llx %#llx %#llx], struct %u in [%02x %02x %02x %02x "
+			    "%02x %02x %02x %02x], %u/%u out\n", selector, who, args->scalarInputCount,
+			    args->scalarInputCount > 0 ? in[0] : 0, args->scalarInputCount > 1 ? in[1] : 0,
+			    args->scalarInputCount > 2 ? in[2] : 0, args->structureInputSize,
+			    s && args->structureInputSize > 0 ? s[0] : 0, s && args->structureInputSize > 1 ? s[1] : 0,
+			    s && args->structureInputSize > 2 ? s[2] : 0, s && args->structureInputSize > 3 ? s[3] : 0,
+			    s && args->structureInputSize > 4 ? s[4] : 0, s && args->structureInputSize > 5 ? s[5] : 0,
+			    s && args->structureInputSize > 6 ? s[6] : 0, s && args->structureInputSize > 7 ? s[7] : 0,
+			    args->scalarOutputCount, args->structureOutputSize);
+		}
 	}
 	/* a request that only sets something is accepted; one that wants an answer gets zeros */
 	if (args->scalarOutputCount != 0) {

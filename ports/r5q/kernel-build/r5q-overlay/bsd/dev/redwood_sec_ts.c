@@ -49,6 +49,7 @@
  * include/linux/regulator/s2dos05.h (its SM8250 kernels).
  */
 #include <kern/clock.h>
+#include <kern/locks.h>
 #include <kern/thread.h>
 #include <libkern/libkern.h>
 #include <mach/mach_types.h>
@@ -1165,6 +1166,65 @@ static vm_offset_t chg_se;
 static bool chg_se_off;
 static const char *chg_xfer_at(uint32_t addr, uint32_t op, uint8_t *data, uint32_t n, bool stretch);
 
+/*
+ * (Test 143) SE4 is shared with the vibration motor's driver (redwood_haptic.c: the S2MU106's haptic block, 0x3a): a
+ * register's read is two commands (its number with no stop, then the bytes), which nothing may come between. Held by
+ * gauge_poll()/charger_dump()'s caller and by the two functions below.
+ */
+static LCK_GRP_DECLARE(r5q_pmic_group, "r5q-pmic-bus");
+static LCK_MTX_DECLARE(r5q_pmic_lock, &r5q_pmic_group);
+
+/* the engine as the loader left it, mapped and checked once; false if it is not (then never again) */
+static bool
+chg_se_ready(void)
+{
+	if (chg_se_off) {
+		return false;
+	}
+	if (chg_se == 0) {
+		chg_se = ml_io_map(R5Q_SE4_PHYS, 0x4000);
+		if (((rd(chg_se + 0x68) >> 8) & 0xff) != 3 || (rd(chg_se + 0x48) & 0xff1) != 0x71) {
+			printf("charger: SE4 is not set up for I2C (fw %#x, clk %#x)\n", rd(chg_se + 0x68), rd(chg_se + 0x48));
+			chg_se_off = true;
+			return false;
+		}
+	}
+	return true;
+}
+
+bool redwood_r5q_pmic_read(uint8_t address, uint8_t reg, uint8_t *value);
+bool redwood_r5q_pmic_write(uint8_t address, uint8_t reg, uint8_t value);
+
+bool
+redwood_r5q_pmic_read(uint8_t address, uint8_t reg, uint8_t *value)
+{
+	const char *why = "the bus is not set up";
+
+	lck_mtx_lock(&r5q_pmic_lock);
+	if (chg_se_ready()) {
+		why = chg_xfer_at(address, 1, &reg, 1, true);
+		if (why == NULL) {
+			why = chg_xfer_at(address, 2, value, 1, false);
+		}
+	}
+	lck_mtx_unlock(&r5q_pmic_lock);
+	return why == NULL;
+}
+
+bool
+redwood_r5q_pmic_write(uint8_t address, uint8_t reg, uint8_t value)
+{
+	uint8_t b[2] = { reg, value };
+	const char *why = "the bus is not set up";
+
+	lck_mtx_lock(&r5q_pmic_lock);
+	if (chg_se_ready()) {
+		why = chg_xfer_at(address, 1, b, 2, false);
+	}
+	lck_mtx_unlock(&r5q_pmic_lock);
+	return why == NULL;
+}
+
 static const char *
 chg_xfer(uint32_t op, uint8_t *data, uint32_t n, bool stretch)
 {
@@ -1279,18 +1339,8 @@ chg_status(uint8_t st[2])
 	const char *why;
 	uint8_t reg = 0x0e;
 
-	if (chg_se_off) {
+	if (!chg_se_ready()) {           /* (the loader's set-up must be there: the I2C protocol, FIFO mode, its divider) */
 		return false;
-	}
-	if (chg_se == 0) {
-		chg_se = ml_io_map(R5Q_SE4_PHYS, 0x4000);
-		/* the loader's set-up must be there: the I2C protocol, FIFO mode, the divider it wrote */
-		if (((rd(chg_se + 0x68) >> 8) & 0xff) != 3 || (rd(chg_se + 0x48) & 0xff1) != 0x71) {
-			printf("charger: SE4 is not set up for I2C (fw %#x, clk %#x): status not read\n", rd(chg_se + 0x68),
-			    rd(chg_se + 0x48));
-			chg_se_off = true;
-			return false;
-		}
 	}
 	why = chg_xfer(1, &reg, 1, true);
 	if (why == NULL) {
@@ -1527,11 +1577,15 @@ step_watch(void)
 		}
 		/* r5q: the battery level, every 5 s, while the touch chip is quiet */
 		if (r5q && ticks % (5 * 1000000 / POLL_US) == 2 && (rd(GPIO_IO(PIN_INT)) & 1) && !any_finger_down()) {
+			lck_mtx_lock(&r5q_pmic_lock);
 			gauge_poll();
+			lck_mtx_unlock(&r5q_pmic_lock);
 		}
 		if (r5q && ticks % (60 * 1000000 / POLL_US) == 3 * 1000000 / POLL_US && (rd(GPIO_IO(PIN_INT)) & 1) &&
 		    !any_finger_down()) {
+			lck_mtx_lock(&r5q_pmic_lock);
 			charger_dump();         /* (Test 87: charger_dump=1, reads only) */
+			lck_mtx_unlock(&r5q_pmic_lock);
 		}
 		delay(POLL_US);
 	}
@@ -1566,12 +1620,80 @@ sec_ts_thread(void *parameter, __unused wait_result_t result)
 	thread_terminate(current_thread());
 }
 
+/*
+ * r5q (Test 126): touches from the PC, for testing iOS without a hand on the phone. The loader, which keeps serving
+ * fastboot from another core while iOS runs, finds this mailbox in the loaded kernel by its first word (as it finds
+ * loader_live) and fills it on "oem touch KIND X0 Y0 X1 Y1 MS" (0..65535 across iOS's screen, as the panel's touches
+ * are scaled here), bumping seq last; this thread plays each new gesture as one more finger (id 9) through the same
+ * redwood_touch_post() the panel's touches take: 1 a tap, 2 a swipe from (x0, y0) to (x1, y1) over MS, 3 a press
+ * held MS. Nothing is read from or written to the touch chip.
+ */
+struct r5q_touch_mailbox {
+	uint64_t magic;                         /* "XNUTOUCH" */
+	volatile uint32_t seq;                  /* the loader's: one more after each gesture written */
+	volatile uint32_t done;                 /* ours: the last seq played */
+	volatile uint32_t kind, x0, y0, x1, y1, ms;
+};
+__attribute__((used, aligned(64))) struct r5q_touch_mailbox r5q_touch_mbox = { .magic = 0x484355544f554e58ULL };
+
+static void
+pc_touch_thread(__unused void *parameter, __unused wait_result_t result)
+{
+	r5q_touch_mbox.done = r5q_touch_mbox.seq;
+	for (;;) {
+		uint32_t seq = r5q_touch_mbox.seq;
+
+		if (seq != r5q_touch_mbox.done) {
+			uint32_t kind = r5q_touch_mbox.kind, x0 = r5q_touch_mbox.x0, y0 = r5q_touch_mbox.y0;
+			uint32_t x1 = r5q_touch_mbox.x1, y1 = r5q_touch_mbox.y1, ms = r5q_touch_mbox.ms;
+
+			if (x0 > 65535 || y0 > 65535 || x1 > 65535 || y1 > 65535 || ms > 10000) {
+				printf("touch: from the PC: gesture %u out of range, not played\n", seq);
+			} else if (kind == 4) {
+				/* (Test 144) a hardware button pressed for MS: x0 is which (REDWOOD_BUTTON_LOCK 1, VOLUME_UP 2, VOLUME_DOWN 3) */
+				if (x0 >= 1 && x0 <= 3) {
+					redwood_touch_post(REDWOOD_BUTTON_DOWN, x0, 0, 0);
+					delay_for_interval(ms ? ms : 120, NSEC_PER_MSEC);
+					redwood_touch_post(REDWOOD_BUTTON_UP, x0, 0, 0);
+					printf("touch: from the PC: button %u pressed for %u ms\n", x0, ms ? ms : 120);
+				}
+			} else if (kind == 2) {
+				uint32_t steps = ms / 16 < 4 ? 4 : ms / 16;
+
+				redwood_touch_post(REDWOOD_TOUCH_DOWN, 9, x0, y0);
+				for (uint32_t i = 1; i <= steps; i++) {
+					delay_for_interval(16, NSEC_PER_MSEC);
+					redwood_touch_post(REDWOOD_TOUCH_MOVE, 9, (uint32_t)((int64_t)x0 + ((int64_t)x1 - x0) * i / steps),
+					    (uint32_t)((int64_t)y0 + ((int64_t)y1 - y0) * i / steps));
+				}
+				redwood_touch_post(REDWOOD_TOUCH_UP, 9, x1, y1);
+				printf("touch: from the PC: swipe %u,%u -> %u,%u in %u ms\n", x0, y0, x1, y1, ms);
+			} else {
+				redwood_touch_post(REDWOOD_TOUCH_DOWN, 9, x0, y0);
+				delay_for_interval(kind == 3 ? (ms ? ms : 800) : 70, NSEC_PER_MSEC);
+				redwood_touch_post(REDWOOD_TOUCH_UP, 9, x0, y0);
+				printf("touch: from the PC: %s at %u,%u\n", kind == 3 ? "press" : "tap", x0, y0);
+			}
+			r5q_touch_mbox.done = seq;
+		}
+		delay_for_interval(20, NSEC_PER_MSEC);
+	}
+}
+
 void
 redwood_sec_ts_init(void)
 {
 	uint32_t enabled = 0, steps = 7;
 	thread_t thread;
 
+	if (redwood_platform_is("r5q")) {
+		uint32_t pc = 1;
+
+		if (!(PE_parse_boot_argn("pc_touch", &pc, sizeof(pc)) && pc == 0) &&
+		    kernel_thread_start(pc_touch_thread, NULL, &thread) == KERN_SUCCESS) {
+			thread_deallocate(thread);
+		}
+	}
 	if (!PE_parse_boot_argn("touchscreen", &enabled, sizeof(enabled)) || !enabled) {
 		return;
 	}

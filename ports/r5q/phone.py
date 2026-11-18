@@ -20,6 +20,8 @@ keeps it in maintenance mode instead of starting iOS (a volume key held at the s
   python phone.py stop              end the iOS run now (it returns to the loader as at its time limit)
   python phone.py screenshot [PNG]  the phone's screen
   python phone.py raw ARGS...       any fastboot command (e.g. raw oem part userdata)
+  python phone.py wifi-join [--forget]  the Wi-Fi network iOS joins: asks for its name and password here, keeps only
+                                    the WPA2 key made from them (PBKDF2, the PMK) in USERDATA 4 GiB + 520 KiB
 
 Writes on the phone are only what flash-boot (BOOT) and the loader's own allowlist (boot, userdata) permit.
 """
@@ -186,6 +188,78 @@ def settime():
     print('    clock: ' + (out.splitlines()[0] if out else '?'), flush=True)
 
 
+IOS_W, IOS_H = 750, 1624                       # iOS's screen as the screenshot shows it (top left of the image)
+
+
+def touch(kind, rest):
+    """(Test 126 loader+kernel) a gesture for the running iOS: tap X Y | press X Y [MS] | swipe X0 Y0 X1 Y1 [MS],
+    in pixels of iOS's 750x1624 screen (the top-left part of `screenshot`)."""
+    v = [int(float(a)) for a in rest]
+    need = 4 if kind == 'swipe' else 2
+    if len(v) < need:
+        raise SystemExit(f'usage: {kind} ' + ('X0 Y0 X1 Y1 [MS]' if kind == 'swipe' else 'X Y' + (' [MS]' if kind == 'press' else '')))
+
+    def sx(x):
+        return max(0, min(65535, x * 65535 // IOS_W))
+
+    def sy(y):
+        return max(0, min(65535, y * 65535 // IOS_H))
+    if kind == 'swipe':
+        k, x0, y0, x1, y1, ms = 2, sx(v[0]), sy(v[1]), sx(v[2]), sy(v[3]), v[4] if len(v) > 4 else 300
+    else:
+        k, x0, y0, ms = (3 if kind == 'press' else 1), sx(v[0]), sy(v[1]), v[2] if len(v) > 2 else 800
+        x1, y1 = x0, y0
+    for _ in range(50):
+        out = fb('oem', 'touch', *('%x' % n for n in (k, x0, y0, x1, y1, ms)), check=False)
+        if 'still being played' not in out:
+            break
+        time.sleep(0.1)
+    print(f'{kind} {rest}: ' + (out.strip().splitlines()[0] if out.strip() else 'OKAY'))
+
+
+WIFI_KEY_OFF = (4 << 30) + 520 * 1024        # USERDATA block 4 GiB + 520 KiB (after the clock 512 and args 516)
+
+
+def wifi_join(rest):
+    """the network to join: name and password asked for here (never on the command line), the WPA2-PSK key derived
+    from them (PBKDF2-HMAC-SHA1, 4096 rounds, 32 bytes) kept on the phone; the password itself is not stored anywhere"""
+    import getpass
+    import hashlib
+    block = bytearray(4096)
+    if rest != ['--forget']:
+        ssid = input('Wi-Fi network name: ').encode()
+        pw = getpass.getpass('Wi-Fi password (not shown): ').encode()
+        if not 1 <= len(ssid) <= 32 or not 8 <= len(pw) <= 63:
+            raise SystemExit('a name of 1-32 bytes and a WPA2 password of 8-63 characters')
+        pmk = hashlib.pbkdf2_hmac('sha1', pw, ssid, 4096, 32)
+        del pw
+        block[0:16] = b'R5Q-WIFI-KEY/1\0\0'
+        struct.pack_into('<I', block, 16, len(ssid))
+        block[20:20 + len(ssid)] = ssid
+        block[52:84] = pmk
+        h = 2166136261
+        for b in bytes(block[0:84]):
+            h = ((h ^ b) * 16777619) & 0xffffffff
+        struct.pack_into('<I', block, 84, h)
+    if 'FAIL' in fb('oem', 'args', 'show', check=False):
+        print('ending the iOS run to reach the listening window ...', flush=True)
+        fb('oem', 'stop', check=False)
+        if not gone(45):
+            fb('reboot', check=False)
+            gone(30)
+        wait_for_phone()
+    tmp = pathlib.Path(tempfile.gettempdir()) / 'r5q-wifi-key.bin'
+    try:
+        tmp.write_bytes(bytes(block))
+        fb('stage', str(tmp))
+    finally:
+        tmp.write_bytes(bytes(4096))
+        tmp.unlink()
+    out = fb('oem', 'writepart', 'userdata', '%x' % WIFI_KEY_OFF)
+    print(('Wi-Fi key removed: ' if rest == ['--forget'] else 'Wi-Fi network stored (the key only): ') + out.splitlines()[0])
+    print(fb('oem', 'continue'))
+
+
 def args(rest):
     """extra kernel boot-args kept on the phone (Test 82+ loader), put in at every start after the BOOT image's own:
     a key given here replaces the image's, '-key' takes it away. No new BOOT image needed."""
@@ -266,7 +340,8 @@ def main():
     if len(sys.argv) < 2:
         raise SystemExit(__doc__)
     cmd, rest = sys.argv[1], sys.argv[2:]
-    wait_for_phone()
+    if cmd not in ('rd', 'respring', 'sh', 'ps'):      # (those go over Wi-Fi to r5qd, not over USB)
+        wait_for_phone()
     if cmd == 'logs':
         logs(rest[0] if rest else pathlib.Path(__file__).parent / 'port/build/phone-logs')
     elif cmd == 'read':
@@ -289,6 +364,38 @@ def main():
         cycle(pathlib.Path(rest[0]), int(rest[1]) if len(rest) > 1 else 120, rest[2:] or None)
     elif cmd == 'args':
         args(rest)
+    elif cmd == 'wifi-join':
+        wifi_join(rest)
+    elif cmd in ('tap', 'swipe', 'press'):
+        touch(cmd, rest)
+    elif cmd in ('rd', 'respring', 'sh', 'ps'):
+        # (Test 157) the running iOS without a reboot, over Wi-Fi through r5qd (wifi/r5qd.c, wifi/r5qd_client.py):
+        #   rd ping|put LOCAL /var/..|run PROG ARGS|kill NAME [SIG]|inject [CONF]|reload LIB PROGRAM
+        #   respring            SpringBoard restarted (launchd starts it again)
+        #   sh PROG ARGS...     a program run on the phone, its output here (no shell: PROG is a full path)
+        #   ps                  the processes
+        sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / 'wifi'))
+        import r5qd_client
+        if cmd == 'respring':
+            r5qd_client.main(['kill', 'SpringBoard'])
+        elif cmd == 'ps':
+            r5qd_client.main(['run', '/bin/ps', '-Ao', 'pid,%cpu,rss,comm'])
+        elif cmd == 'sh':
+            r5qd_client.main(['run'] + rest)
+        else:
+            r5qd_client.main(rest)
+    elif cmd == 'button':
+        # (Test 144 kernel) a hardware button for the running iOS: button lock|volup|voldown [MS]
+        names = {'lock': 1, 'side': 1, 'power': 1, 'volup': 2, 'voldown': 3}
+        if not rest or rest[0] not in names:
+            raise SystemExit('usage: button lock|volup|voldown [MS]')
+        ms = int(rest[1]) if len(rest) > 1 else 120
+        for _ in range(50):
+            out = fb('oem', 'touch', *('%x' % n for n in (4, names[rest[0]], 0, 0, 0, ms)), check=False)
+            if 'still being played' not in out:
+                break
+            time.sleep(0.1)
+        print(f'button {rest[0]} {ms} ms: ' + (out.strip().splitlines()[0] if out.strip() else 'OKAY'))
     elif cmd == 'charger':
         charger()
     elif cmd == 'smem':

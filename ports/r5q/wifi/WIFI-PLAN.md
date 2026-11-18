@@ -215,6 +215,354 @@
     WLAN_MODE mission accepted in 49 ms: the radio is on.** Modem healthy. Next: the host copy engines
     (ath10k_snoc_init_pipes / ce.c) at 0x18800000 (CE ring registers, SMMU SID 0x640 S1-bypass), interrupts
     (GIC SPI 414-425), then HTC -> WMI/HTT and a network interface.
+  - **Tests 111-114 (2026-11-17 ~11:45-12:55): the host copy engines and HTC/WMI, a stand-in for ath10k snoc/ce/htc
+    (redwood_wifi.c r5q_htc_bringup, boot-args wifi_wlfw=3 wifi_smmu=2). WMI SERVICE_READY RECEIVED (Test 114, BOOT
+    ecc8cf83…).** What it took:
+    - I/O maps of the WLAN block must be small (CE window 0x18a40000 + 64 KB, shadow 0x18832000 + 4 KB): a 4 MB
+      ml_io_map panicked (kmem_alloc failed).
+    - CE registers answer after mission mode (CE0 ctrl1 0x80, CE2 0x800). RRI: host page into 0x24c004/8, ctrl1 bit 19
+      on every CE. Rings 64-bit descriptors in 16 KB kernel pages; CE0 16 / CE3 32 send, CE2 64 / CE1 32 receive;
+      src write index via shadow regs (CE0 0x32000), dest via the CE's DST_WR (0x40).
+    - THE APPS SMMU: sCR0 0x230406 = unmatched streams FAULT; 94 SMRs, none for the WLAN SID 0x640: the first DMA after
+      posting buffers warm-reset the phone (XBL "warm reset", no iOS panic). Reading the SMMU is fine (0x15000000;
+      the earlier 'hang' was the same post-buffers reset). A context bank of our own (CB55, SCTLR 0, CBAR 0x1f000)
+      took the SMR but faulted at stage 2 (CB55 FSR 0x2 at a receive buffer): the hypervisor sets nothing up behind
+      new banks. TrustZone refuses to share iOS pages with WLAN/WLAN_CE (assign_mem -2). WHAT WORKS: a free SMR
+      (SMR6 = 0x80010640: id 0x640 mask 1) whose S2CR is a copy of a boot stream's that names a boot bank with
+      translation off (SMR0 0x800006a0 -> S2CR 0 -> CB0: SCTLR 0xe0, CBAR 0x1f000). DMA then reaches iOS memory.
+    - Then: HTC READY (2 credits x 2184 bytes, 22 endpoints, HTC 2.1) on CE2; CONNECT HTT 0x300 -> endpoint 1 (max
+      2000), WMI 0x100 -> endpoint 2 (max 2040); SETUP_COMPLETE_EX; WMI events 0x3 (SERVICE_AVAILABLE), **0x1
+      SERVICE_READY (332 bytes, fw 0x3203038e, "QCA_ML")**, 0x4009, 0x4022 (ath10k wmi-tlv.h numbering). No faults.
+    - Next: WMI_INIT (resource config) -> READY (0x2, MAC address), then a station: scan/connect via WMI, HTT data
+      path on CE4 (tx) / CE1 (rx), and the network interface for iOS (donor's redwood_sta / redwood_net).
+  - **Test 115 (BOOT bd3adf6c…): WMI_INIT -> WMI READY.** Service ready: fw 0x3203038e, abi 1.0/998, phy capability 0x3
+    (2.4 + 5 GHz), 2 RF chains, ht 0x381b, vht 0x739139b2, 0 host memory requests, 68 scan channels. WMI_INIT (cmd 0x1:
+    INIT_CMD tag 0x4a with ath10k's ABI 1/53/QCA_ML, RESOURCE_CONFIG 0x4b, 44 words as ath10k_wmi_tlv_op_gen_init
+    for a WCN3990, native-wifi decap; empty ARRAY_STRUCT of chunks) sent on CE3 (shadow 0x3200c). First try: CE3 never
+    took it -- the WMI service had been connected with no credits; ath10k gives WMI control all the transmit credits
+    in the connect's RECV_ALLOC (flags 15:8). With them: events 0x3a001 x2, then **READY (0x2): status 0, MAC
+    00:00:00:00:00:00** (no MAC in firmware: the host gives one). Next: scan channel list, a station vdev, start scan,
+    beacons via WMI mgmt rx.
+  - **Test 116 (BOOT 32a2ff47…): the scan runs, but nothing is received.** After READY (boot-arg `wifi_scan`, default
+    1): SCAN_CHAN_LIST 0x3003 (tag 0x4f + ARRAY_STRUCT of 37 CHANNEL 0x50 TLVs: 2.4 GHz 1-13 HT20, 5 GHz 36-64 /
+    100-140 / 149-165 HT20, all PASSIVE, 20 dBm), VDEV_CREATE 0x5001 (tag 0x56: vdev 0, STA 2, MAC
+    02:52:35:51:00:01, locally administered), START_SCAN 0x3001 (tag 0x4d, 25 words: ids 0xa001, priority LOW, all
+    events, passive dwell 150 ms, ctrl 0x21 = PASSIVE ^ FILTER_PROBE_REQ as ath10k-TLV; ARRAY_UINT32 channels,
+    ARRAY_FIXED_STRUCT no SSIDs / one broadcast BSSID, empty ARRAY_BYTE). Scan events 0x3001 (tag 0x24): STARTED,
+    FOREIGN_CHANNEL on each of the 37, COMPLETED reason 0 after ~10 s -- **but 0 management frames**. HTC credits:
+    trailers (flags 0x2) carry records with a **4-byte** header {id, len, pad, pad} then {eid, credits, pad, pad}:
+    WMI's credits do come back. Events 0x4009 (980 bytes) and 0x3a001 x2 ("US", phy 0/1) look regulatory.
+  - **Test 117 (BOOT e5abbfff…): WI-FI SCAN WORKS — 33 networks, 49 beacons, -31 … -94 dBm, 2.4 and 5 GHz.** Cause in
+    116: on this LL design the MAC DMAs every received frame into host buffers named by **HTT's rx ring**; the firmware
+    turns management frames into WMI MGMT_RX (0x7001, tag 0x2c header + ARRAY_BYTE frame) only from there. Added
+    ath10k_htt_setup's part for rx: CE4 send ring (HTT H2T, shadow 0x32010); VERSION_REQ (H2T 0) -> **VERSION_CONF
+    3.89** on CE1; RX_RING_CFG (H2T 2: one 64-bit ring of 256 entries / 255 buffers of 2048 bytes, alloc index in host
+    memory, flags 0xffff, WCN3990 desc offsets in words from struct htt_rx_desc_v2 (360 bytes, compiled with gcc):
+    hdr 74, payload 90, ppdu_start 27, ppdu_end 37, mpdu_start 4, mpdu_end 26, msdu_start 7, msdu_end 12,
+    attention 1, frag 2). FRAG_DESC_BANK_CFG (tx) not sent yet. Beacons then arrive as WMI 0x7001 (rssi = snr - 95).
+    No HTT RX_IN_ORD_PADDR_IND (0x12) came during the scan, so ring buffers are not yet given back (255 frames max):
+    needed for the data path. Next: association (open / WPA2 -> EAPOL over the HTT data path: peer create, vdev
+    start/up, frag desc bank, tx via HTT), then the iOS network interface.
+  - **Test 118 (BOOT f1d33066…, + arg `wifi_ssid=h<hex name>`): ASSOCIATED.** Services: RX_FULL_REORDER 1,
+    MGMT_TX_WMI 0 (by-reference mgmt tx works anyway). Strongest BSS of the network (5 GHz ch 40, -31 dBm, RSN
+    CCMP/CCMP/PSK). VDEV_START_REQUEST 0x5003 (tag 0x58, **18 words**, + CHANNEL + empty ARRAY_STRUCT) -> response
+    0x5001 status 0; PEER_CREATE 0x6001 (tag 0x61) -> HTT PEER_MAP (T2H 3, peer ids 0x50/0x40); open-system auth
+    and the association request (SSID, rates, RSN WPA2-PSK/CCMP, HT cap 0x000c / A-MPDU 64K / MCS 0-7, WMM IE) as
+    MGMT_TX_SEND 0x7008 (tag 0x1a6 {vdev, desc, chanfreq 0, paddr u64, frame_len, buf_len} + ARRAY_BYTE first 64
+    bytes; frame in a DMA page) -> completions 0x7006 status 0, auth seq 2 status 0, assoc status 0 **AID 4**;
+    PEER_ASSOC 0x6005 (tag 0x65, 19 words: flags AUTH|QOS|NEED_PTK_4_WAY|HT = 0x1007, phy 11NA_HT20, 8 legacy rates,
+    MCS 0-7, VHT_RATE_SET 0x66), VDEV_UP 0x5005 (tag 0x5c). The AP then sent EAPOL message 1 five times (HTT
+    RX_IN_ORD_PADDR_IND, peer 0x50) and deauthenticated with reason 15 (4-way handshake timeout) -- as expected.
+  - **Test 119 (BOOT f624aff8…): data path + WPA2 supplicant, dry run.** Crypto in bsd/dev/redwood_wpa.h (SHA-1,
+    HMAC-SHA1, 802.11 PRF, AES-128 decrypt, RFC 3394 unwrap; all pass the published vectors in wifi/wpa_selftest.c).
+    HTT FRAG_DESC_BANK_CFG (H2T 6, 64 bytes: 1 bank of 4 x 72-byte htt_msdu_ext_desc_64) before RX_RING_CFG; HTT
+    TX_FRM (H2T 1: flags0 0x21 native wifi + header, flags1 TID 7 | POSTPONED, len, msdu id, frags_paddr -> ext desc
+    whose frags[0] points at the frame, peer 0xffff, freq 0, 52 bytes prefetch) on CE4. Rx: in-order buffers hold the
+    frame at +360 (native wifi: 802.11 header, SNAP 88-8e, EAPOL). **Message 1 parsed (info 0x8a), message 2 sent,
+    TX_COMPL status 0** (delivered); with no key stored the PMK was zero, so the AP retried msg 1 and deauthed
+    (reason 15) as expected. Key storage: `python phone.py wifi-join` asks for name + password on the PC, writes only
+    the PMK (PBKDF2-SHA1 4096) to USERDATA 4 GiB + 520 KiB ("R5Q-WIFI-KEY/1", FNV-1a); the kernel reads it at READY
+    (and takes the network name from it when no wifi_ssid arg). After msg 3: MIC check, AES unwrap of the GTK KDE,
+    msg 4, VDEV_INSTALL_KEY 0x5009 (tag 0x60, 23 words, AES-CCM 4) PTK + GTK, PEER_SET_PARAM AUTHORIZE.
+  - **2026-11-17 14:17, same BOOT (Test 119), after the owner ran `phone.py wifi-join`: CONNECTED TO THE OWNER'S
+    WPA2 NETWORK.** Key record read at READY; auth + assoc (AID 4); msg 1 -> msg 2 (TX_COMPL 0) -> msg 3 (info
+    0x13ca, **MIC good**, GTK 16 bytes index 1 unwrapped) -> msg 4 (TX_COMPL 0) -> PTK and GTK installed (AES-CCM),
+    AP authorized. No deauthentication in the following 25 s; protected broadcast/multicast data (fc 0x0842) arrives
+    already decrypted by the hardware (plain SNAP + IPv4 / IPv6 headers in the rx buffers). 40 in-order rx
+    indications, all buffers returned to the ring.
+    Not done yet: the driver only services the rings during its time-limited bring-up loop (then the link will
+    lapse); next is a kernel thread that keeps servicing CE1/CE2 and the rx ring, group-key rekeys, an iOS network
+    interface (ifnet, native-wifi <-> Ethernet framing) and DHCP via iOS's own configd.
+  - **Test 120 (BOOT e28b4915…): en0 on the radio.** The donor's bsd/dev/redwood_net.c (Ethernet-family en0,
+    subfamily Wi-Fi, RedwoodWLANStart for wifid) gets a link driver: attached as the kernel starts (wifi_wlfw>=3,
+    `wifi_net=0` skips; iOS looks for its Wi-Fi interface once), link up after the keys (KEV_DL_LINK_ON). The bring-up
+    loop's body became r5q_service(); 1 s after CONNECTED the rings go to redwood_net's thread (poll every 2-10 ms,
+    a lock against transmit). Tx: Ethernet -> 802.11 data (to DS | protected: the firmware encrypts; addr1 BSSID, addr2
+    us, addr3 DA) + SNAP, 32 HTT tx slots (bank of 32), freed by TX_COMPL ids or after 2 s, CE4 64 entries with a
+    space check. Rx: native wifi (from DS) -> Ethernet -> redwood_net_input. Pairwise/group rekey answered (group msg
+    1 -> msg 2 + GTK install; new ANonce -> new SNonce, renewed PTK installed 60 ms after msg 4; EAPOL protected once
+    keyed). 5 minutes connected: 67 frames sent, all completed, 448 received; no drops, no deauth.
+  - **Test 121 (BOOT 2ca375ce…): iOS GETS AN ADDRESS: DHCP DISCOVER -> OFFER 192.168.x.x -> REQUEST -> ACK**;
+    en0's IPv4 address 192.168.x.x (ifnet KPI, printed every 30 s) for the whole 5 minutes. But no DNS question and
+    no TCP connection was seen from iOS in that time (the driver logs the first 40): wifid has no station (no
+    redwood_sta ops attached), so iOS's Wi-Fi side probably does not count the network as joined/usable. (redwood_net's
+    own "net:" lines never reach this log; its net_trace is not parsed in this kernel.) Next: attach redwood_sta ops
+    (power/scan/heard/join/leave/state/channels) so wifid sees the association (as the donor's y2q did, where apps
+    then had network), or check NECP / the primary interface.
+  - **Test 122 (BOOT 2d8c760e…): the radio is iOS's Wi-Fi station** (donor sys/redwood_sta.h + redwood_apple80211.c):
+    ops power/scan (START_SCAN on the station vdev, heard table of struct redwood_sta_bss filled from beacons)/heard/
+    join (leave, strongest BSS of the name from the last scan or a new one, join state machine from VDEV_START, PMK
+    from PBKDF2 when Settings gives a passphrase; errors EAUTH = wrong password, ETIMEDOUT, ECONNREFUSED)/leave
+    (deauth, VDEV_DOWN 0x5007 tag 0x5e, PEER_DELETE 0x6002 tag 0x62, VDEV_STOP 0x5006 tag 0x5d)/state/channels;
+    attached after the bring-up (`wifi_sta=0` skips), the start's network handed over as the standing one (asked
+    again, found joined -> JOIN_DONE + LINK events to wifid). PBKDF2 passes IEEE 802.11 J.4.2. **Result: iOS uses
+    the network** -- captive.apple.com check, DNS (time/iCloud/weather/...), TLS to Apple. But ~1 min in, CE1 (HTT
+    T2H) stopped: no TX_COMPL, no rx, then WMI ROAM events 0xb001 (tag 0x30, reason 2 = beacon miss) every ~5 s.
+  - **Test 123 (BOOT e54afbd8…): fixed -- receive rings uncached.** Four 16-byte CE descriptors share a 64-byte
+    cache line; cleaning our copy of a line (after giving a slot back) wrote stale lengths over ones the engine had
+    just written, a slot was missed and CE1 stalled under real traffic. Dest rings (CE1, CE2) are now used through
+    an ml_io_map_wcomb alias of their page (as ath10k's coherent DMA). 5 minutes: 0 beacon misses, 6.4k frames sent
+    (all completed; 594 dropped in bursts: 32 tx slots / CE4 full), 16k received, DNS + TCP from iOS, **the status
+    bar shows Wi-Fi with full bars** (screenshot port/build/t123-screen.png).
+    Open: more tx slots for bursts; Settings > Wi-Fi list / joining another network untested; rekeys not yet seen;
+    power save; the Wi-Fi still depends on the PC-connected boot args (modem=2 needs the PC).
+  - **Test 124 (BOOT c5afc4fe…, loader change only, kernel = t123): `modem=3`** starts the modem with or without a
+    PC on the cable (modem=2 keeps its PC-only rule). Run with the PC: connected, DHCP, traffic as in 123. The phone's
+    stored args are now `wifi_survey=1 modem=3 wifi_modem=1 wifi_rails=2 wifi_wlfw=3 wifi_smmu=2`, so every start
+    brings Wi-Fi up. A start without the PC: pending (needs the owner to unplug and restart).
+  - **Test 125 (BOOT ee2cbf64…): faster and wider.** The 4-second marks before each bring-up step only with
+    `wifi_slow=1`: the modem link thread is done after 21 s instead of 45 s. 128 frames in flight (bitmap; bank of
+    128 x 72-byte descriptors, ids 0..127 in FRAG_DESC_BANK_CFG), CE4 256 entries. 5 minutes: 0 drops, 0 beacon
+    misses, DHCP + 21 DNS questions -- but no burst as big as Test 123's (6.4k frames), so the 128 slots are not yet
+    proven under load.
+  - **Test 126 (BOOT 89f07a52…): touches from the PC** (not Wi-Fi, but how it was tested): `phone.py tap X Y`,
+    `press X Y [MS]`, `swipe X0 Y0 X1 Y1 [MS]` in pixels of iOS's 750x1624 screen (top-left of `phone.py screenshot`).
+    Kernel: struct r5q_touch_mailbox ("XNUTOUCH") in redwood_sec_ts.c, a thread plays each gesture as finger 9 through
+    redwood_touch_post() (`pc_touch=0` turns it off); loader: finds the mailbox in the loaded kernel like kernel_live,
+    `oem touch KIND X0 Y0 X1 Y1 MS` (hex) while iOS runs. Seen with it: **Settings shows "Wi-Fi: Living Room"; the
+    Wi-Fi screen shows it ticked (lock, full bars); its scans run through our scan op (31-39 access points heard
+    each time; the list shows the strong ones only)**. Safari: opens, Favorites shown, tapping Google leaves a blank
+    page and the UI stops answering (stop, address bar). Not Wi-Fi: the donor's y2q had the same (TLS stalled after the
+    server's certificates in app processes: user/501 trustd; WebContent drawing). Open, for its own investigation.
+  - **Safari investigation (Tests 126-128, 2026-11-17 ~15:50-16:15).**
+    - var_store=0 (fresh /var from the image): Safari the same (blank, loading) -> not the kept /var.
+    - Test 127 (BOOT d927e8b8…): per-TCP-connection summaries in the driver (`wifi: tcp:` lines: bytes/packets each
+      way, bytes the client sent after the server's first data, how it ended). Most TLS to Apple completes; one (push,
+      Akamai 2.18.190.136) is the donor's pattern: ClientHello 517 B, server 5351 B, then nothing from us, closed by us
+      after 18 s. Safari typed "example.com" (keyboard by remote taps): **HTTP GET 378 B, page 2485 B back -- the
+      page arrives; Safari still shows nothing and keeps "loading".** With google.com/apple.com earlier, Safari asked
+      DNS nothing at all.
+    - Test 128 (BOOT 48ff5fad…): `wifi: proc:` every 30 s (task suspend count, thread states, CPU) for MobileSafari,
+      WebKit helpers, trustd, apsd, runningboardd (`wifi_procs=0` off). **Nothing suspended**; MobileSafari,
+      WebContent, Networking and GPU all idle-waiting with flat CPU after the load; trustd (user/501, donor plist
+      /redwood/LaunchDaemons/com.apple.trustd.plist) 0 ms CPU, priority 4.
+    - So: not Wi-Fi, not RunningBoard; the page is stuck between WebKit's processes (drawing/IPC). Candidates the donor
+      wrote tests for (userland/src/shm_test.c: StreamConnection shared memory + semaphore across processes;
+      cg_test.c: CGIOSurfaceContext drawing without a GPU) -- no results recorded. Next: build those into the image
+      and run them, or disable WebKit's accelerated drawing (IOSurface tiles) for Safari.
+  - **SAFARI FIXED (Tests 129-137, 2026-11-17 ~16:15-17:15).** The redwood volume (root.apfs, md1) is rebuilt from
+    WSL /var/tmp/codex-ios-r5q/work/linux-source/userland with `env REST=1 PREBUILT=1 ./build.sh` (reproduces
+    test80-root.apfs.new byte for byte); the iOS system volume on the flash is untouched. Test programs are
+    cross-compiled with `clang -target arm64-apple-ios16.5 -isysroot sdks-source/iPhoneOS16.5.sdk -fuse-ld=lld`
+    (AMFI here takes unsigned code) and added with EXTRA=, RC_JOBS=, INJECT=.
+    - Test 129: donor's shm_test (shared memory, both ways, + mach semaphores across processes) and cg_test
+      (CGIOSurfaceContext drawing seen by another process) both PASS -> WebKit's plumbing works.
+    - Test 130+: wifi/inject_safari.c (libr5q-safari.dylib via kern.exec_inject): app/scene/WKWebView state, a
+      main-thread watchdog, all threads' stacks (thread_get_state + frame chain; frames named by dladdr and by an
+      Objective-C IMP table built in-process, since the cache's local symbols are not on the device).
+    - The chain: Safari's first navigation -> -[History _webView:didNavigateWithNavigationData:] -> WBSHistory
+      dispatch_sync on the history queue, held by -[WBSHistoryServiceStore loadWithCompletionHandler:] waiting on
+      com.apple.Safari.History (/System/Cryptexes/App/usr/libexec/com.apple.Safari.History), whose main thread is
+      in -[WBSCloudHistoryPushAgent init] -> ApplePushService -> sync XPC to apsd; apsd's main thread is in its own
+      start, a sync NSXPC call through MobileActivation to mobileactivationd, which dies of SIGTRAP at every start
+      (no Secure Enclave): so nobody ever answers.
+    - **Fix: 'mobileactivationd' added to mkjobs.py's DENY** (lookups then fail at once). Test 136: Safari loads and
+      draws (Google search over HTTPS, padlock; the owner typed example.com on the phone: it works).
+    - **Test 137 (BOOT e4ad59d6…), flashed 17:15 with the owner's OK: the clean build** -- default INJECT and rc.jobs
+      (no test programs, no injected library), DENY with mobileactivationd, kernel with the process watcher off by
+      default (`wifi_procs=1`). Wi-Fi joined + DHCP 192.168.x.x; apsd and appstored now get "failed lookup"
+      (error 3) for com.apple.mobileactivationd at once instead of waiting; Safari reopened example.com and drew it
+      over HTTPS (padlock).
+  - **2026-11-17 ~17:25: a start WITHOUT the PC works.** The owner unplugged the cable and restarted the phone (Test
+    137, stored args with modem=3): Wi-Fi icon, Safari loads pages. After plugging the cable back in mid-run, `phone.py
+    live` still reached the running kernel: CONNECTED and DHCP ACK 192.168.x.x in that run's log. Wi-Fi no longer
+    needs the PC.
+
+## Sound (started 2026-11-17 ~17:25)
+
+  - Plan: the donor's audio path (bsd/dev/redwood_adsp.c steps 1-11: ADSP boot via TZ PAS, SMP2P, GLINK, QRTR, APR;
+    then redwood_sound.c / speaker / mic) adapted to SM8150, the way the modem/Wi-Fi bring-up was.
+  - **Step 0 done, Test 138 (BOOT d94e7de5…, firmware fulldbg31):** the audio DSP's region (live DT pil_adsp_region
+    0x99300000, 39 MiB) overlapped the firmware's main DXE heap (0x99E00000, 28 MiB), which stays in use while iOS
+    runs. Mu-Silicium r5qfullPkg/Library/MemoryMapLib/MemoryMapLib.c (WSL; backup MemoryMapLib.c.fulldbg30): "DXE
+    Heap" moved to 0xDC000000 (free DRAM after DXE Heap 2, below the loader's 0xE0000000), "PIL Reserved II" now
+    0x8B800000 + 0x10200000 (to 0x9BA00000, the whole ADSP region). (fulldbg30 = the source as it was: no source
+    newer than its build.) Boots; iOS, Wi-Fi, DHCP as before.
+  - **Step 1 done, Test 139 (BOOT 2a9c062e…, args + `adsp=2`): THE AUDIO DSP RUNS.** Loader: r5q_modem_boot made
+    general (r5q_pas_boot(who, partition, pas_id, mem, size, start)); adsp=1 reads/checks, adsp=2 starts: PAS 1,
+    0x99300000 + 0x2700000, AOP "{class: image, res: load_state, name: adsp, val: on}". The image is NOT in the
+    modem partition: Samsung keeps the APPS-side DSP images in **apnhlos** (FAT16 whose 8.3 names are made-up aliases,
+    "PCAFUI~2" for image/), so the loader's FAT got fat_find_long (VFAT long names) and fat_find_name (8.3, else
+    long). adsp.mdt 8060 B, 18 segments, hash segment 1, relocatable, 0x8be00000..0x8e500000 (39 MB, = the region);
+    init_image 0/0, mem_setup 0/0, 14 MB in 99 ms, auth_and_reset 0/0: "adsp: OUT OF RESET". SMEM: item 443 "$SMP"
+    pid 2->0 (the DSP's SMP2P, waiting for ours, 429), item 423 (its SFR) only the init text. (Some loader messages
+    still say "modem:".) Next: the kernel's link with it -- SMP2P 429, GLINK edge with pid 2, QRTR, then APR (the
+    donor's redwood_adsp.c steps 6-11 with SM8150's IPC bits from the live DT).
+  - **Step 2 done, Test 140 (BOOT e54a454a…, kernel t140, args + `adsp=2`): THE AUDIO DSP IS LINKED, ITS AUDIO
+    SERVICES UP (APR), first try.** The donor's redwood_adsp.c in the r5q overlay with an r5q mode (scratchpad
+    t140_adsp.py + t140_adsp2.py): on r5q `adsp=2` turns it on; SMEM 0x86000000; steps 2-5 (image, AOP, TZ) are the
+    loader's; doorbells to the DSP = APCS IPC 0x17c0000c bit 10 (SMP2P) / bit 8 (GLINK), none listened for (the
+    link thread polls every ms); rails/AOP mailbox not touched; no TZ shut-down from the kernel (the reset does it);
+    GLINK's queue of ours, **item 479 (16 KB), is made by us** in the 0/2 partition (the DSP made 478 and 480);
+    the donor's speaker/mic/battmgr not started. Results (`adsp_step=11 adsp_keep=1` for the step-by-step log; the
+    default whole mode logs only the end line): the DSP's 443 reads "slave-kernel" 0x6 (up, own power) at once;
+    SMP2P agreed (v1, features 1); GLINK versions agreed in 54 ms; the DSP opens glink_ssr, IPCRTR, fastrpcglink-
+    apps-dsp, LOOPBACK_CTL_LPASS, apr_audio_svc, apr_apps2 — IPCRTR and apr_audio_svc opened both ways. QRTR: the
+    DSP is **node 5**, 8 services: 0x301 (769) i0 p12, 0x42 (66) i74 p3, 0x422 (1058) i1 p8, 0x2b (43) v2 i20 p2,
+    0xf (15) i32 p1 and i33 p10, 0x33 (51) i5 p6, 0x18 (24) i1 p9. APR: core (service 3, domain 4) says the audio
+    services are up after 2.2 s (opcode 0x1290d = 1); its service list (0x12906, 80 bytes): 0 0x9 0x3 0x40002 0x4
+    0x260000 0x7 0x70002 0x8 0x70000 0x9 0x10000 0xa 0x10000 0xb 0x10000 0xc 0x70000000 0xd 0x10000003. iOS, Wi-Fi
+    as before. Next: the speaker path (S10 Lite's codec and amplifier from the live DT; AFE port, ASM stream,
+    ADM routing over APR), then the microphone and iOS's audio HAL.
+  - **Step 3 done, Test 141 (BOOT f95f78e4…, kernel t141, args + `adsp=2 sound=N`): THE SPEAKER PATH WORKS, iOS's
+    output reaches the speaker.** The donor's redwood_sound.c in the r5q overlay with an r5q mode (scratchpad
+    t141_sound.py): speaker = one **TI TAS2562** (live DT i2c@884000/tas2562@4c = QUP0 **SE1**, pins GPIO114/115 func 1
+    "qup1", reset GPIO148 — found LOW, so the kernel drives it high; irq GPIO142 unused) on **SEC_MI2S_RX 0x1002**
+    (Samsung q6audio-adaptation amp-rx-port-id; I/V sense on 0x1003 unused). MI2S pins GPIO126 SCK / 127 WS / 128 SD0
+    in / 129 SD1 out, func 1 sec_mi2s, 8 mA, all in the SOUTH tile 0x03d00000. Codec WCD934x (tavil card) not needed
+    for the speaker. AFE: clock SET 0x102 (SEC_MI2S_IBIT) 3.072 MHz attr 1, AFE_PARAM_ID_I2S_CONFIG 0x1020d {1, 32
+    bits, SD1 (2), stereo, WS internal, 48000}, DEVICE_START — the DSP is the master: WS toggles ~96k/s at the pin.
+    SMMU stream **0x1b21** (match 6, context 4, our page tables; low bits 1 as the donor's). ADM/ASM unchanged:
+    tone 159/159 periods, 48.4 kframes/s, 0 underflows. TAS2562 over SE1 FIFO I2C as the loader's SE4 code
+    (vote 0x5200c bit 11; SE1's source is in DFS mode 0x21 → GENI_CLK_SEL 0 = XO): rev 0x10, reset, TDM_CFG0 0x09
+    TDM_CFG1 0x02 TDM_CFG2 0x1a (mono left, 24 of 32 bits), PWR_CTRL 0x0e shutdown / 0x0c active, volume = page-2
+    DVC 0x0c-0x0f Q30 (0x40000000 = 0 dB) — "Android's level" = 0 dB DVC at reset AMP_LEVEL 0x20; TDM_DET reads 0x24
+    with the clock. **Pitfall: mapping GCC as 0x100000+0x1f0000 hung the thread silently; 0x60000 (as the touch driver)
+    is fine.** sound=1 port+clock, sound=2 +stream (amp off), sound=3 +amp (1 kHz −20 dBFS, sound_below=120): amp
+    active 3 s, no fault. **sound=4** (iOS: /dev/redwood-audio from the RedwoodAudio HAL plug-in already in the image):
+    the boot sound played — amp up 46 ms after the first non-silent write, peak 11 %, stopped after 3 s silence; guard
+    on, default 30 dB under. Not yet: Settings ▸ Ringtone ignores taps (checkmark never moves), keyboard clicks don't
+    reach the driver (probably iOS's ringer/silent state — no switch on this phone); audibility to be confirmed by the
+    owner; microphone (WCD934x/DMIC, tx) not started. Stored args now include `sound=4`.
+  - **Test 142 (BOOT 384bca87…, root test142 with RC_JOBS=rc.jobs.ringer + EXTRA obj/ringer_test; kernel t141):**
+    iOS's ringer is ON (com.apple.springboard.ringerstate goes 0 → 1 ~10 s after SpringBoard; backboardd's stays 0)
+    and system sounds DO play: sound_test `system 1104` (key click), `system 1100` (lock) and an AudioQueue tone all
+    reached the amplifier. So Safari's missing key clicks and Settings ▸ Ringtone (whose rows ignore taps — the
+    checkmark never moves) are app-side problems, not the ringer/audio path. App os_log isn't in the live log.
+  - **Haptics, Test 143 (BOOT 3b05948f…, kernel t143, args + `haptic=5`): THE VIBRATION MOTOR FOLLOWS iOS.** The
+    motor is an LRA ("LINEAR_1040") on the **S2MU106's haptic block, I2C 0x3a on QUP0 SE4** (same bus as the charger
+    0x3d; redwood_sec_ts.c now has `redwood_r5q_pmic_read/write` under one lock, also held around gauge_poll /
+    charger_dump), LRA mode (DT operation_mode 2, no boost), driven by a PWM on **GPIO136 func 2 (gcc_gp1) from GCC
+    GP1** (0x164000: CBCR +0, CMD +4, CFG +8, M/N/D +0xc/+0x10/+0x14; mnd 8 bits). The block divides the PWM by 128:
+    the DT's periods are ns (0x9896 = 39062 ns = 25.6 kHz = 200 Hz at the motor; the bootloader leaves M 3 N 137
+    ≈ 205 Hz). Here XO/16/47 = 25.5 kHz (199.5 Hz), duty 88 % (DT normal_ratio; D = ~(2·n·duty)). Registers from
+    Samsung's drivers/vibrator/slsi/s2mu106/s2mu106_vibrator.c (LineageOS android_kernel_samsung_exynos850):
+    init OV_BK_OPTION|=0x80, filter 0x13-0x15 = 7f 5a 02, PWM_CNT_NUM 0x40, OV_WAVE_NUM|=0xf0, HT_OTP2 &= ~0xc0;
+    amplitude AMPCOEF1..3 (19 bits from 0..10000); on = HAPTIC_MODE 0x20 then PWM; off = PWM then mode 0; faults =
+    HAPTIC_INT 0x00 / HBST_INT 0x01 (read-clear). Donor redwood_haptic.c in the overlay with an r5q mode (scratchpad
+    t143_haptic.py, t143_sects.py): haptic=3 test (3 × 30 ms + 300 ms), haptic=5 serves /dev/redwood-haptic (the
+    RedwoodAudio plug-in's Actuator): a tap ≥ 30 ms, longer waveforms held (≤ 1 s, then rest), strength 4000-8000 by
+    the waveform's peak. Seen: the boot haptic (43 %) and the home-screen long-press menu (80 %). **Pitfall (panic
+    "kmem_alloc(1-2 MB) failed with 3" at Wi-Fi's copy-engine set-up): an extra 1 MB ml_io_map made early in boot
+    (TLMM whole tile; also the first t141's 2 MB GCC window) leaves the Wi-Fi start no kernel VA for its rings — map
+    single pages early.** Not felt by a person yet.
+- **Panel power / lock, Test 144 (BOOT e2081a84…, kernel t144, args + `fb_power=1`): the screen turns off when iOS
+  locks and on when it wakes.** MiniIOMobileFramebuffer.cpp (overlay, scratchpad t144_fb.py): selector 12
+  (RequestPowerChange) comes from backboardd with in[0] 1 = on, 0 = off (at boot: 1, 0, 1); with fb_power=1 it is
+  acted on: off = INTF1 autorefresh (0x2b4) 0, 40 ms, DCS 0x28 display off, 0x10 sleep in; on = 0x11 sleep out,
+  120 ms, 0x29, autorefresh restored. DCS through DSI0 (0x0AE94000) command DMA as the firmware's R5qDsiSend
+  (packet {cmd, 0, 0x05, 0x80} at 0x9E200000, DMA_BASE 0x48 / LEN 0x4C / TRIG 0x90, INTR 0x110 bit 0; ack_err 0x68
+  stays 0). Proof: the panel's TE (GPIO8, north tile 0x03900000) 12 edges/100 ms → 0 asleep → 12 again; fb_sleeptest=N
+  is a self-test. Side button (injected) → lock → panel OFF; again → ON. Not done: auto-lock never fires (Auto-Lock
+  is "1 minute" but the phone stayed awake 7+ min: something resets iOS's idle timer — unknown), brightness (DCS
+  0x51 would be the way; untested, needs eyes).
+- **App survey + crash tracer, Tests 145-146 (BOOT 1427a58f…, root test146, kernel t144 copied as t146):** every
+  home-screen app opens to its first-run screen (FaceTime sign-in, Calendar, Photos, Notes, Reminders, Clock, News,
+  TV, Podcasts, App Store, Maps, Health, Wallet, Phone keypad, Music; Weather blank without location) except
+  **Messages, which dies 0.25 s in (SIGSEGV, pc 0)**. wifi/inject_app.c → /redwood/lib/libr5q-app.dylib, injected into
+  22 stock apps (INJECT line; kern.exec_inject is 512 bytes, exact names: Compass, Tips, Home, FindMy, Shortcuts,
+  Books, Calculator, VoiceMemos, Files left out), prints "r5q-crash:" pc/lr/frames with dladdr names on a crash. The
+  Messages crash: ChatKit → UIKitCore → MobileIcons LICreateIconForImage(s) → CoreImage (+0x7114 → +0x45884 →
+  +0x19c4c0) calls glDisable(GL_DEPTH_TEST) (w1 0xb71) through a GL dispatch table that is all zeros (CoreImage's own
+  GL context, no Metal device, no OpenGL ES driver). Tried, no effect: EAGLContext initializers answering nil (CI does
+  not use EAGLContext there), __interpose of LICreateIconForImages (shared-cache calls are direct). Next idea: a real
+  GL behind it (userland GL=1, Mesa eagl.c) or patching CoreImage's choice of context. Tools: scratchpad dsc_dis.py /
+  dsc_sel.py disassemble the phone's cache (ios165/20F66__iPhone10,3_6, split; no local symbols).
+- **Messages fixed, Test 147 (BOOT 6107b079…, root test147):** libr5q-app.dylib replaces +[CIContext
+  contextWithEAGLContext:], contextWithEAGLContext:options: and internalContextWithEAGLContext:options: to answer nil
+  where there is no OpenGL ES and no Metal device; MobileIcons then makes its icons without CoreImage's GL path and
+  Messages opens ("Shared with You", then the conversation list). (A kCIContextUseSoftwareRenderer context instead got
+  past the GL table but Messages then killed itself with SIGILL.) Deeper survey: Mail reaches its account picker.
+  Tools: scratchpad build_root_app.sh N (lib + root with the INJECT line) and mktest.sh A B KERNEL ROOT "msg".
+- **Brightness + analyticsd, Test 148 (BOOT 800dd6c4…, kernel t148, root test148, args + `fb_bright=1`):**
+  CoreBrightness (in backboardd) looks for an **AppleARMBacklight** service (its strings: IODisplayParameters,
+  brightness, backlight-level, brightness-nits); MiniIOMobileFramebuffer now publishes one under disp0 and the
+  slider drives it: backboardd sets `brightness` (0..65536; 18074, 19488… while dragging), `backlight-level`,
+  `DisplayBrightness`, `FadePeriod`. Each brightness goes to the panel as DCS 0x53 0x20 (once) and 0x51 [hi lo]
+  (0..0x3ff, never under 10 %) through panelPacket() (long packet {3,0,0x39,0xc0,0x51,hi,lo,0xff}); ack_err 0 every
+  time. Whether the panel dims is NOT yet seen by a person (Samsung S6E3FA9 may want its own sequence). Unimplemented
+  framebuffer selectors from backboardd are logged (15, 17, 22, 27, 29, 33, 50, 55, 57, 68, 84). analyticsd removed
+  from build.sh's IOS_JOBS (it was named there, so the DENY list could not stop it): it crash-looped every 10 s.
+- **Owner-confirmed 2026-11-18:** brightness slider dims/brightens the panel, vibration works, speaker sound works.
+- **Auto-lock FIXED, Test 152 (BOOT cb1c35f1…, kernel t148, root test152):** cause found with probes injected into
+  SpringBoard/backboardd (wifi/inject_sbdiag.c, Tests 149-151): SpringBoard's idle timer is an attention-aware one
+  served by backboardd's com.apple.AttentionAwareness (AWScheduler); its 40/42/60 s timeouts never fired because
+  SpringBoard re-sent its configuration once a second: -[SBTelephonyManager _handleTelephonyDaemonRestart] (a
+  delayed perform, retried every second because CommCenter is not run) -> handleCallControlFailure: -> updateCalls
+  -> updateSpringBoard -> -[SBIdleTimerGlobalCoordinator resetIdleTimerForReason:]. Fix in userland
+  src/inject_sb.c (no_telephony_retries(): the method does nothing); libredwood-sb.dylib rebuilt with clang/lld into
+  prebuilt/userland (backup .pre152). Now: dim (factor 0.05) at 40 s, lock + panel off at 60 s. (Dispatch timers
+  were checked and are fine: wifi/timer_test.c.)
+- **Faster boot, Tests 153-155 (BOOT e3fc5d67…, firmware fulldbg32, kernel t155, root test154/155; cycle start ->
+  SpringBoard 2:36 -> 1:30):**
+  - firmware (Mu-Silicium r5qfullPkg FirstBootManager/R5qUsbRamDisk.c, backup .fulldbg31): the 2.49 GB system
+    image's CRC-32 by the CPU's crc32x instructions (same CRC, R5qCrc32Fast) instead of gBS->CalculateCrc32's table;
+    the second full CRC at every start (only for the "[MSD] ... crc32 still" line) removed. "[UFS] read in 4688 ms,
+    checked in 995 ms" (was "read in 15469 ms" + the second CRC).
+  - loader: ufs_survey() (hashes of dsp/xbl/tz/aop/abl/bluetooth, GPT, super, userdata dumps) only with ufs_probe=1;
+    AUTOBOOT_WAIT_MS 2000 -> 500; the listening window without a PC 5 s -> 1.5 s (15 s once a PC enumerates).
+  - userland: rc.jobs.quiet (no bring-up tests at start: hello_dyn, svc_test, surf_test, ps, mg_test, cpu_test 240);
+    build_root_app.sh RC_JOBS=rc.jobs.quiet. Image args: touch_log=1 dropped (sed on build_testN_shim.py).
+  - kernel: redwood_sound.c pause_ms 0 on r5q (was 1 s after each announcement; sound_pause=N for debugging).
+  - stored args now: modem=3 wifi_modem=1 wifi_rails=2 wifi_wlfw=3 wifi_smmu=2 adsp=2 sound=4 haptic=5 fb_power=1
+    fb_bright=1 (wifi_survey dropped: a read-only bring-up survey).
+  - left: backboardd waits 5 s for an ambient light sensor (CBU_ShouldWaitForALS; inject.c's brightness_fixes() is
+    off because it once broke the touch service's registration).
+- **No-reboot iteration, Tests 156-157 (BOOT ca9eab70…, kernel t157, root test157; owner approved the Wi-Fi
+  daemon):** wifi/r5qd.c, a root daemon on TCP 7777 started from rc.jobs.quiet; token /redwood/share/r5qd/token
+  (= work/ios-r5q/r5qd.token, from EXTRA_SHARE), private peers only. PC: `python phone.py rd ping|put|run|kill|inject|
+  reload LIB PROGRAM`, `phone.py respring`, `phone.py sh PROG ARGS`, `phone.py ps` (no USB needed; Git Bash needs
+  MSYS_NO_PATHCONV=1 for phone paths). Seen working: ping, df/ps, put into /var/r5q/lib, inject, kill, Messages
+  relaunched with the library. /private/var is a 3 GB ramfs (kept by var_store across clean shutdowns only).
+  Kernel t157: kern.exec_inject 512 -> 2048 bytes (bsd/kern/kern_exec.c now in the overlay; inject_env 1024), so the
+  app library goes into every stock app (Files, Calculator, Books, Compass, VoiceMemos, Shortcuts, Tips, FindMy,
+  Magnifier, Home, Stocks added). Next image: r5qd's inject read-back buffer 600 -> 2100 (it said "cannot read it"
+  once the table passed 600 bytes; the set itself works).
+  Idea not done: a kernel hot swap ("oem kernel" + "oem run" after "oem stop") -- after a run the loader returns to
+  the firmware (full reset), and a re-run would need the modem and ADSP restarted and hardware re-initialised.
+- **Boot-screen messages fixed, Test 159:** "ConvertPages: failed to find range 99000000 - 9956DFFF" was UEFI
+  failing to put the loader at its link address (/base:0x99000000, now inside the ADSP's reserved region since
+  fulldbg31) before loading it elsewhere; build-testN.sh now links /base:0xD8C00000 (where UEFI put it). "[Bds]
+  Connect ConIn failed - Unsupported" was the loader's r5q_volume_key() reading the console's own text input, which
+  makes BDS connect ConIn on demand (it never connects on this phone); it now reads only the other text inputs
+  (ButtonsDxe's). Neither line in the firmware log of the new boot.
+- **GPU, Tests 158-159 (kernel t158, root test159 with fw-gpu):** redwood_adreno.c in the overlay with an "r5q" board
+  (scratchpad t158_adreno.py): GPU blocks 0x1100000 below the others' (gpu 0x2c00000, gmu 0x2c6a000, gpucc 0x2c90000,
+  smmu 0x2ca0000, cx_misc 0x2c9e000, gbif 0x2c0f000), RSCC = gmu + 0x23000, command DB 0x85f20000, GCC PLL vote
+  0x52004, speed bin at qfprom +0x4130 bits 29-31 (dt qcom,gpu-speed-bin). Firmware: a640_gmu.bin + a630_sqe.fw from
+  vendor.img (debugfs), a640_zap.{mdt,b00-b02} from modemfw/NON-HLOS.bin (7z) -> linux-source/fw-gpu (image /fw).
+  adreno=12 adreno_pause=300: 1 clocks + RPMh gfx/cx/mx levels; 2 speed bin 0; 3 gpucc (CX/GX off); 4 CX ON; 5 GMU
+  clock 200 MHz (src 6 = GPLL0 div, as gpucc-sm8150.c), clocks on (not measured); 6 GMU counter 19.2 MHz: THE GPU
+  BLOCK IS ALIVE; 7 RSCC; 8 SMMU 6 SMRs, 5 contexts, unset; 9 context 0; 10 GMU DTCM takes writes; 11 TrustZone
+  answers; 12 TRUSTZONE ACCEPTS THE ZAP SHADER'S SIGNATURE (PAS 13). Next: 13-17 (GMU address space, firmware, start,
+  RPMh, HFI) -- check a640 vs a650 differences first (GMU DTCM address, HFI, bus tables).
+- **GPU (next):** the donor's bsd/dev/redwood_adreno.c (Adreno 642L, 22 steps up to a filled frame; Mesa behind
+  userland eagl.c, gpu=1) is the template; Adreno 640 is a6xx too. Needs SM8150 addresses (kgsl-3d0 0x02c00000, GMU,
+  GPU CC, kgsl SMMU from the live DT) and the phone's a640_gmu.bin / a640_sqe.fw / a640_zap.* from its vendor
+  firmware.
+- **PC button injection (Test 144 kernel):** the touch mailbox's kind 4 = a hardware button (x0: 1 lock, 2 volume up,
+  3 volume down; ms held) posted as REDWOOD_BUTTON_DOWN/UP; `python phone.py button lock|volup|voldown [MS]`. Volume
+  keys reach iOS (the lock screen's volume indicator shows).
   - BOOT is Test 103 (89ad5c45…, kernel t103 + Test 102 loader): all of the above stays off unless the live args turn it on
     (`phone.py args wifi_survey=1 modem=2 wifi_modem=1 wifi_rails=2`); args cleared after the run.
 - Charging (2026-11-17): the charger is a **Samsung S2MU106** (I2C 0x3D on QUP SE4, GPIO51/52; fuel gauge 0x3B is
@@ -246,8 +594,401 @@
 - Live boot-args (Test 82): every `wifi_*` switch is set with `python phone.py args ...` (kept in USERDATA, applied
   at the next start), so each Wi-Fi step needs no new BOOT image unless code changes.
 
+## GPU (Adreno 640) — 2026-11-18, Tests 160–166
+
+**Result: iOS's window server (CoreAnimation) renders through the GPU.** Mesa 25.0.7 freedreno ("FD640, OpenGL ES 3.2")
+behind the donor's EAGL bridge (libredwood-gl.dylib); home screen, Today view and apps draw correctly, frames take
+~1 ms of GPU work. BOOT = Test 166 (e1cf4d41…: kernel t165, root test166 with GL=1). Stored args now include
+`adreno=21 adreno_pause=0 adreno_keep=1 adreno_watch=0 gpu_recover=1 glfetch=0`.
+
+a640 differences from the donor's a650/a660 path (all in `redwood_adreno.c`, flag `a640`, set by `r5q_blocks()`;
+patch scripts scratchpad t160–t164_adreno.py), from Linux v6.6 a6xx_gmu.c/a6xx_hfi.c/a6xx_gpu.c:
+- GMU DTCM at 0x40000 (not 0x10004000); GMU caches of 240 KB at 0x4000 (icache) and 0x44000 (dcache) plus a page at
+  0x60000000, in memory of ours (step 13). The a640_gmu.bin (core 0x20000105) has no "needs" blocks.
+- Old firmware: started value is 0xbabeface with mask ~0 (Linux a6xx_gmu_start), and its bits overlap the
+  donor's "failed" mask 0xe00 — the HFI wait quit after 100 µs because of it (`gmu_failed_bits`, Test 162).
+- RSCC program for non-650 (0xa7a506a0…, hidden_tcs_cmd2_data 0x80000000); the PDC is ours to program (not the AOP's):
+  sequence at 0xb490000, TCS1/TCS3 at 0xb290000 (Linux a6xx_gmu_rpmh_init), done in step 15 before the GMU starts,
+  then the RSCC to sleep and woken again. No FAL_INTF writes; AHB fence range Linux's (0xa << 18 | 0xa0).
+- **Linux's hard-coded RPMh addresses do not match this phone's command DB**: Linux's PDC "GPU rail" 0x30090 is
+  `xo.lvl` here (gfx.lvl is 0x30050), and its three CNOC votes 0x50034/0x5007c/0x5004c are SH2/SN15/SN3. Both now
+  come from the command DB by name (Test 164); the bus table is the donor's (SH0, MC0, ACV; CN0).
+- HFI order as Linux: perf table, bw table, core fw start, START, then the GX vote (bus index 0, not 0xff).
+- Step 20: UCHE GMEM range (not 650), UBWC a640 values (amsbc only, hbb 15), no CP_APRIV_CNTL (no hw_apriv),
+  RB_DBG_ECO_CNTL 0x00100000.
+- Steps 10–12 must NOT be skipped on r5q (`adreno_skip=0x1c00`, i.e. `gpu=1`): without step 12 handing TrustZone the
+  zap header, step 19's PAS shutdown call never returns.
+- **Mappings**: all adreno blocks now come from `ml_io_map_unmappable` (kernel map). With `ml_io_map` (8 MB in all) the
+  kept GPU's ~1.5 MB left no room for the modem link's 2 MB rmtfs mapping → `kmem_alloc failed with 3` panic in
+  `r5q_modem_link`, which showed up as "boot stops at var_store" (Test 165).
+- CoreAnimation with EXT_shader_framebuffer_fetch draws rounded corners as octagons and loses the dock/Search platters
+  on FD640: `glfetch=0` fixes all three; eagl.c now drops the extension by itself when the renderer is FD640
+  (in prebuilt libredwood-gl.dylib, not yet in an image).
+- Texture formats (LA, A, L, RGBA) sample correctly on FD640 (wifi/tex_test.c).
+
+- **App survey under the GPU (Test 167):** all 19 home-screen apps open and draw correctly (Settings, Photos,
+  Safari, Maps, Messages, Music, Notes, Clock, FaceTime, Calendar, Mail, Reminders, News, TV, Podcasts, App Store,
+  Health, Wallet, Phone; scratchpad appshots.py, port/build/gpu-apps/). Messages had crashed again in CoreImage:
+  inject_app.c skipped its CIContext fix wherever libredwood-gl.dylib exists, but that GL is backboardd's only —
+  apps still have the stock empty EAGL table. Guard removed (Test 167). Idle frame rate ~3.5 fps; no GPU recoveries.
+- **Boot: 5 s ALS wait removed (Test 168, BOOT 07e8dee6…):** backboardd's window-server start waited 5.19 s in
+  CoreBrightness `CBU_ShouldWaitForALS` (not exported) for a HID service usage page 0xff00 / usage 4. New
+  libr5q-bbd.dylib (wifi/inject_bbd.c, injected into backboardd beside libredwood.dylib) patches its
+  dispatch_time(0, 5e9) to 0 in a private copy of the page (CoreBrightness+0xc98e0, words checked first). Window
+  server ready in 0.11 s. Note: hot-reloading anything into backboardd (killing it) leaves the lock screen in
+  "pocket touches expected" mode (0x101) and swipes don't unlock — reboot instead.
+- Stored args no longer need `glfetch=0` (auto for FD640 since Test 167).
+- **Page-2 apps (Test 168):** Weather, Stocks, Find My, Books, iTunes Store, Fitness, Watch, Contacts, Translate,
+  Files, Shortcuts, Freeform, Tips, App Library, keyboard and alerts all draw correctly. Home is blank: `homed` is in
+  mkjobs.py DENY (crash-loops, as on the donor). First-run notification alerts (Home, Watch, Photos, iTunes) block
+  the home gesture until answered (SpringBoard's own alert); Home and Watch answered "Don't Allow" during the survey.
+- Sound checks under Test 168: keyboard taps in Safari reach the speaker and haptics (amps start; the click peaks at
+  1 % of full scale before the 30 dB attenuation, so probably inaudible). The ringtone preview (Settings > Sounds >
+  Ringtone, tapping the current tone) still plays nothing: no stream reaches /dev/redwood-audio; nothing in the
+  kernel log says why (Preferences/mediaserverd don't log there). Safari search suggestions load (network fine).
+
+- **Ringtones FIXED (Tests 169–171, BOOT e810b650…, root test171):** `ios165/select-system.py` leaves
+  `Library/Ringtones/` (53 files, 18 MB) out of the system image, so ToneLibrary had nothing to play. They are now in
+  the root image (/redwood/share/Ringtones, from rootfs.dmg via 7z → /var/tmp/r5q-ringtones) and shown on
+  /Library/Ringtones by wifi/r5q_bind.c (kern.apfs_synthetic mount point + bindfs). The port's bindfs mounts only
+  for process 1 (redwood.patch, bind_vfsops.c) — a launchd job and even a child of init got EPERM — so init's rc is
+  now rc.r5q: `exec /redwood/bin/r5q_bind FROM TO /sbin/launchd.ios` (process 1 mounts, then becomes launchd, mount
+  or not). init itself can't be rebuilt here: ld64.lld makes no static LC_UNIXTHREAD binaries. Verified: 53 items,
+  AVAudioPlayer plays Opening.m4r (peak 27 %), Settings' ringtone preview starts the amplifiers.
+  build_root_app.sh defaults now: GL=1, RC=rc.r5q, EXTRA="obj/r5qd obj/r5q_bind", EXTRA_SHARE adds the ringtones.
+- **Wi-Fi firmware crash under sustained upload (Test 168):** after ~18 MB over r5qd, servreg reported
+  "msm/modem/wlan_pd" DOWN then UP (+1079 s); tx/rx counters froze (29 frames never completed) and Wi-Fi stayed dead
+  until reboot — the driver does the WLFW/CE/HTC/WMI/join bring-up once and never again. SMEM item 611 empty (no reason
+  recorded).
+- **Recovery written (Tests 172–173, kernel t173, BOOT 8db6f465…):** servreg DOWN → link down; UP again →
+  `r5q_wifi_again()` resets HTC/WMI/join/tx state and redoes the WLFW handshake (no second QMI handle; TZ assign errors
+  tolerated, the MSA stays the modem's) and `r5q_htc_bringup()` (ce_setup / rx ring / RRI page / maps / SMMU reused; iOS's
+  station stays attached). The first bring-up is unchanged and verified. **The recovery itself is untested**: servreg
+  restart_pd (0x21, boot-arg `wifi_pd_restart=S`) is answered "taken" (result 0) but the modem does not restart the
+  domain, and 6 × 8 MB uploads over r5qd did not crash it again.
+- **Recovery VERIFIED (Tests 180–181, BOOT 14bc9248…: kernel t181):** boot-arg `wifi_fw_crash=S` makes the firmware
+  assert S s after the first bring-up (ath10k's simulate_fw_crash: WMI 0x1d008, TLV 0x98 {1, 0}). wlan_pd goes DOWN and
+  UP within 15 ms; Test 180's recovery waited 30 s for a WLFW service that had already re-registered (the loop cleared
+  wlfw10_server after the new_server callback) — t181 clears it in the servreg DOWN handler instead. Then: handshake
+  again (MSA still the modem's, tolerated), firmware READY, radio on, rejoined with keys, **en0 up 14.3 s after the
+  domain returned**, r5qd reachable, traffic flowing, same IP.
+
+- **Wallpaper / lock screen black (Test 174, BOOT e7ebf87b…, root test174):** PosterBoard died (SIGABRT, "attempt to
+  insert nil object from objects[1]", PosterBoard+0x71aa8) whenever wallpapers were shown: it builds CARenderer options
+  {kCARendererColorSpace, kCARendererMetalCommandQueue, kCARendererFlags=2} and the Metal queue is nil (no Metal device
+  here). libr5q-app.dylib (now also injected into PosterBoard) drops nil pairs from such dictionaries in PosterBoard only
+  and logs them ("r5q-nildict:"): PosterBoard survives, but its previews stay empty and the lock/home wallpaper stays
+  black — posters need Metal. Same blocker as Metal apps (donor's RedwoodMetal is research-grade). Don't kill PosterBoard
+  or backboardd at runtime: the lock screen then ignores the unlock swipe until reboot.
+- Wi-Fi stress (Test 173): 106 × ~350 KB uploads (36 MB) over r5qd in 21 s, no firmware crash; recovery still unexercised.
+
+- **Home app works (Tests 175–177, BOOT 7b5c7f24…, root test177):** homed was in mkjobs.py DENY (the donor's crash
+  loop); here it starts and stays up, and the Home app shows its welcome screen instead of a blank page. Allowed for good
+  in WSL userland/mkjobs.py. Of the rest of that DENY line, duetexpertd (SIGTRAP ×23 in 4 min), syncdefaultsd
+  (NSURL nil path, ×8) and photoanalysisd (SIGTRAP ×3) still crash — iCloud/account services, left denied; routined,
+  dmd and avconferenced were not started in 4 min (untested). Microphones: WCD9340 "Tavil" codec over SLIMbus
+  (slim@171c0000 qcom,slim-ngd, tavil-slim-pgd) — needs a SLIMbus NGD driver, the codec's power-up and register
+  programming, and an AFE capture path: a large job, not started.
+
+- **Flashlight WORKS (Tests 178–179, BOOT b5fe2246…: loader t179, kernel t178, root test177):** the PM8150L's flash
+  LED module (SPMI slave 5, 0xd300, "qcom,qpnp-flash-led-v2", type 0x18 subtype 0x04 = 3 channels) driven by the donor's
+  redwood_torch.c in an r5q mode (overlay; scratchpad t178_torch.py): Linux leds-qcom-flash.c's 3-channel registers,
+  channels 0+1 (Android's led:switch_0) at ≤100 mA each (Android 280/300), every write read back, fault/OTST/VPH flags
+  and the PM8150L temperature alarm (slave 4, 0x2400) watched 10×/s, ≤120 s per lighting (torch_max_s=120). torch=1
+  look, torch=2 2-s test (ramped up, no faults), torch=3 for iOS. The loader only advertised the flash
+  (MobileGestalt camera-flash → Control Center's button) outside R5Q_XNU_TEST builds: the torch= check is now in our
+  path too. Verified: Control Center flashlight on → "ON (iOS asked for 850 of 1000)", off → "off". Stored args now
+  add `torch=3 torch_max_s=120`.
+
+- **Microphone groundwork (not started):** the ADSP offers QMI service 0x301 (SLIMbus, instance 0) at node 5 port 12
+  (Test 140 log), which Linux's qcom-ngd-ctrl.c uses to power the NGD (select instance 0x20, power 0x21, framer
+  status 0x22). Then needed: the NGD's BAM DMA message channels (slim@171c0000 + its BAM), SLIMbus enumeration of the
+  WCD9340 (tavil-slim-pgd, ifd elemental addr 00 00 50 02 17 02), the codec's reset GPIO/supplies/MCLK, its register
+  setup and capture path (Linux wcd934x.c), an AFE SLIMBUS_0_TX port and an ASM record stream into RedwoodAudio. The
+  donor's redwood_mic.c targets SM7325's LPASS TX macro and does not apply. Multi-week.
+- **Microphone stage 1 DONE (Test 182, kernel t182, boot-arg mic=1; redwood_adsp.c r5q_mic_start):** QMI to the DSP's
+  0x301 at node 5 port 12 from our QRTR port 0x4130: select instance (0x20: instance 0, mode **2 = the DSP is master**
+  — mode 1 was refused 0x5a "incompatible state", and power then 0x34) → done; power active (0x21) → done. The
+  controller (0x171c0000) reads version 0x202; the NGD (base + 0x1000): cfg 0, status 0x40c, no logical address.
+  (Note: in the ADSP driver `printf` is silent in quiet mode — use `tell()`; and redwood_sound_dsp_up() never returns,
+  so anything after it never runs.) Next: the NGD's BAM DMA message queues (0x17184000), NGD enable, logical address,
+  then the WCD9340's reset/supplies/MCLK and its enumeration. Stored args do not set mic=1.
+- **Microphone stage 2 DONE (Tests 183–189, BOOT f4d98350…: loader t189, kernel t189, mic=2):** reading the BAM's
+  *global* registers (0x17184000+0) hangs the CPU (the DSP's); only pipes 3 (rx) and 4 (tx) are touched (rx pipe =
+  (NGD_STATUS & 0xfc) >> 2 = 3). The first pipe set-up reset the phone (Tests 185–186): the BAM takes 32-bit addresses
+  and every kernel page is above 4 GB (iOS gets no RAM below; kmem_alloc_contig with max_pnum finds none). The loader
+  now reserves 64 KB below 4 GB once and passes `lowdma_pa=` (Test 189: 0xdbcb2000). SMMU: SMR7–9 for SIDs
+  0x1b46/8, 0x1b4d/2, 0x1b50/1 copy SMR0's bypass S2CR. Then: pipes reset/FIFO/enable (0x2a rx, 0x22 tx), 32 rx
+  descriptors of 40 bytes, NGD RX_MSGQ_CFG 0x10000 + cfg |= 7 → **logical address assigned (status 0x240e) and the
+  manager's first message in 10 ms: c7 00 ff d9 c5 01 01 = MASTER_CAPABILITY (mt 6, mc 0, magic 0xc5d9, v1, prot 1)**.
+  Next: answer it (REPORT_SATELLITE on the tx pipe), then the codec.
+- **Microphone stages 3–4 (Tests 190–193, kernel t193, mic=3/4):** REPORT_SATELLITE `c7 01 ff d9 c5 01 01` (rl is the
+  length less one) is sent and accepted (tx offset 8, NGD int stat bit 31 "sent"); no answer follows. The WCD9340: its
+  clock LN_BB_CLK2 voted on through RPMh ("lnbclka2" at 0x42f00, new exported redwood_r5q_rpmh_enable() in
+  redwood_wifi.c, with a lock around rsc_write), GPIO143 driven high (cfg 0x2c1, io 0x3: out of reset); its 1.8 V
+  (PM8150 S4) and 3.3 V (PM8150L BOB) were already on. ADDR_QUERY (mt 5, mc 0xd, to 0xff: `aa 0d ff <tid> 00 01 50
+  02 17 02`, as Linux's qcom_slim_ngd_get_laddr) is refused by the NGD itself every time: int stat 0x88000000 =
+  sent + MSG_TX_INVAL, one message at a time with the status cleared between. Open question: the NGD's state — Linux
+  waits for the manager's reconfiguration (NGD_INT_RECFG_DONE / ctrl->reconf) after REPORT_SATELLITE before user
+  messages; nothing like that was seen here (no rx after the satellite report). Next: watch NGD int stat bit 24
+  (RECFG_DONE) and the rx queue longer after REPORT_SATELLITE; re-post rx descriptors; compare with downstream
+  msm slim-ngd (SM8150's own Android kernel) for the satellite handshake.
+- **Test 194 (kernel t194, mic=4): variants.** Downstream LineageOS sm8150 slim-msm-ngd.c/slim-msm.c (scratchpad
+  ref-linux) build ADDR_QUERY and REPORT_SATELLITE byte for byte as we do (rl-1 in the header, tid in wbuf[0], tx
+  length (rl+3)&~3, EOT-only descriptors, rx/tx pipes = (NGD_STATUS & 0xfc)>>2 and +1). Every query variant —
+  INT+EOT, EOT only, length 11, after enabling the NGD's interrupt mask, to the interface device — is "sent INVALID"
+  (0x88000000); REPORT_SATELLITE again is "sent" clean **and the manager answers it with MASTER_CAPABILITY again**:
+  the manager does not take our satellite report and starts the handshake over. Likely the real problem; the
+  invalid queries follow from the NGD not being an accepted satellite. To look at next: whether the DSP's SLIMbus
+  manager needs the "select instance" mode/instance otherwise (both 0x20 forms tried: mode 1 refused 0x5a, mode 2
+  done) or a QMI "check framer" first, the satellite's own logical address in the report, and the timing (downstream
+  answers within the rx interrupt, we ~5 s later).
+- **Video playback WORKS (2026-11-18, no image change; wifi/vt_test.m, wifi/openurl.m over r5qd):** no hardware
+  decoder (VTIsHardwareDecodeSupported no for H.264 and HEVC), but iOS's software decoders run: AVAssetReader decodes
+  720p30 H.264 at 242 fps and HEVC at 390 fps; AVPlayer plays both at rate 1. In Safari (page served from the PC on
+  the LAN, opened with `openurl URL`, an LSApplicationWorkspace helper) both `<video>`s play inline and the picture
+  moves; mediaserverd ~60 % of a core for two 720p streams. Unlock note: an injected swipe of 200 ms unlocks, 300–400
+  ms ones sometimes leave "Swipe up to open".
+- **Sensors, stages 1–2 (Tests 200–201, BOOT 9f44901a…: loader t200 with slpi=, kernel t201, root test199):** the
+  loader's `slpi=1` reads image/slpi.mdt from apnhlos (22 segments, relocatable, 20 MB), `slpi=2` starts it (PAS 12 at
+  0x8c400000, inside UEFI's "PIL Reserved II"): TrustZone accepts it, OUT OF RESET, iOS boots normally. Kernel t201
+  (redwood_adsp.c r5q_slpi_start/sl_*: its own GLINK edge with host 3, doorbell APCS IPC bit 24, polled): versions
+  agreed, IPCRTR open, QRTR HELLO from node 9 and 9 services -- **400 (SEE, the sensors' client service) at node 9
+  port 12**, plus 66, 4100, 43, 15×2, 51×2, 24. The SLPI also opens glink_ssr, fastrpcglink-apps-dsp (the sensor
+  registry's file server, FastRPC -- may be needed) and LOOPBACK_CTL_DSPS. Next: a QMI client on port 400 (SEE
+  protobuf: SUID lookup for "accel", then a stream), then orientation into iOS.
+- **Sensors, stage 3 (Tests 202–204, BOOT 65d47075…: loader t203, kernel t204; boot-arg slpi=3):** the SEE client
+  works (redwood_adsp.c see_*: QMI 0x20 with a hand-made protobuf sns_client_request_msg, indications 0x21 decoded,
+  floats taken apart by hand). SUID lookups answer for resampler, timer, async_com_port, data_acquisition_engine, but
+  **no accel/gyro/mag/ambient_light/proximity/pressure, and no "registry" or "interrupt"**: the physical drivers need
+  the registry, which loads /vendor/etc/sensors/config/*.json and /persist/sensors/registry through FastRPC from the
+  AP (Android's sscrpcd; postmarketOS's hexagonrpcd) on the channel the SLPI opens, "fastrpcglink-apps-dsp".
+  (Test 202's loader took only slpi=1/2: fixed in t203, 2 and up start it.) Next: FastRPC on that channel (attach to
+  the sensors PD, the adsp_listener loop, apps_std file calls served from copies of those files) -- multi-stage.
+- **Sensor data on the PC (2026-11-18):** persist partition read in the loader's listening window (`phone.py reboot`,
+  then `phone.py read persist 0 2000000`, then `phone.py continue`; 31 MB ext4) into work/ios-r5q/work-sensors/
+  (local only); `debugfs rdump /sensors`: registry/registry/ has 91 JSON groups (lsm6dsm_0 accel/gyro/temp + factory
+  calibration, ak0991x_0 mag, tmd4907 light/proximity, power.gpio, sns_reg_config...), sensors_list.txt lists 25
+  sensors Android had (accel, gyro, mag, ambient_light, proximity, auto_rotation, step_counter, ...). Still to get:
+  /vendor/etc/sensors/config/*.json and sns_reg_config (vendor, inside super).
+- **FastRPC, stage 1 (Tests 205–210; kernel redwood_adsp.c frpc_*, boot-arg slpi=4; the SLPI's GLINK now two channels):**
+  "fastrpcglink-apps-dsp" opens both ways. SMMU: streams 0x5a0–0x5a3 given matches copying a translation-off boot
+  bank's S2CR (as the SLIMbus/Wi-Fi code; copying SMR0's blindly hung the core, Tests 205–206). Test 207: INIT_ATTACH
+  (handle 1, pd 2) ANSWERED with 0x8000040e (DSP "bad parameter"): the S10 Lite's adsprpc.c puts the session (0x5a1&3)
+  in address bits 32-33 for the SDSP ("SMMU interconnect HW bug" workaround), which through a bypass bank point at the
+  wrong memory; t208+ send plain physical addresses (FRPC_SESSION 0, stream 0x5a0). Tests 208–210: the FastRPC
+  thread never gets past its start-up delay, and Test 210's phone RESET itself (XBL boot) ~6 min in. kern.redwood.
+  slpi_log (t210; wifi/r5q_sysctl.c over r5qd) keeps the "slpi:" lines -- the kernel log wraps in ~10 s. Note: /var is
+  saved only on a clean shutdown; files put there are lost if the phone resets. slpi=3 alone ran 12 min, no reset.
+- **THE ACCELEROMETER WORKS (Tests 211–222; BOOT 2caaaaaf…: loader t221, kernel t222, root test199; boot-arg slpi=5).**
+  What it took, in order: (t211) FastRPC's buffer from RAM between 4 and 8 GB -- its address bits 32-33 = 01 are the
+  session/stream (0x5a1) the SLPI's interconnect uses, so the translation-off bank passes it unchanged (attach answer 0);
+  (t212) slpi=5: the loader puts the image in place but does not release it; the kernel readies FastRPC, then calls
+  auth_and_reset itself (the registry is read only at the SLPI's start); (t214) our SMP2P item 430 with "sleepstate" 1
+  (awake); (t215) **register with the SLPI's "adsp_default_listener"** (remotectl open + method 0) before listener
+  init2 -- then the SLPI calls us; (t216) apps_std served from a table compiled into the kernel (redwood_sensor_files.h,
+  wifi/mk_sensor_files.py, from the phone's own /persist/sensors and vendor /etc/sensors -- read in the listening window:
+  persist partition, and vendor from super at sector 10283008, 2280248 sectors; local only); (t217) paths with ".."
+  resolved; (t218) the default-listener open retried (too soon = "bad parameter"); (t219) writes kept in memory
+  (fwrite, fremove, frename, ...); (t220) vendor configs + /sys/devices/soc0 (MTP, soc_id 339) + ssc_hw_rev 9: the
+  registry rebuilds itself and publishes accel/gyro/mag (LSM6DSM, AK0991x), ambient_light/proximity (TMD4907),
+  registry, interrupt; (t221) the stream answered SEE error 6 "not available"; (t222) **the sensors' supply sensor_vdd =
+  PM8150L LDO8 "ldoc8" voted on through RPMh** -> samples at ~12/s, x 0.15 y -0.16 z -9.78 m/s^2 lying flat, status 3.
+  Next: the samples into iOS (orientation/auto-rotate: a HID accelerometer service for backboardd), then gyro, mag,
+  light (auto-brightness), proximity.
+- **ORIENTATION IN iOS WORKS (Tests 223–227; BOOT 1f13324e…: loader t221, kernel t223, root test227; slpi=5).**
+  Kernel t223: samples routed by the event's SUID; streams: accel 25/s, mag 10/s, ambient light and proximity on change
+  (msg 514); the last values in the sysctl kern.redwood.motion (struct redwood_motion, Android axes, x1000). backboardd
+  (wifi/inject_bbd.c, libr5q-bbd): an Apple-vendor accelerometer HID service (0xff00/3) fed every sample as
+  accelerometer events in g (iOS = -Android/9.80665) -- the event server opens it and backboardd's OrientationDevice
+  drives it (ReportInterval 20 ms, interrupt thresholds); and since backboardd takes the device orientation from
+  CoreMotion (CMDeviceOrientationManager, which needs the motion coprocessor's own HID device: "fHidDeviceInterface
+  NULL"), its startDeviceOrientationUpdatesToQueue:withHandler: is taken over: the handler kept, the orientation worked
+  out from the accelerometer (flat -> face up/down at |z|>0.8 g, else the larger of x/y with 0.2 g margin, held 0.2 s)
+  and handed on as CoreMotion's own CMDeviceOrientation object (from deviceOrientationBlocking; fOrientation int at
+  +16) on backboardd's NSOperationQueue. Result: "Effective device orientation changed to: faceDown (6)", sent to
+  SpringBoard; BKHIDServicesGetCurrentDeviceOrientation (wifi/orient_test.c) says 6. Mistakes on the way: an object of
+  our own making and dispatch_async onto the NSOperationQueue both crashed backboardd (Tests 224–226). Rotation itself
+  needs the phone turned by hand to see. Not done: an ambient light service (0xff00/4) makes CoreBrightness crash
+  backboardd at every start (Test 228; it wants a real ALS's properties) -- disabled, and the compass service with it;
+  proximity has sent no event yet; the gyroscope is not streamed. Light reads 0 lux lying face down, as expected.
+- **Compass service (Test 229; BOOT de49258e…: loader t221, kernel t223, root test229; slpi=5):** the compass alone
+  (0xff00/0x0a, compass events in uT from the 10/s mag stream) is safe: no crash, and opening the Compass app makes
+  the event server subscribe to it (ReportInterval 25 ms -- locationd/CoreMotion); the app runs, shows its dial and
+  the location; no heading figure with the phone face down (expected) -- the heading needs a hand test. The mag
+  values are uncalibrated (~390 uT magnitude; CoreMotion calibrates itself, or SEE "mag_cal" could be streamed).
+  Proximity's one event is msg 769 (not 1024): fields 1 = 2, 2 = raw ~2090 -- not yet decoded in the kernel, not in
+  iOS. Ambient light: CoreBrightness reads many ALS properties (ALSSensorType, ALSCapability, ALSSCalDBV,
+  integration times...); emulating them is the next job for auto-brightness.
+- **Apps get the sensors (Tests 230–231; BOOT 50bfafa0…: loader t221, kernel t231, root test230; slpi=5):** the gyro
+  streamed at 25/s (kernel) and a gyroscope service (0xff00/9, rad/s) in backboardd; wifi/cm_test.m (CMMotionManager,
+  an ordinary client) gets accelerometer, gyro and magnetometer at 10/s each -- device motion (fused attitude) gives
+  nothing yet. Proximity decoded (msg 769: "NEAR", raw 2092 lying face down) but deliberately NOT given to iOS: it
+  drives pocket/touch suppression and the phone lies face down. **Wi-Fi race fixed (t231):** FastRPC's stream matches
+  now take the HIGHEST free SMRs (93...) -- the Wi-Fi takes the lowest, and with the SLPI released early the two ran
+  at once and could take the same SMR (Test 230: Wi-Fi sent nothing; earlier SLPI boots were slow to connect).
+- **Crash loops fixed (Test 199, BOOT 912c7c60…: loader t189, kernel t196, root test199):** installcoordinationd
+  (app installs' coordinator, runs as mobile) died at every start ("Failed to create data directory", EACCES) -- 7–11
+  times a boot, 92 in a row after app installs: every system container's Library (/var/containers/Data/System/*,
+  /var/containers/Shared/SystemGroup/*, 31 of them) is mode 0000 owned by uid/gid -2 (app containers under
+  /var/mobile are fine). Root daemons don't care; mobile ones can't enter. The 29 that were 0000 set to 501:501 0755
+  with wifi/r5qfs.c (`r5qfs ls|stat|mkdir PATH UID GID MODE|chown|rm` -- the phone has no ls); kept across reboots
+  (/var), installcoordinationd stays up, aggregated now exits 0. A container made later will come out 0000 again:
+  re-run the loop if a mobile daemon logs EACCES. AssetCacheLocatorService (Apple's LAN content caches) exited 1
+  every 10 s as mobile (runs fine as root): added to mkjobs.py DENY. Test 199 boot log: no crash loops, no exit(1)
+  respawns; locationd, location setting, and the installed R5Q Hello all survived the reboot.
+- **FairPlay is out of reach:** fairplayd.H2 opens com_apple_driver_FairPlayIOKitUserClient, a closed Apple kernel
+  driver a source-built XNU does not have, and exits. Blocked with it: WeatherKit data, Podcasts' show/episode pages
+  ("Can't connect right now"; Browse loads), App Store, TV, Apple Music, App Store apps (encrypted).
+- **UI frame rate (2026-11-18, wifi/fps_test.c over r5qd: CARenderServerGetFrameCounter/GetDirtyFrameCount):**
+  scrolling Settings up and down by injected swipes holds 53–60 frames/s (mostly 58–60); idle is 0 (nothing drawn
+  when nothing changes -- the old "idle ~3.5 fps" note was idle redraws, not a limit). The GPU UI is smooth.
+- **Installing applications WORKS (2026-11-18, no image change):** iOS's own installer takes applications built here.
+  `python wifi/ipa_install.py APP.ipa|APP.app` (Windows or WSL Python): every Mach-O thinned to arm64 and signed by
+  wifi/r5qsign.py (a from-scratch ad-hoc signer: CodeDirectory 0x20400 SHA-256, Requirements, XML + DER entitlements,
+  bundle seal _CodeSignature/CodeResources; ldid is not here and cloning it was not allowed), entitlements kept minus
+  get-task-allow (with it: "Developer Mode Required") under team prefix R5QDEVTEAM, zipped, put over r5qd and
+  installed by /var/r5q/bin/appinst (wifi/appinst.m, signed with wifi/appinst.entitlements: allowedSPI
+  InstallForLaunchServices etc.; `appinst PATH BUNDLE_ID Customer`, `appinst --uninstall BUNDLE_ID`). Verified with
+  wifi/hello_app (UIKit "R5Q Hello"): installed, launched by `openurl app:dev.r5q.hello`, drawn. Steps that failed on
+  the way: unsigned client → "Missing Entitlement=InstallForLaunchServices"; no CFBundleIdentifier in the options →
+  MIInstallerErrorDomain 25; linker-signed app → 0xe800801c "No code signature found". App Store copies are FairPlay-
+  encrypted and cannot run (no fairplayd); apps from source or decrypted copies can. Not yet tried: an app with
+  frameworks/extensions (the signer handles nested bundles, untested), survival across a reboot.
+- **Location WORKS by Wi-Fi (Test 197, BOOT cf7cee3d…: loader t189, kernel t196, root test197):** locationd was in
+  mkjobs.py DENY (donor) and its 31 MB program is not in the system image (select-system.py BIG_PROGRAM). Now: the
+  binary (7z from ios165/rootfs.dmg) kept at /var/r5q/bin/locationd (put over r5qd; /var persists), and mkjobs.py has
+  `RELOCATE="label=/path ..."` (rest jobs: the program path rewritten, taken as present); build_root_app.sh defaults
+  `ALLOW=locationd RELOCATE=com.apple.locationd=/var/r5q/bin/locationd`. locationd starts on demand and stays up.
+  Location services were off: set `LocationServicesEnabledIn8.0 = true` in com.apple.locationd (users mobile and
+  root, wifi/cfpref.c over r5qd; In7.0 is the old key and does nothing), then locationd restarted. Result: Maps and
+  Weather ask "Allow ... to use your location?", and with Allow Once Weather showed the right town (Wi-Fi scan →
+  Apple's Wi-Fi positioning works even though locationd's `com.apple.wifi.manager` lookups fail). Not done: the
+  Settings > Privacy "Location Services" row is still missing (MobileGestalt location-services/gps are true; cause
+  unknown); Maps' map itself is blank (VectorKit draws with Metal); Weather shows no temperatures — WeatherKit's auth
+  wants com.apple.fairplayd, and fairplayd.H2 (19 MB, relocated the same way in Test 198) exits at once and is
+  respawned every 10 s, so it was left out again. Tools: wifi/cl_test.m (CoreLocation probe; a bundle-less tool is
+  "denied"), wifi/cfpref.c, wifi/openurl.m (`openurl URL` or `openurl app:BUNDLE_ID`).
+- **Tests 195–196 (kernel t195/t196, mic=5/6; redwood_adsp.c r5q_slim_v5): PARKED here.** Downstream's exact order
+  (codec clock + reset first, NGD_INT_EN 0xbe000000 before enable, rx queue as 256 four-byte descriptors, NGD
+  enabled, MASTER_CAPABILITY answered within 1 ms by REPORT_SATELLITE, ADDR_QUERY 5 ms later) changes nothing. The
+  NGD status decodes it: **0xd0240e = LADDR, ACKED_MC 0x1 (the manager acked REPORT_SATELLITE), NACKED_MC 0xd (the
+  manager NACKed ADDR_QUERY)** — MSG_TX_INVAL is the manager's NACK, not our framing. Same NACK through the NGD's
+  own TX_MSG registers (+0x30, tx queue off), and for the interface device's address (00 00 50 02 17 02) too. A
+  second REPORT_SATELLITE makes the manager send MASTER_CAPABILITY again. Timing ruled out. Most likely the DSP's
+  manager has no WCD9340 enumerated (no REPORT_PRESENT ever seen) and refuses queries until it has, or it wants a
+  QMI step we do not send (check-framer 0x22, deferred power response). Next, when resumed: QMI 0x22 check-framer;
+  the WCD9340's other supplies/pinctrl per downstream wcd9xxx-core (its reset timing, "cdc-vdd-buck" etc. are on
+  already-on rails); read NGD_IE_STAT (0xf0)/VE_STAT (0x100). Stored args do not set mic.
+
+Tooling: Mesa built with `THEOS=/var/tmp/codex-ios-r5q/work/theos-shim tools/mk-mesa.sh` (meson in the build venv;
+`xnu-deps/host/bin/ld64` is a wrapper for ld64.lld adding `-platform_version ios 16.5 16.5`; venv has install_name_tool
+→ llvm-install-name-tool and nm → llvm-nm). `build_root_app.sh N` forwards `GL=1`. Without a reboot: put gl_test /
+tex_test and a /var copy of libOSMesa with r5qd and run them (`phone.py sh /var/r5q/bin/gl_test 3`).
+
 ## Safety
 
 Read-only first at every stage. Writes go only to the modem's own reserved memory and to the SMEM items that the
 protocols define. Never to PMIC supply rails, never to the phone's EFS partitions (rmtfs writes stay in RAM). Every
 run ends with the modem shut down through TZ, after asking it to stop over SMP2P.
+
+## Test 232 (2026-11-18): auto-brightness from the light sensor -- WORKS
+
+- Kernel t231, root test232 (only libr5q-bbd changed). Boot image r5q-install-boot-232.img, sha256 b0a574a4...
+- CoreBrightness cannot take a virtual ALS service (Test 228 crash: its internal ALS object, self->ivar, is never built
+  for a service that lacks a real iPhone ALS's calibration properties; NULL ctx read at +0x1c8 in 0x1af0a2010).
+- So libr5q-bbd drives the brightness itself, once a second from the sensors thread: BackBoardServices'
+  BKSDisplayBrightnessGetCurrent / BKSDisplayBrightnessSet (dlsym, no underscore). Smoothed log10(lux+1) ->
+  0.08 + 0.23*s (0.08 dark, ~0.55 at 100 lux, ~0.77 at 1000, 1.0 at 10000), steps of at most 0.05/s.
+  A hand change (slider, >0.04 off what we set) stops automatic changes until the light changes ~4x (0.6 in log10).
+  Off when com.apple.backboardd BKEnableALS is false.
+- Seen: "brightness: automatic ... on", then 0.50 -> 0.45 -> ... -> 0.20 (phone face down, 0 lux, proximity near).
+  backboardd stayed pid 14 (no crash). Light sensor: ~14 on-change samples a minute, status 3.
+- Not yet seen: lux above 0 (the phone has lain face down for every test). Check with the phone face up in light.
+
+## Tests 233-236 (2026-11-18): CoreMotion device motion -- WORKS (BOOT = Test 236: kernel t236, root test234)
+
+- Device motion (CMDeviceMotion: attitude, gravity, user acceleration) is computed in-process by CoreMotion
+  (CLDeviceMotion::enableSensorFusionWithMode). Which fusion it uses comes from CLPlatformInfo::motionCaps(), a fixed
+  per-model table (queryMotionCaps, CoreMotion+0x18d3c; switch on the HW type): iPhone10,3 has bit 3 (6-axis SPU),
+  bit 4 (9-axis SPU), bit 5 (SPU compass, CLCompass7 -- asserts bit 4) and bit 7 (3-axis SPU). With those set it waits
+  for the motion coprocessor's fused HID services, which this phone has not: 0 samples.
+- Fix: the mask queryMotionCaps stores through (`mov x9, #0xfeff` at 0x1919a8164) made #0xfe47 (bits 3, 4, 5, 7
+  cleared) -> CoreMotion's own fusion (CLSensorFusionService...AP, MEKF) from our accel/gyro/compass services.
+  Done in the KERNEL's APFS reads (r5q-overlay/bsd/miscfs/apfs/apfs_vnops.c, apfs_patch_content: name + size + old
+  bytes must match), because the shared cache lives in the multi-GB system image: dyld_shared_cache_arm64.05 at
+  0x3dd8164 (d29fdfe9 -> d29fc8e9) AND its CodeDirectory's SHA-256 of that 16 KB page (page 3958, file 0x6d12fa1).
+  scratchpad dsc_cdpatch.py computes the hash patch; dsc_fileoff.py finds the file offset of a cache address.
+- Test 233/234 (word only): every process running CoreMotion lost CS_VALID (page hash mismatch; cs_flags 0x26000000,
+  "SecTaskLoadEntitlements failed"), so backboardd lost its entitlements -> IOHIDVirtualServiceClientCreate NULL ->
+  NO TOUCH SCREEN and no sensor services. Fixed by the page hash (Test 235). The CMS blob is not checked (miniamfi).
+- Test 235 (bits 3,4,7): arbitrary frame works; magnetic-north frame SIGABRT (CLCompass7 chosen by bit 5, asserts
+  bit 4). Test 236 (bits 3,4,5,7): both frames work. cm_test (wifi/cm_test.m, `cm_test SECS [north]`): ~8 device
+  motion samples/s, face down: gravity (-0.015, 0.016, 1.000), roll -179, north frame yaw -94.6; raw accel/gyro/mag
+  unchanged; touch, backboardd, SpringBoard fine; no entitlement failures.
+- libr5q-bbd (root test234): a sensor service is kept even when not opened at once (3 tries, then kept).
+- Seen once (restored Test 232 boot, 14:16): the SLPI stopped at FastRPC call 39 (reading the persist registry):
+  "next2: answered, answer -2147482610 (0x8000040e): the listener stops" -> no sensors that boot. Not seen in ~10
+  other boots. If it repeats: log the last call's sizes, and answer the failed call instead of stopping.
+- Not done: CMDeviceMotion.heading reads 0/-1 (calibration?); the Compass app's heading comes from locationd's OWN
+  copy of this code (locationd binary, /var/r5q/bin/locationd) -- not patched yet.
+- (Test 236, later) locationd's own copy of queryMotionCaps patched the same way: file offset 0x3b6e38 d29fdfe9 ->
+  d29fc8e9, its ad hoc CodeDirectory's SHA-256 of 4 KB page 950 updated (scratchpad macho_patch.py). Kept at
+  /var/r5q/bin/locationd (original beside it: /var/r5q/bin/locationd.orig; local copies work-sensors/locationd.orig
+  and .caps). locationd runs fine (Compass shows the Wi-Fi location fix with "Allow Once"); the heading still reads
+  "--" -- the phone lies face down, so not judged yet: check face up. wifi/cl_test.m has `--heading` (a bundle-less
+  tool gets no headings: authorization 0).
+
+## Tests 237-240 (2026-11-18): SLPI listener hardening; microphone, more ruled out (BOOT = Test 240, no mic arg)
+
+- Test 237 (kernel t237+): the SLPI FastRPC listener no longer stops at the first refused next2 answer: the same
+  answer is sent twice more, then a plain failure for that call (no data), and the listener goes on (stops only
+  after 5 refusals in a row). The refusal did not recur in Tests 235-240, so the new path is untested on a real
+  refusal; normal boots: sensors and device motion unchanged.
+- Microphone (mic=7, r5q_slim_v5): Android's order from a SAVED ANDROID BOOT LOG (outputs/.../test67/.../
+  firmware-log.txt: wcd9xxx_slim_probe 10.889 s -> laddr 0xcf 10.960 s, chip id 0x108; wcd9xxx_reset low 20 ms /
+  high 20 ms, then slim_get_logical_addr retried every 1 ms for 100 ms; MCLK not needed for enumeration there):
+  codec held in reset through the NGD bring-up, reset after REPORT_SATELLITE, ADDR_QUERY every 10 ms for 3 s:
+  ALL 301 NACKed (status 0xd0240e). Ruled out now: order/timing, retry window, the codec clock -- PM8150 peripheral
+  0x5200 (LN_BB_CLK2, subtype 8) reads status 00 -> 80 after our "lnbclka2" RPMh vote (new read-only
+  redwood_spmi_peek() in redwood_buttons.c; PM8150 clock buffers 0x50-0x5c dumped), the framer (QMI 0x22 check
+  framer after power: result 0), the reset pin (GPIO143 south tile, io 0x3), the address bytes (= upstream's
+  slim_eaddr memcpy), the device tree (tavil enabled; pahu disabled). The mic code's SMMU SMRs now come from the
+  highest free below 80 (Wi-Fi lowest, FastRPC highest). Still unknown: why the DSP's manager never enumerates the
+  codec. Ideas: the codec's own supplies really on (S4/BOB assumed, never read: their PMIC status can now be peeked),
+  the WCD's SPI interface (tavil has one, for its DSP) to prove the chip is alive, the ADSP's own log.
+
+## Owner's hand tests (2026-11-18 evening) and Test 241
+
+- Rotation: WORKS. Auto-brightness: worked but "not smooth, doesn't settle" -> rewritten (inject_bbd.c, Test 241): every
+  40 ms, light smoothed ~1.5 s (log scale), 0.05 dead band on the goal, eased 6%/step (max 0.006/step), settled within
+  0.002. Hot-loaded first (`r5qd_client.py reload work-sensors/libr5q-bbd.dylib backboardd`), owner: "brightness is
+  good". In the root image as test241 (image r5q-install-boot-241.img: kernel t240 + root test241), NOT yet flashed.
+- Compass: does nothing (heading "--"). locationd (caps-patched, CLCompass6 path) opens our compass service
+  (ReportInterval 10000 set) but no heading reaches apps. CoreMotion in an app (cm_test north): calibrated field
+  0,0,0, accuracy -1 (uncalibrated) throughout; north-frame yaw ~0 and drifting (magnetometer not used). Raw field
+  about (-34, 103, -471) uT, |~480 uT| (hard-iron offset from the phone's own magnets; Earth ~50). Factory cal in the
+  persist registry: bias 0, corr_mat ~identity -- no help. Also seen: during device-motion runs the app gets raw
+  accel ~2.3/s, gyro ~1.2/s, mag ~1/s (the kernel has 25/25/10/s) -- our virtual services ignore ReportInterval /
+  BatchInterval, and something downstream thins them; may starve iOS's calibrator. Next: (a) give the services the
+  rates iOS asks for (honour ReportInterval) and check the delivered rate; (b) a hard-iron estimate of our own (or
+  SEE's sns_mag_cal bias) subtracted in the kernel, as Android does; (c) locationd's own logs (os_log Info for
+  com.apple.locationd) to see CLCompass6/CLCompassCalculator's state.
+
+## Tests 242-243 (2026-11-18 evening): the compass
+
+- Test 242 (kernel t242): CoreMotion had NO compass object (factory CoreMotion+0x2b60c0: CLCompass7 needs caps bit
+  4/5, cleared by us; CLCompass6 only if CoreMotion+0x11808 says the model has one -- iPhone10,3: no). The factory's
+  call made `mov w0,#1` (cache .05 0x40750e8 + page 4125 hash), verified in memory (cm_test peek). locationd: same
+  factory found by hand (CLCompass7 ctor 0x1006bcf44 <- thunk 0x1006bd104 <- factory 0x1006e4338), its call at file
+  0x6e4360 made `mov w0,#1`, page 1764 hash updated -> work-sensors/locationd.caps2 = /var/r5q/bin/locationd.
+- Data checked (wifi/magrec.c + scratchpad magfit.py/magaxes.py/magcorr.py, owner's figure-8): sphere radius 50.5 uT
+  (units right), residual 1.5, offset (-95.1, 39.0, -425.8) uT, axes = accelerometer's (identity best), factory
+  corr_mat makes it no better. Field tilt -84 +- 5 deg where the owner tested (expected ~-67 for the owner's area): only
+  ~5 uT horizontal -- indoor interference likely.
+- Test 243 (root test243, image with kernel t242; hot-loaded first): libr5q-bbd subtracts the hard-iron offset and
+  refines it online (magcal_feed, sphere fit, radius 25..70, residual < 3). iOS now sees |B| ~51 uT.
+- Result: the Compass app showed a heading for the FIRST time ("jumped from 0 to 305 NW") then froze. CoreMotion in an
+  app (cm_test north) still calibrated field 0 / accuracy -1, yaw 0. Rates per sensor alone are fine (accel/gyro
+  23/s, mag 10/s; cm_rate.m). Next: test Compass outdoors (interference vs WMM inclination); if it still freezes,
+  locationd's heading path (CLCompass6 -> CLCompassCalculator interference checks) needs its own logs.
