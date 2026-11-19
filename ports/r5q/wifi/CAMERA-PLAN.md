@@ -750,3 +750,22 @@ candidate designs).
 - **Test 331 (kernel t331): fast by default** (`cam_slow=1` for the pacing). In the Camera app: the first session
   0.13 s after the camera's power-up began (was ~6 s), "a photograph of 4032x3024 encoded in 187 ms", saved;
   Home: "the camera is off". iOS up throughout.
+- **Colour tuning for the S5K3L6 (2026-11-19, desk work):** this phone's vendor partition (local dump) has
+  `/lib64/camera/com.samsung.tuned.lsi_s5k3l6.bin` (5,359,760 bytes, "Parameter Parser V1.4.0"; extracted to
+  `fw-camera-r5q/`, never in the repository), with the modules the donor's tools/camtuning.py takes (mod_cc13,
+  mod_lsc34, refPtV1, initDataV1). New **`pipeline/camtuning_v14.py`** reads V1.4.0 (tree records with 8-byte fields,
+  data packed as 4-byte floats; lsc34 grids 222 floats apart: 221 = 17 x 13 and one more) and writes the same
+  "RWCISP02" the media library loads:
+  - colour matrix: one range, **identity** (Samsung's pipeline colour-corrects elsewhere);
+  - lens shading: four light ranges; **corner gains 5.5x (R) / 5.3x (G) / 4.9x (B) at low light, 4.4x at mid,
+    1.0 everywhere in the middle** (the ultra-wide's strong vignetting);
+  - the AWB's ten reference lights (R/G 0.32 -> 2.0, B/G 1.30 -> 0.30 from 10000 K to a candle).
+  `camera-s5k3l6.isp`, 14,408 bytes (local). build_root_app.sh installs it in /fw under the two slot names
+  `cam_r5q` serves from this sensor (camera-s5khm2sd.isp, camera-ov16a1q.isp).
+- **Test 332 (the t331 kernel, a new root with the tuning; `cam=5 cam_r5q=1`).**
+  - **The tuning loads for both slots:** "the s5khm2sd's colour tuning from /redwood/fw/camera-s5khm2sd.isp: 1 colour
+    matrices' lights, 3 lens shadings'" (the front slot's likewise); white balance starts from the reference lights
+    ("about 5000 K"); "a photograph of 4032x3024 encoded in 167 ms"; iOS up. (The first try built the root but no
+    image: `MSYS_NO_PATHCONV=1` exported in the same shell as test.sh breaks its Python steps' paths.)
+  - Root `test332-root.apfs.new` is the one to use from now on (the tuning in /fw). Whether the shading looks right
+    needs a lit scene (owner).

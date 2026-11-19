@@ -1089,3 +1089,15 @@ run ends with the modem shut down through TZ, after asking it to stop over SMP2P
   the order from Android's boot log). The WCD9340 still never reports present on SLIMbus. Left: the ADSP's SLIMbus
   manager side (what Android's NGD driver, slim-msm-ngd.c, sends the DSP before devices are enumerated), compared
   message by message with what redwood_adsp.c sends.
+- **Later the same day (desk check, Samsung's `drivers/slimbus/slim-msm.c`/`slim-msm-ngd.c`):** the QMI select-instance
+  request is `instance = ctrl.nr >> 1`, `mode = MASTER (2)` when the DSP runs the bus (`msm_slim_qmi_init(dev,
+  false)` from the NGD): for the codec's bus `sb-1` (Android's log: the WCD probe runs in `ngd_notify_sl1`) that is
+  instance 0, mode 2 -- what we send. The board files (`sm8150-sec-r5q-common.dtsi`) add a PCAL6524 GPIO expander
+  (I2C on GPIO21/22, reset GPIO29), but only wireless charging's enable uses its pins; Samsung's audio pins file
+  changes only the amplifier's I2C and pins. Android's saved boot log: the codec's probe at 10.8894 s (supplies
+  cdc-vdd-buck/sido/tx-h/rx-h/vddpx-1 at 1.8 V, cdc-vdd-3v3 at 3.3 V), its laddr 0xcf at 10.9601 s on the NGD's
+  notify thread (the codec reporting present ~70 ms after its reset).
+- **Where it stands:** everything readable from the board side matches Android (supplies, reset pin and timing, MCLK,
+  the QMI instance/mode, the NGD messages byte for byte). The codec still never reports present. What is left needs
+  the audio DSP's own view (its log) or the codec's pins observed while Android brings it up; not doable from the
+  sources. Parked again.

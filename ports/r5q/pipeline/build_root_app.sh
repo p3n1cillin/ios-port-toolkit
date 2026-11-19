@@ -55,6 +55,14 @@ python3 $R5Q_PORT/pipeline/camfaketab.py $IOS_WORK/linux-source/fw-camfake >/dev
 # (Test 275) the S10 Lite's own sensor tables, made locally from its vendor module files by camsensor_v14.py into
 # ../fw-camera-r5q (the vendor's: never in the repository), into the root's /fw too
 if ls $IOS_WORK/linux-source/fw-camera-r5q/*.tab >/dev/null 2>&1; then cp $IOS_WORK/linux-source/fw-camera-r5q/*.tab $IOS_WORK/linux-source/fw-camfake/; fi
+# (2026-11-19) the S5K3L6's colour tuning (pipeline/camtuning_v14.py from the vendor's com.samsung.tuned.lsi_s5k3l6.bin;
+# local only): under the names of the two camera slots `cam_r5q` serves from that sensor (camera_device.c picks the
+# file by slot: back "s5khm2sd", front "ov16a1q")
+if [ -f $IOS_WORK/linux-source/fw-camera-r5q/camera-s5k3l6.isp ]; then
+	for slot in s5khm2sd ov16a1q; do
+		cp $IOS_WORK/linux-source/fw-camera-r5q/camera-s5k3l6.isp $IOS_WORK/linux-source/fw-camfake/camera-$slot.isp
+	done
+fi
 grep -q 'fw-camfake' build.sh || sed -i 's|^if \[ -d \.\./fw-gpu \]; then|if [ -d ../fw-camfake ]; then mkdir -p root/fw; cp ../fw-camfake/* root/fw/; fi      # (r5q: synthetic camera table)\n&|' build.sh
 INJECT="$(printf '%s\n' '/redwood/lib/libredwood.dylib backboardd containermanagerd containermanagerd_system' '/redwood/lib/libredwood-sb.dylib SpringBoard' '/redwood/lib/libredwood-media.dylib mediaserverd' '/redwood/lib/libredwood-app.dylib Sileo' '/redwood/lib/libredwood-tweaks.dylib Preferences' "/redwood/lib/libr5q-app.dylib $APPS" "/redwood/lib/libr5q-bbd.dylib backboardd" "$EXTRA_LINE")"
 echo "inject: $(echo "$INJECT" | tr '\n' ';' | wc -c) bytes"
