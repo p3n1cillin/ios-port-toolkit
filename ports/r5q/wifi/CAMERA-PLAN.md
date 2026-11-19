@@ -870,3 +870,40 @@ candidate designs).
   shading grids over the sensor's middle 1028x772, so the corner gains (4.8x at the sensor's corners) become ~2.1x at
   the frame's. It has an identity colour matrix and ten reference lights. build_root_app.sh installs it as the front
   slot's `camera-ov16a1q.isp`.
+
+## The main camera, the IMX586 (2026-11-19)
+
+- **Desk work** (live DT `qcom,cam-sensor@0` under `cci@ac4a000`; the toolkit's sm8150.json for the GPIO tiles):
+  - **CCI0 master 0 = GPIO17/18** (NORTH), slave 0x34 (7-bit 0x1a), **CSI-PHY 0**, rear (yaw 180);
+  - **MCLK0 on GPIO13** (NORTH, function 1), camcc RCG 0x5004 / branch 0x501c (MCLK2's 0x5044 less 0x40);
+    **reset GPIO92** (NORTH); "RCAM1_OIS" **GPIO133** (SOUTH);
+  - supplies, mostly on a **second S2MPB03 (#1: 0x56 on GPIO94/95, NORTH)**: vdig #1 LDO1 1.1 V, vana #1 LDO6
+    2.9 V, vaf #1 LDO7 2.8 V, vio L14, custom1 #2 LDO3 1.8 V, custom2 #1 LDO3 1.8 V, custom3 #1 LDO5 2.8 V;
+  - module file `com.samsung.sensormodule.0_sony_imx586.bin` (local; `camera-imx586.tab`, 16,424 bytes): ID
+    0x0586 at 0x16 (two bytes), 4 lanes 0x3210, RGGB, eight modes; power-up vana, custom1, vdig, vaf, vio, custom2,
+    the OIS line, custom3, MCLK, reset 10 ms; **res5 = 2000x1500 at 120 fps, its output PLL at 0x138 (~2.5 Gb/s a
+    lane)**.
+- **Kernel t342:** the IMX616's streaming code made common (`sony_stream()` with a `struct sony_cam` per sensor:
+  tables, mode, crop, frame and line length, PHY, settle, output PLL multiplier, iOS's exposure ratios); the
+  exposure path takes the live sensor's ratios (`cam_live`). `mainsensor_probe()` (`cammain=N`, levels as the front
+  one's): both PMICs, the power-up order above, the domain, MCLK0 from TCXO, reset, a scan of GPIO17/18 and the ID;
+  then res5 cropped to the middle 1028x772 at 486,364, line length doubled (10752), frame length 5356 (~30 fps at
+  24 MHz), the output PLL at 160 (~1 Gb/s a lane, the IMX616's proven setting), CSI-PHY 0, settle 28.
+- **Test 342 (kernel t342; `camsensor=1 cammain=4`): THE MAIN CAMERA ANSWERS AND STREAMS CLEAN, first try.** Both
+  S2MPB03s found ("#1 LDO1 0x1c LDO3 0x2c LDO5 0x0e LDO6 0x28 LDO7 0x28, #2 LDO3 0x2c"), switched on ("#1 LDO1 0xa0
+  LDO3 0x80 LDO5 0xa8 LDO6 0xac LDO7 0xa8, #2 LDO3 0x80"), MCLK0 on, reset and OIS lines high; "the bus GPIO17/18
+  answers at: 0x1a"; **"ID 0586: THE IMX586 ANSWERS"**; res5 + crop + line/frame length + output PLL 160 "taken";
+  CSI-PHY 0 (settle 28); with the solid-colour pattern **133 frames in 5 s, 0 of 992,020 bytes wrong, CRC 0, ECC 0**;
+  everything back as found; iOS up. The common `sony_stream()` made this a one-test sensor.
+- **Test 343 prep (kernel t343): iOS's back camera from the IMX586.** `redwood_r5q_cam_sensor(0/1/2)` (S5K3L6 /
+  IMX616 / IMX586) replaces the front flag; redwood_camera.c gives the back slot the IMX586 (`cam_main=0` keeps the
+  S5K3L6), RGGB. The soak's `cam_soak_alt=2` turns through the three cameras; `cam_soak_front=2` makes the long session
+  the main camera's. The IMX586's tuning (`com.samsung.tuned.sony_imx586.bin`, `--crop 0.243,0.2427,0.757,0.7573`:
+  corner gains ~1.8x over the crop) installed as the back slot's `camera-s5khm2sd.isp`.
+- **Test 343 (kernel t343; the three cameras in turn): ALL THREE SENSORS SERVE SESSIONS.** Six short sessions front →
+  main → ultra-wide → front → main → ultra-wide, each "30 frames handed over, 0 misses"; each front or main request
+  after the ultra-wide: "the S5K3L6's pipeline goes down first"; exposure "taken" on all three. Then **20 s from the
+  main camera: 600 frames, 465,600 packets, ECC 0, CRC 0, SMMU gfsr 0**, no IFE violation; iOS running.
+  - Middle-line means: front 20 (facing up, a dim room), ultra-wide 15 (≈ its black level: facing the desk),
+    **main 0-4**: dark too, but below the 64 (16 of 255) black level the iOS side assumes. The IMX586's pedestal may
+    differ: to be checked in a lit scene (the pattern was exact, so the data path is not the cause).

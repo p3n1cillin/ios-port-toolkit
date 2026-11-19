@@ -2371,7 +2371,14 @@ static uint32_t exp_applied;
  * 5160 at ~26.6 a second, MCLK 19.2 MHz), so lines and frame lengths are scaled by 919/729 and 5160/3268; its analog
  * gain (SMIA 0x0204) is Sony's code 1024 - 1024 / gain (0 = 1x, 960 = 16x), its coarse time at most frame - 48.
  */
-static bool cam_front_live;
+/* (Test 342) the Sony sensor streaming now (sony_stream), whose terms iOS's exposure is put in; NULL: the S5K3L6 */
+struct sony_cam {
+	const char *name, *tab, *mode;
+	uint16_t crop_x, crop_y, frame_lines, line_length;        /* line_length 0: the mode's own */
+	uint32_t phy, settle, iop_mpy;
+	uint32_t line_num, line_den, frame_num, frame_den, margin; /* iOS's lines x num / den; its frame lines likewise */
+};
+static const struct sony_cam *cam_live;
 
 void redwood_r5q_cam_exposure(uint32_t lines, uint32_t gain, uint32_t frame_lines);
 void
@@ -2399,11 +2406,11 @@ cam_exposure_apply(void)
 	g = exp_gain < 32 ? 32 : exp_gain > 512 ? 512 : exp_gain;                  /* 1x .. 16x */
 	uint32_t w_fl = fl, w_ln = ln, w_g = g;
 
-	if (cam_front_live) {
-		w_fl = fl * 5160u / 3268u;
+	if (cam_live != NULL) {
+		w_fl = fl * cam_live->frame_num / cam_live->frame_den;
 		w_fl = w_fl > 0xfff0 ? 0xfff0 : w_fl;
-		w_ln = ln * 919u / 729u;
-		w_ln = w_ln < 4 ? 4 : w_ln > w_fl - 48 ? w_fl - 48 : w_ln;
+		w_ln = ln * cam_live->line_num / cam_live->line_den;
+		w_ln = w_ln < 4 ? 4 : w_ln > w_fl - cam_live->margin ? w_fl - cam_live->margin : w_ln;
 		w_g = 1024u - 1024u * 32u / g;
 	}
 	was = bb;
@@ -2430,7 +2437,7 @@ cam_session_frames(uint32_t *misses_out)
 	uint32_t frames = 0, misses = 0;
 	static uint32_t half;
 
-	rxlog("camera sensor: SESSION: frames for iOS from the %s%s\n", cam_front_live ? "IMX616 (front)" : "S5K3L6", cam_pipe_up ? " (the pipeline was already up)" : "");
+	rxlog("camera sensor: SESSION: frames for iOS from the %s%s\n", cam_live != NULL ? cam_live->name : "S5K3L6 (rear)", cam_pipe_up ? " (the pipeline was already up)" : "");
 	while (misses < 50) {
 		int i;
 
@@ -2908,6 +2915,246 @@ cam_pipe_down(void)
 }
 
 /*
+ * (Test 342) A Sony SMIA sensor's frames, once it is powered and answers on `bb' (its bus, `cam'): the part of
+ * frontsensor_probe() that Tests 334-341 proved on the IMX616, made common so the main camera (the IMX586) runs the
+ * same way. `c' is the sensor's: its tables, the mode, the crop to the middle 1028x772 (the frame shape the rest of
+ * the pipeline takes), frame and line length, CSI-PHY, settle, the output PLL's multiplier, iOS's exposure in its
+ * terms. front_level: 2 a 5 s stream, 3 a settle sweep, 4 the test pattern, 5 crops (the IMX616's), 6 an output
+ * PLL sweep, 7 iOS's session.
+ */
+static const char *sony_name = "camera";
+#define SLOG(fmt, ...) rxlog("%s: " fmt, sony_name, ##__VA_ARGS__)
+
+static void
+sony_stream(struct bitbang *cam, uint32_t front_level, const struct sony_cam *c)
+{
+	sony_name = c->name;
+	{
+	/*
+	 * (Test 334, camfront=2) Its frames: init + res3 (1632x1224, 4x4 binned), the sensor's own digital crop
+	 * to the middle 1028x772 (SMIA 0x0408-0x040e, offsets 306/226 even: RGGB kept) and output size
+	 * (0x034c/0x034e) -- the rear sensor's frame shape, so CSID, IFE-lite, the stride and the camera block are
+	 * as proven -- frame length 5160 lines (~30 a second at 24 MHz), CSI-PHY 3 with settle 12.
+	 */
+	uint64_t tab_size = 0;
+	const uint8_t *tab = redwood_image_file("fw", c->tab, &tab_size, NULL);
+
+	if (tab == NULL || tab_size < 48 || memcmp(tab, "RWCTAB02", 8) != 0) {
+		SLOG("no fw/%s\n", c->tab);
+	} else if (cam_table(tab, tab_size, "init") && cam_table(tab, tab_size, c->mode)) {
+		bool rx;
+
+		(void)bb_write16(0x0104, 1, 1);
+		SLOG("crop 1028x772 at %u,%u, frame %u lines, line %u: %s\n", c->crop_x, c->crop_y, c->frame_lines,
+		    c->line_length, bb_write16(0x0408, c->crop_x, 2) ?: bb_write16(0x040a, c->crop_y, 2) ?:
+		    bb_write16(0x040c, 1028, 2) ?: bb_write16(0x040e, 772, 2) ?: bb_write16(0x034c, 1028, 2) ?:
+		    bb_write16(0x034e, 772, 2) ?: bb_write16(0x0340, c->frame_lines, 2) ?:
+		    (c->line_length ? bb_write16(0x0342, c->line_length, 2) : NULL) ?: "taken");
+		(void)bb_write16(0x0104, 0, 1);
+		/*
+		 * (Test 336, camfront=3) Test 335 streamed (992020 bytes a frame, headers right: ECC 0) but every packet
+		 * failed its CRC (65535, RX irq bit 19): the link's timing. A sweep of the CSI-PHY's settle count, the
+		 * receive path brought up and down for each (fast: safe since Test 327), 1 s of frames each, the
+		 * write master re-armed after every frame as the session does. camfront=2: settle 12 only, 5 s.
+		 */
+		static const uint32_t settles[] = { 12, 6, 20, 28, 36, 48 };
+		uint32_t tries = front_level == 3 ? sizeof(settles) / sizeof(settles[0]) : 1;
+
+		/*
+		 * (Test 337, camfront=4) Test 336: settles 12-48 all alike (26 frames a second, every image line's CRC
+		 * bad, 2 packets a frame good), 6 no link: not the settle. The sensor's solid-colour test pattern
+		 * (SMIA 0x0600/0x0601 = 1, colours 0x0602-0x0609) with four different 10-bit values, so every received
+		 * byte has a known value: the frame checked byte by byte below, the errors counted per lane (a packet's
+		 * byte k travels on lane k % 4).
+		 */
+		if (front_level >= 4 && front_level <= 6) {
+			SLOG("test pattern: solid colour R 0x2aa Gr 0x155 B 0x0cc Gb 0x333: %s\n",
+			    bb_write16(0x0602, 0x2aa, 2) ?: bb_write16(0x0604, 0x155, 2) ?: bb_write16(0x0606, 0x0cc, 2) ?:
+			    bb_write16(0x0608, 0x333, 2) ?: bb_write16(0x0600, 0, 1) ?: bb_write16(0x0601, 1, 1) ?: "taken");
+		}
+		/*
+		 * (Test 338, camfront=5) Test 337: the pattern's bytes right up to ~byte 962 of every line (pixel ~770 of
+		 * 1028, three quarters across), then two bytes wrong and the rest of the line shifted; all lanes alike.
+		 * A fault at a fixed place in the line: the sensor's crop, not the link. Crops tried in one boot, each
+		 * checked against the pattern: {analog x start, x end, y start, y end, digital x, y, width, frame lines}.
+		 */
+		static const uint16_t crops[][8] = {
+			{ 0, 0x199f, 0x10, 0x132f, 306, 226, 1028, 5160 },     /* Tests 334-337 */
+			{ 0, 0x199f, 0x10, 0x132f, 4, 0, 1028, 5160 },         /* the digital crop at the left edge */
+			{ 0, 0x199f, 0x10, 0x132f, 308, 226, 1024, 5160 },     /* 1024 wide (a multiple of 16) */
+			{ 1224, 5351, 920, 4023, 2, 2, 1028, 5160 },           /* the window cut in the analog array */
+			{ 0, 0x199f, 0x10, 0x132f, 306, 226, 1028, 1290 },     /* the mode's own frame length */
+		};
+		/*
+		 * (Test 339, camfront=6) Test 338: every crop alike -- bytes dropped from the second half of each line
+		 * (a group short by two bytes at ~byte 890-960, the line's tail junk "00 00 ff ff"). res3's output PLL
+		 * (IOP: 0x030d pre-divider 3, 0x030e/f multiplier 0x101) makes ~2 Gb/s a lane at 24 MHz (~1.6 at our
+		 * 19.2): past where D-PHY wants deskew, and faster than the line needs. The multiplier swept down.
+		 */
+		static const uint16_t iop_mpy[] = { 0x101, 0xc8, 0xa0, 0x80, 0x64 };
+
+		/*
+		 * (Test 340) Test 339: multipliers 200 and 160 (~1.28 and ~1.02 Gb/s a lane): the pattern without one
+		 * wrong byte, CRC 0, RX irq 0xff as the rear sensor's; 128 and 100 no output at all; 257 drops bytes.
+		 * 160 from now on (~1.28 Gb/s once MCLK is the tables' 24 MHz), settle 28. camfront=7 is iOS's session
+		 * (redwood_r5q_cam_run with the front camera asked for): frames to rx_session_cb until it says stop.
+		 */
+		bool session = front_level == 7 && rx_session_cb != NULL;
+
+		if (front_level == 5) {
+			tries = sizeof(crops) / sizeof(crops[0]);
+		} else if (front_level == 6) {
+			tries = sizeof(iop_mpy) / sizeof(iop_mpy[0]);
+		}
+		rxlog_fast = true;
+		for (uint32_t s = 0; s < tries; s++) {
+			uint32_t line_bytes = 1285;
+
+			cam_phy_index = c->phy;
+			cam_phy_settle = front_level == 3 ? settles[s] : c->settle;
+			if (front_level == 6) {
+				SLOG("IOP %u: output PLL multiplier %u (~%u Mb/s a lane at 19.2 MHz): %s\n", s,
+				    iop_mpy[s], 192u * iop_mpy[s] / 30u, bb_write16(0x030e, iop_mpy[s], 2) ?: "taken");
+			} else {
+				SLOG("output PLL multiplier %u (~%u Mb/s a lane at 19.2 MHz): %s\n", c->iop_mpy,
+				    192u * c->iop_mpy / 30u, bb_write16(0x030e, c->iop_mpy, 2) ?: "taken");
+			}
+			if (front_level == 5) {
+				const uint16_t *c = crops[s];
+
+				line_bytes = c[6] * 5u / 4u;
+				(void)bb_write16(0x0104, 1, 1);
+				SLOG("CROP %u: analog x %u-%u y %u-%u, digital %u,%u %ux772, frame %u lines: %s\n", s,
+				    c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7],
+				    bb_write16(0x0344, c[0], 2) ?: bb_write16(0x0348, c[1], 2) ?: bb_write16(0x0346, c[2], 2) ?:
+				    bb_write16(0x034a, c[3], 2) ?: bb_write16(0x0408, c[4], 2) ?: bb_write16(0x040a, c[5], 2) ?:
+				    bb_write16(0x040c, c[6], 2) ?: bb_write16(0x040e, 772, 2) ?: bb_write16(0x034c, c[6], 2) ?:
+				    bb_write16(0x034e, 772, 2) ?: bb_write16(0x0340, c[7], 2) ?: "taken");
+				(void)bb_write16(0x0104, 0, 1);
+			}
+			camrx_on = true;
+			camrx_level = 7;
+			rx_reached = 0;
+			rx = cam_rx_up();
+			if (session && rx && rx_reached >= 6 && cam_table(tab, tab_size, "on")) {
+				/*
+				 * (Test 340) iOS's front camera: the session's loop as for the S5K3L6 (the write master's two
+				 * halves of the camera block in turn, each done frame to the caller, iOS's exposure between two
+				 * frames over this bus), the battery's lock let go meanwhile; then everything down (no pipeline
+				 * kept for the front camera: a switch brings it up afresh, ~0.4 s).
+				 */
+				uint32_t sframes, misses = 0;
+
+				cam_bus_keep = *cam;
+				cam_bus_ok = true;
+				cam_live = c;
+				exp_applied = 0;
+				lck_mtx_unlock(&r5q_pmic_lock);
+				sframes = cam_session_frames(&misses);
+				lck_mtx_lock(&r5q_pmic_lock);
+				cam_bus_ok = false;
+				cam_live = NULL;
+				SLOG("SESSION ends: %u frames handed over, %u misses at the end; the camera goes down\n", sframes, misses);
+				(void)cam_table(tab, tab_size, "off");
+			} else if (!session && rx && rx_reached >= 6 && cam_table(tab, tab_size, "on")) {
+				uint32_t frames = 0, sum = 0, ms_all = tries > 1 ? 1000 : 5000;
+
+				for (uint32_t ms = 0; ms < ms_all; ms++) {
+					delay_for_interval(1, NSEC_PER_MSEC);
+					if (IFE(0x2060) & 1) {
+						IFE(0x2054) = 1;
+						IFE(0x2068) = 1;
+						IFE(0x2214) = (uint32_t)rx_buf_pa;
+						IFE(0x04ac) = 0x2;
+						frames++;
+					}
+				}
+				for (uint32_t i = 0; i < 1280; i++) {
+					if (i % 5 != 4) {
+						sum += rx_buf[1296u * 386u + i];
+					}
+				}
+				SLOG("SETTLE %u: FRAMES IN %u ms: %u; middle line mean %u of 255; CSID pkts %u ecc %#x "
+				    "crc %u\n", cam_phy_settle, ms_all, frames, sum / 1024u, CSID(0x160), CSID(0x164), CSID(0x168));
+				cam_rx_show("front streaming");
+				if (front_level >= 4 && front_level <= 6) {
+					/*
+					 * (Test 337) Each row's 5-byte groups against the middle rows' first group (row parity:
+					 * R/Gr rows and Gb/B rows); the errors per lane and per bit, the first few shown.
+					 */
+					uint8_t ref[2][5];
+					uint32_t lane_err[4] = { 0 }, bit_err[8] = { 0 }, bad = 0, shown = 0, rows_bad = 0, first386 = ~0u;
+
+					for (int k = 0; k < 5; k++) {
+						ref[0][k] = rx_buf[1296u * 386u + k];
+						ref[1][k] = rx_buf[1296u * 387u + k];
+					}
+					for (uint32_t y = 0; y < 772; y++) {
+						uint32_t row_bad = 0;
+
+						for (uint32_t x = 0; x < line_bytes; x++) {
+							uint8_t want = ref[y & 1][x % 5], got = rx_buf[1296u * y + x];
+
+							if (got != want) {
+								bad++;
+								row_bad++;
+								lane_err[x % 4]++;
+								for (int b = 0; b < 8; b++) {
+									bit_err[b] += ((got ^ want) >> b) & 1;
+								}
+								if (y == 386 && first386 == ~0u) {
+									first386 = x;
+								}
+								if (shown < 6) {
+									shown++;
+									SLOG("pattern: row %u byte %u: %#04x, not %#04x\n", y, x, got, want);
+								}
+							}
+						}
+						rows_bad += row_bad != 0;
+					}
+					SLOG("PATTERN: groups %02x%02x%02x%02x%02x / %02x%02x%02x%02x%02x; %u bytes of %u-byte "
+					    "lines wrong in %u rows; per lane %u %u %u %u; per bit %u %u %u %u %u %u %u %u\n",
+					    ref[0][0], ref[0][1], ref[0][2], ref[0][3], ref[0][4], ref[1][0], ref[1][1], ref[1][2],
+					    ref[1][3], ref[1][4], bad, line_bytes, rows_bad, lane_err[0], lane_err[1], lane_err[2], lane_err[3],
+					    bit_err[0], bit_err[1], bit_err[2], bit_err[3], bit_err[4], bit_err[5], bit_err[6], bit_err[7]);
+					if (first386 != ~0u) {
+						/* the middle row's bytes from 8 before its first wrong one, and its last 12 and 4 after */
+						char hex[3 * 40 + 1];
+						uint32_t at = first386 >= 8 ? first386 - 8 : 0, n = 0;
+
+						for (uint32_t k = 0; k < 32 && n + 3 < sizeof(hex); k++) {
+							n += snprintf(hex + n, sizeof(hex) - n, "%02x ", rx_buf[1296u * 386u + at + k]);
+						}
+						SLOG("row 386 from byte %u: %s\n", at, hex);
+						n = 0;
+						for (uint32_t k = line_bytes - 12; k < line_bytes + 4 && n + 3 < sizeof(hex); k++) {
+							n += snprintf(hex + n, sizeof(hex) - n, "%02x ", rx_buf[1296u * 386u + k]);
+						}
+						SLOG("row 386 from byte %u (the end, and 4 after): %s\n", line_bytes - 12, hex);
+					}
+				}
+				(void)cam_table(tab, tab_size, "off");
+			}
+			spin_us(20000);
+			cam_rx_show("stopped");
+			cam_rx_down();
+		}
+		rxlog_fast = false;
+		cam_phy_index = 2;
+		cam_phy_settle = 14;
+	}
+	}
+}
+
+/* (Test 342) the front camera's: Tests 334-341 */
+static const struct sony_cam imx616_cam = {
+	.name = "front camera", .tab = "camera-imx616.tab", .mode = "res3", .crop_x = 306, .crop_y = 226, .frame_lines = 5160,
+	.line_length = 0, .phy = 3, .settle = 28, .iop_mpy = 160, .line_num = 919, .line_den = 729, .frame_num = 5160,
+	.frame_den = 3268, .margin = 48,
+};
+
+/*
  * (Test 333, camfront=1) The FRONT camera, the IMX616 (live DT qcom,cam-sensor@1 on CCI0 master 1; Samsung's
  * sm8150-camera-sensor-r5q-r01.dtsi; module file com.samsung.sensormodule.1_sony_imx616.bin): powered as its module
  * file's power-up says (vana 2.9 V S2MPB03 #2 LDO5, vdig 1.05 V LDO1, vio 1.8 V L14, reset high 10 ms, MCLK 2 ms),
@@ -3026,220 +3273,7 @@ frontsensor_probe(uint32_t front_level)
 		rxlog("front camera: 7-bit 0x1a: ID %s %02x%02x%s\n", problem ? problem : "", id[0], id[1],
 		    problem == NULL && id[0] == 0x06 && id[1] == 0x16 ? ": THE IMX616 ANSWERS" : "");
 		if (problem == NULL && id[0] == 0x06 && id[1] == 0x16 && front_level >= 2) {
-			/*
-			 * (Test 334, camfront=2) Its frames: init + res3 (1632x1224, 4x4 binned), the sensor's own digital crop
-			 * to the middle 1028x772 (SMIA 0x0408-0x040e, offsets 306/226 even: RGGB kept) and output size
-			 * (0x034c/0x034e) -- the rear sensor's frame shape, so CSID, IFE-lite, the stride and the camera block are
-			 * as proven -- frame length 5160 lines (~30 a second at 24 MHz), CSI-PHY 3 with settle 12.
-			 */
-			uint64_t tab_size = 0;
-			const uint8_t *tab = redwood_image_file("fw", "camera-imx616.tab", &tab_size, NULL);
-
-			if (tab == NULL || tab_size < 48 || memcmp(tab, "RWCTAB02", 8) != 0) {
-				rxlog("front camera: no fw/camera-imx616.tab\n");
-			} else if (cam_table(tab, tab_size, "init") && cam_table(tab, tab_size, "res3")) {
-				bool rx;
-
-				(void)bb_write16(0x0104, 1, 1);
-				rxlog("front camera: crop 1028x772 at 306,226 and frame 5160 lines: %s\n",
-				    bb_write16(0x0408, 306, 2) ?: bb_write16(0x040a, 226, 2) ?: bb_write16(0x040c, 1028, 2) ?:
-				    bb_write16(0x040e, 772, 2) ?: bb_write16(0x034c, 1028, 2) ?: bb_write16(0x034e, 772, 2) ?:
-				    bb_write16(0x0340, 5160, 2) ?: "taken");
-				(void)bb_write16(0x0104, 0, 1);
-				/*
-				 * (Test 336, camfront=3) Test 335 streamed (992020 bytes a frame, headers right: ECC 0) but every packet
-				 * failed its CRC (65535, RX irq bit 19): the link's timing. A sweep of the CSI-PHY's settle count, the
-				 * receive path brought up and down for each (fast: safe since Test 327), 1 s of frames each, the
-				 * write master re-armed after every frame as the session does. camfront=2: settle 12 only, 5 s.
-				 */
-				static const uint32_t settles[] = { 12, 6, 20, 28, 36, 48 };
-				uint32_t tries = front_level == 3 ? sizeof(settles) / sizeof(settles[0]) : 1;
-
-				/*
-				 * (Test 337, camfront=4) Test 336: settles 12-48 all alike (26 frames a second, every image line's CRC
-				 * bad, 2 packets a frame good), 6 no link: not the settle. The sensor's solid-colour test pattern
-				 * (SMIA 0x0600/0x0601 = 1, colours 0x0602-0x0609) with four different 10-bit values, so every received
-				 * byte has a known value: the frame checked byte by byte below, the errors counted per lane (a packet's
-				 * byte k travels on lane k % 4).
-				 */
-				if (front_level >= 4 && front_level <= 6) {
-					rxlog("front camera: test pattern: solid colour R 0x2aa Gr 0x155 B 0x0cc Gb 0x333: %s\n",
-					    bb_write16(0x0602, 0x2aa, 2) ?: bb_write16(0x0604, 0x155, 2) ?: bb_write16(0x0606, 0x0cc, 2) ?:
-					    bb_write16(0x0608, 0x333, 2) ?: bb_write16(0x0600, 0, 1) ?: bb_write16(0x0601, 1, 1) ?: "taken");
-				}
-				/*
-				 * (Test 338, camfront=5) Test 337: the pattern's bytes right up to ~byte 962 of every line (pixel ~770 of
-				 * 1028, three quarters across), then two bytes wrong and the rest of the line shifted; all lanes alike.
-				 * A fault at a fixed place in the line: the sensor's crop, not the link. Crops tried in one boot, each
-				 * checked against the pattern: {analog x start, x end, y start, y end, digital x, y, width, frame lines}.
-				 */
-				static const uint16_t crops[][8] = {
-					{ 0, 0x199f, 0x10, 0x132f, 306, 226, 1028, 5160 },     /* Tests 334-337 */
-					{ 0, 0x199f, 0x10, 0x132f, 4, 0, 1028, 5160 },         /* the digital crop at the left edge */
-					{ 0, 0x199f, 0x10, 0x132f, 308, 226, 1024, 5160 },     /* 1024 wide (a multiple of 16) */
-					{ 1224, 5351, 920, 4023, 2, 2, 1028, 5160 },           /* the window cut in the analog array */
-					{ 0, 0x199f, 0x10, 0x132f, 306, 226, 1028, 1290 },     /* the mode's own frame length */
-				};
-				/*
-				 * (Test 339, camfront=6) Test 338: every crop alike -- bytes dropped from the second half of each line
-				 * (a group short by two bytes at ~byte 890-960, the line's tail junk "00 00 ff ff"). res3's output PLL
-				 * (IOP: 0x030d pre-divider 3, 0x030e/f multiplier 0x101) makes ~2 Gb/s a lane at 24 MHz (~1.6 at our
-				 * 19.2): past where D-PHY wants deskew, and faster than the line needs. The multiplier swept down.
-				 */
-				static const uint16_t iop_mpy[] = { 0x101, 0xc8, 0xa0, 0x80, 0x64 };
-
-				/*
-				 * (Test 340) Test 339: multipliers 200 and 160 (~1.28 and ~1.02 Gb/s a lane): the pattern without one
-				 * wrong byte, CRC 0, RX irq 0xff as the rear sensor's; 128 and 100 no output at all; 257 drops bytes.
-				 * 160 from now on (~1.28 Gb/s once MCLK is the tables' 24 MHz), settle 28. camfront=7 is iOS's session
-				 * (redwood_r5q_cam_run with the front camera asked for): frames to rx_session_cb until it says stop.
-				 */
-				bool session = front_level == 7 && rx_session_cb != NULL;
-
-				if (front_level == 5) {
-					tries = sizeof(crops) / sizeof(crops[0]);
-				} else if (front_level == 6) {
-					tries = sizeof(iop_mpy) / sizeof(iop_mpy[0]);
-				}
-				rxlog_fast = true;
-				for (uint32_t s = 0; s < tries; s++) {
-					uint32_t line_bytes = 1285;
-
-					cam_phy_index = 3;
-					cam_phy_settle = front_level == 3 ? settles[s] : 28;
-					if (front_level == 6) {
-						rxlog("front camera: IOP %u: output PLL multiplier %u (~%u Mb/s a lane at 19.2 MHz): %s\n", s,
-						    iop_mpy[s], 192u * iop_mpy[s] / 30u, bb_write16(0x030e, iop_mpy[s], 2) ?: "taken");
-					} else {
-						rxlog("front camera: output PLL multiplier 160 (~1 Gb/s a lane at 19.2 MHz): %s\n",
-						    bb_write16(0x030e, 0xa0, 2) ?: "taken");
-					}
-					if (front_level == 5) {
-						const uint16_t *c = crops[s];
-
-						line_bytes = c[6] * 5u / 4u;
-						(void)bb_write16(0x0104, 1, 1);
-						rxlog("front camera: CROP %u: analog x %u-%u y %u-%u, digital %u,%u %ux772, frame %u lines: %s\n", s,
-						    c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7],
-						    bb_write16(0x0344, c[0], 2) ?: bb_write16(0x0348, c[1], 2) ?: bb_write16(0x0346, c[2], 2) ?:
-						    bb_write16(0x034a, c[3], 2) ?: bb_write16(0x0408, c[4], 2) ?: bb_write16(0x040a, c[5], 2) ?:
-						    bb_write16(0x040c, c[6], 2) ?: bb_write16(0x040e, 772, 2) ?: bb_write16(0x034c, c[6], 2) ?:
-						    bb_write16(0x034e, 772, 2) ?: bb_write16(0x0340, c[7], 2) ?: "taken");
-						(void)bb_write16(0x0104, 0, 1);
-					}
-					camrx_on = true;
-					camrx_level = 7;
-					rx_reached = 0;
-					rx = cam_rx_up();
-					if (session && rx && rx_reached >= 6 && cam_table(tab, tab_size, "on")) {
-						/*
-						 * (Test 340) iOS's front camera: the session's loop as for the S5K3L6 (the write master's two
-						 * halves of the camera block in turn, each done frame to the caller, iOS's exposure between two
-						 * frames over this bus), the battery's lock let go meanwhile; then everything down (no pipeline
-						 * kept for the front camera: a switch brings it up afresh, ~0.4 s).
-						 */
-						uint32_t sframes, misses = 0;
-
-						cam_bus_keep = cam;
-						cam_bus_ok = true;
-						cam_front_live = true;
-						exp_applied = 0;
-						lck_mtx_unlock(&r5q_pmic_lock);
-						sframes = cam_session_frames(&misses);
-						lck_mtx_lock(&r5q_pmic_lock);
-						cam_bus_ok = false;
-						cam_front_live = false;
-						rxlog("front camera: SESSION ends: %u frames handed over, %u misses at the end; the front camera goes "
-						    "down\n", sframes, misses);
-						(void)cam_table(tab, tab_size, "off");
-					} else if (!session && rx && rx_reached >= 6 && cam_table(tab, tab_size, "on")) {
-						uint32_t frames = 0, sum = 0, ms_all = tries > 1 ? 1000 : 5000;
-
-						for (uint32_t ms = 0; ms < ms_all; ms++) {
-							delay_for_interval(1, NSEC_PER_MSEC);
-							if (IFE(0x2060) & 1) {
-								IFE(0x2054) = 1;
-								IFE(0x2068) = 1;
-								IFE(0x2214) = (uint32_t)rx_buf_pa;
-								IFE(0x04ac) = 0x2;
-								frames++;
-							}
-						}
-						for (uint32_t i = 0; i < 1280; i++) {
-							if (i % 5 != 4) {
-								sum += rx_buf[1296u * 386u + i];
-							}
-						}
-						rxlog("front camera: SETTLE %u: FRAMES IN %u ms: %u; middle line mean %u of 255; CSID pkts %u ecc %#x "
-						    "crc %u\n", cam_phy_settle, ms_all, frames, sum / 1024u, CSID(0x160), CSID(0x164), CSID(0x168));
-						cam_rx_show("front streaming");
-						if (front_level >= 4 && front_level <= 6) {
-							/*
-							 * (Test 337) Each row's 5-byte groups against the middle rows' first group (row parity:
-							 * R/Gr rows and Gb/B rows); the errors per lane and per bit, the first few shown.
-							 */
-							uint8_t ref[2][5];
-							uint32_t lane_err[4] = { 0 }, bit_err[8] = { 0 }, bad = 0, shown = 0, rows_bad = 0, first386 = ~0u;
-
-							for (int k = 0; k < 5; k++) {
-								ref[0][k] = rx_buf[1296u * 386u + k];
-								ref[1][k] = rx_buf[1296u * 387u + k];
-							}
-							for (uint32_t y = 0; y < 772; y++) {
-								uint32_t row_bad = 0;
-
-								for (uint32_t x = 0; x < line_bytes; x++) {
-									uint8_t want = ref[y & 1][x % 5], got = rx_buf[1296u * y + x];
-
-									if (got != want) {
-										bad++;
-										row_bad++;
-										lane_err[x % 4]++;
-										for (int b = 0; b < 8; b++) {
-											bit_err[b] += ((got ^ want) >> b) & 1;
-										}
-										if (y == 386 && first386 == ~0u) {
-											first386 = x;
-										}
-										if (shown < 6) {
-											shown++;
-											rxlog("front camera: pattern: row %u byte %u: %#04x, not %#04x\n", y, x, got, want);
-										}
-									}
-								}
-								rows_bad += row_bad != 0;
-							}
-							rxlog("front camera: PATTERN: groups %02x%02x%02x%02x%02x / %02x%02x%02x%02x%02x; %u bytes of %u-byte "
-							    "lines wrong in %u rows; per lane %u %u %u %u; per bit %u %u %u %u %u %u %u %u\n",
-							    ref[0][0], ref[0][1], ref[0][2], ref[0][3], ref[0][4], ref[1][0], ref[1][1], ref[1][2],
-							    ref[1][3], ref[1][4], bad, line_bytes, rows_bad, lane_err[0], lane_err[1], lane_err[2], lane_err[3],
-							    bit_err[0], bit_err[1], bit_err[2], bit_err[3], bit_err[4], bit_err[5], bit_err[6], bit_err[7]);
-							if (first386 != ~0u) {
-								/* the middle row's bytes from 8 before its first wrong one, and its last 12 and 4 after */
-								char hex[3 * 40 + 1];
-								uint32_t at = first386 >= 8 ? first386 - 8 : 0, n = 0;
-
-								for (uint32_t k = 0; k < 32 && n + 3 < sizeof(hex); k++) {
-									n += snprintf(hex + n, sizeof(hex) - n, "%02x ", rx_buf[1296u * 386u + at + k]);
-								}
-								rxlog("front camera: row 386 from byte %u: %s\n", at, hex);
-								n = 0;
-								for (uint32_t k = line_bytes - 12; k < line_bytes + 4 && n + 3 < sizeof(hex); k++) {
-									n += snprintf(hex + n, sizeof(hex) - n, "%02x ", rx_buf[1296u * 386u + k]);
-								}
-								rxlog("front camera: row 386 from byte %u (the end, and 4 after): %s\n", line_bytes - 12, hex);
-							}
-						}
-						(void)cam_table(tab, tab_size, "off");
-					}
-					spin_us(20000);
-					cam_rx_show("stopped");
-					cam_rx_down();
-				}
-				rxlog_fast = false;
-				cam_phy_index = 2;
-				cam_phy_settle = 14;
-			}
+			sony_stream(&cam, front_level, &imx616_cam);
 		}
 	}
 	wr(BB_CFG(19), was19);
@@ -3270,10 +3304,243 @@ pins_back:
 	bb = was;
 }
 
+/*
+ * (Test 342) The main camera, the IMX586 (48 MP, `qcom,cam-sensor@0' in the live DT): CCI 0 master 0 = GPIO17/18
+ * (NORTH), 7-bit 0x1a (slave-addr 0x34), ID 0x0586 at 0x0016 (two bytes), CSI-PHY 0; MCLK0 = camcc RCG 0x5004 / branch
+ * 0x501c on GPIO13 (NORTH, function 1); reset GPIO92 (NORTH); "RCAM1_OIS" GPIO133 (SOUTH). Its supplies, mostly on a
+ * second S2MPB03 (#1: 0x56 on GPIO94/95, NORTH; LDOn's register 0x02 + n, LDO1-2 0.7 V + 12.5 mV, LDO3-7 1.8 V + 25 mV):
+ * vdig #1 LDO1 1.1 V, vana #1 LDO6 2.9 V, vaf #1 LDO7 2.8 V, vio L14, custom1 #2 LDO3 1.8 V, custom2 #1 LDO3 1.8 V,
+ * custom3 #1 LDO5 2.8 V. Its module file's power-up order: vana, custom1, vdig, vaf, vio, custom2, the OIS line,
+ * custom3, MCLK, reset (10 ms). main_level: 1 its ID; 2-7 as sony_stream's.
+ */
+static const struct sony_cam imx586_cam = {
+	/* res5: 2000x1500 (binned) at 120 a second; its middle 1028x772 at 486,364; line length doubled (10752) and frame
+	 * length 5356: ~30 a second at 24 MHz (~24 at our 19.2); the output PLL at 160 (~1 Gb/s a lane: res5's 312 is
+	 * ~2.5) */
+	.name = "main camera", .tab = "camera-imx586.tab", .mode = "res5", .crop_x = 486, .crop_y = 364, .frame_lines = 5356,
+	.line_length = 10752, .phy = 0, .settle = 28, .iop_mpy = 160, .line_num = 919, .line_den = 778, .frame_num = 5356,
+	.frame_den = 3268, .margin = 48,
+};
+
+static void
+mainsensor_probe(uint32_t main_level)
+{
+	struct bitbang pm1 = { .sda = 94, .scl = 95, .address = 0x56 }, pm2 = { .sda = 47, .scl = 48, .address = 0x56 };
+	struct bitbang cam = { .sda = 17, .scl = 18, .address = 0x1a }, *was = bb;
+	vm_offset_t north = ml_io_map(0x03900000UL, 0x1000UL * 100), east = ml_io_map(0x03500000UL, 0x1000UL * 49);
+	vm_offset_t south = ml_io_map(0x03d00000UL, 0x1000UL * 134), camcc = ml_io_map(0x0ad00000UL + 0x5000, 0x1000);
+	vm_offset_t camcc_c = ml_io_map(0x0ad00000UL + 0xc000, 0x1000);
+	/* #1's LDOs 1, 3, 5, 6, 7 and #2's LDO3 as found (their registers 0x03, 0x05, 0x07, 0x08, 0x09) */
+	static const uint8_t ldo_reg[5] = { 0x03, 0x05, 0x07, 0x08, 0x09 };
+	uint8_t ldo1[5] = { 0 }, ldo2_3 = 0, id[2] = { 0 };
+	uint32_t was94, was95, was47, was48, was13 = 0, was17 = 0, was18 = 0, was92 = 0, was92io = 0, was133 = 0, was133io = 0;
+	uint32_t was_gdscr = 0, was_gdsc_clk = 0;
+	const char *problem = NULL;
+	bool pm1_ok = false, pm2_ok = false;
+	int us;
+
+	if (north == 0 || east == 0 || south == 0 || camcc == 0 || camcc_c == 0) {
+		rxlog("main camera: no mapping\n");
+		return;
+	}
+	rxlog("main camera: the IMX586 (7-bit 0x1a on GPIO17/18, MCLK0 GPIO13, reset GPIO92, OIS GPIO133): its ID\n");
+	pm1.tlmm = north;
+	pm2.tlmm = east;
+	bb = &pm1;
+	was94 = rd(BB_CFG(94));
+	was95 = rd(BB_CFG(95));
+	wr(BB_CFG(94), 0);
+	wr(BB_CFG(95), 0);
+	bb = &pm2;
+	was47 = rd(BB_CFG(47));
+	was48 = rd(BB_CFG(48));
+	wr(BB_CFG(47), 0);
+	wr(BB_CFG(48), 0);
+	spin_us(50);
+	bb = &pm1;
+	pm1_ok = bb_recover("S2MPB03 #1");
+	for (int i = 0; pm1_ok && i < 5 && problem == NULL; i++) {
+		problem = bb_read(ldo_reg[i], &ldo1[i], 1);
+	}
+	if (!pm1_ok || problem != NULL) {
+		rxlog("main camera: S2MPB03 #1 (GPIO94/95): %s: nothing switched on\n", problem ? problem : "the bus stays low");
+		goto pins_back;
+	}
+	bb = &pm2;
+	pm2_ok = bb_recover("S2MPB03 #2");
+	if (!pm2_ok || (problem = bb_read(0x05, &ldo2_3, 1)) != NULL) {
+		rxlog("main camera: S2MPB03 #2 (GPIO47/48): %s: nothing switched on\n", problem ? problem : "the bus stays low");
+		goto pins_back;
+	}
+	rxlog("main camera: S2MPB03 #1 LDO1 %#04x LDO3 %#04x LDO5 %#04x LDO6 %#04x LDO7 %#04x, #2 LDO3 %#04x as found\n",
+	    ldo1[0], ldo1[1], ldo1[2], ldo1[3], ldo1[4], ldo2_3);
+	/* vana, custom1, vdig, vaf, vio, custom2 -- 1 ms apart */
+	bb = &pm1;
+	if ((problem = bb_write(0x08, 0x80 | 44)) != NULL) {             /* vana: #1 LDO6 2.9 V */
+		goto power_back;
+	}
+	spin_us(1000);
+	bb = &pm2;
+	if ((problem = bb_write(0x05, 0x80 | 0)) != NULL) {              /* custom1: #2 LDO3 1.8 V */
+		goto power_back;
+	}
+	spin_us(1000);
+	bb = &pm1;
+	if ((problem = bb_write(0x03, 0x80 | 32)) != NULL) {             /* vdig: #1 LDO1 1.1 V */
+		goto power_back;
+	}
+	spin_us(1000);
+	if ((problem = bb_write(0x09, 0x80 | 40)) != NULL) {             /* vaf: #1 LDO7 2.8 V */
+		goto power_back;
+	}
+	spin_us(1000);
+	rxlog("main camera: L14 vote: %s\n", redwood_r5q_rpmh_enable("ldoa14") ? "done" : "NOT DONE");
+	spin_us(1000);
+	if ((problem = bb_write(0x05, 0x80 | 0)) != NULL) {              /* custom2: #1 LDO3 1.8 V */
+		goto power_back;
+	}
+	spin_us(1000);
+	was133 = rd(south + 0x1000UL * 133);
+	was133io = rd(south + 0x1000UL * 133 + 4);
+	wr(south + 0x1000UL * 133 + 4, 2);
+	wr(south + 0x1000UL * 133, (1u << 9));                          /* the OIS line: GPIO, output, high */
+	spin_us(1000);
+	if ((problem = bb_write(0x07, 0x80 | 40)) != NULL) {             /* custom3: #1 LDO5 2.8 V */
+		goto ois_back;
+	}
+	spin_us(1000);
+	{
+		uint8_t now[5] = { 0 }, now2 = 0;
+
+		for (int i = 0; i < 5; i++) {
+			(void)bb_read(ldo_reg[i], &now[i], 1);
+		}
+		bb = &pm2;
+		(void)bb_read(0x05, &now2, 1);
+		rxlog("main camera: S2MPB03 #1 LDO1 %#04x LDO3 %#04x LDO5 %#04x LDO6 %#04x LDO7 %#04x, #2 LDO3 %#04x now\n",
+		    now[0], now[1], now[2], now[3], now[4], now2);
+	}
+	/* the camera's power domain, as the other probes */
+	rxlog("main camera: rails mmcx %d mx %d\n", redwood_r5q_rpmh_level("mmcx.lvl", 128), redwood_r5q_rpmh_level("mx.lvl", 192));
+	was_gdsc_clk = *(volatile uint32_t *)(camcc_c + 0x1e4);
+	was_gdscr = *(volatile uint32_t *)(camcc_c + 0x1bc);
+	lck_mtx_lock(&redwood_smmu_lock);
+	*(volatile uint32_t *)(camcc_c + 0x1e4) = was_gdsc_clk | 1;
+	*(volatile uint32_t *)(camcc_c + 0x1bc) = was_gdscr & ~1u;
+	for (us = 0; us < 10000 && !(*(volatile uint32_t *)(camcc_c + 0x1bc) & (1u << 31)); us += 10) {
+		spin_us(10);
+	}
+	lck_mtx_unlock(&redwood_smmu_lock);
+	rxlog("main camera: titan_top_gdsc %#x -> %#x\n", was_gdscr, *(volatile uint32_t *)(camcc_c + 0x1bc));
+	/* MCLK0 from TCXO on GPIO13, then reset high (10 ms) */
+	*(volatile uint32_t *)(camcc + 0x004 + 4) = 1;                  /* MCLK0 RCG CFG: TCXO, divider 1 */
+	*(volatile uint32_t *)(camcc + 0x004) |= 1;                     /* CMD: update */
+	for (us = 0; us < 10000 && (*(volatile uint32_t *)(camcc + 0x004) & 1); us += 10) {
+		spin_us(10);
+	}
+	*(volatile uint32_t *)(camcc + 0x01c) |= 1;                     /* the branch */
+	for (us = 0; us < 10000 && (*(volatile uint32_t *)(camcc + 0x01c) & (1u << 31)); us += 10) {
+		spin_us(10);
+	}
+	was13 = rd(north + 0x1000UL * 13);
+	wr(north + 0x1000UL * 13, (1u << 2) | (1u << 6));               /* cam_mclk, 4 mA, no pull */
+	spin_us(1000);
+	was92 = rd(north + 0x1000UL * 92);
+	was92io = rd(north + 0x1000UL * 92 + 4);
+	wr(north + 0x1000UL * 92 + 4, 0);
+	wr(north + 0x1000UL * 92, (1u << 9));                           /* GPIO, output, low */
+	spin_us(1000);
+	wr(north + 0x1000UL * 92 + 4, 2);                               /* high: out of reset */
+	spin_us(10000);
+	rxlog("main camera: MCLK0 RCG cmd %#x cfg %#x branch %#x; GPIO13 %#x; reset GPIO92 %#x io %#x; OIS GPIO133 %#x io %#x\n",
+	    *(volatile uint32_t *)(camcc + 0x004), *(volatile uint32_t *)(camcc + 0x008), *(volatile uint32_t *)(camcc + 0x01c),
+	    rd(north + 0x1000UL * 13), rd(north + 0x1000UL * 92), rd(north + 0x1000UL * 92 + 4), rd(south + 0x1000UL * 133),
+	    rd(south + 0x1000UL * 133 + 4));
+	/* the bus GPIO17/18 by hand: what answers, then the ID */
+	cam.tlmm = north;
+	bb = &cam;
+	was17 = rd(BB_CFG(17));
+	was18 = rd(BB_CFG(18));
+	cam.cfg_sda = 3;
+	cam.cfg_scl = 3;
+	wr(BB_CFG(17), 3);
+	wr(BB_CFG(18), 3);
+	spin_us(50);
+	if (!bb_recover("the main sensor's bus")) {
+		rxlog("main camera: GPIO17/18: the bus stays low\n");
+	} else {
+		char seen[160];
+		int at = 0;
+
+		for (unsigned a = 0x08; a < 0x78 && at < (int)sizeof(seen) - 6; a++) {
+			uint8_t b;
+
+			cam.address = (uint8_t)a;
+			if (bb_read16(0x0000, &b, 1) == NULL) {
+				at += snprintf(seen + at, sizeof(seen) - at, " %#04x", a);
+			}
+		}
+		rxlog("main camera: the bus GPIO17/18 answers at:%s\n", at ? seen : " nothing");
+		cam.address = 0x1a;
+		problem = bb_read16(0x0016, id, 2);
+		rxlog("main camera: 7-bit 0x1a: ID %s %02x%02x%s\n", problem ? problem : "", id[0], id[1],
+		    problem == NULL && id[0] == 0x05 && id[1] == 0x86 ? ": THE IMX586 ANSWERS" : "");
+		if (problem == NULL && id[0] == 0x05 && id[1] == 0x86 && main_level >= 2) {
+			sony_stream(&cam, main_level, &imx586_cam);
+		}
+	}
+	wr(BB_CFG(17), was17);
+	wr(BB_CFG(18), was18);
+	/* everything back, the other way round: reset low, MCLK off, the domain */
+	wr(north + 0x1000UL * 92 + 4, 0);
+	spin_us(1000);
+	wr(north + 0x1000UL * 92, was92);
+	wr(north + 0x1000UL * 92 + 4, was92io);
+	wr(north + 0x1000UL * 13, was13);
+	*(volatile uint32_t *)(camcc + 0x01c) &= ~1u;
+	lck_mtx_lock(&redwood_smmu_lock);
+	*(volatile uint32_t *)(camcc_c + 0x1bc) = was_gdscr;
+	*(volatile uint32_t *)(camcc_c + 0x1e4) = was_gdsc_clk;
+	spin_us(100);
+	lck_mtx_unlock(&redwood_smmu_lock);
+	problem = NULL;
+	bb = &pm1;
+	(void)bb_write(0x07, ldo1[2]);                                  /* custom3 */
+	spin_us(1000);
+ois_back:
+	wr(south + 0x1000UL * 133, was133);
+	wr(south + 0x1000UL * 133 + 4, was133io);
+	spin_us(1000);
+power_back:
+	bb = &pm1;
+	(void)bb_write(0x05, ldo1[1]);                                  /* custom2 */
+	spin_us(1000);
+	(void)bb_write(0x09, ldo1[4]);                                  /* vaf */
+	spin_us(1000);
+	(void)bb_write(0x03, ldo1[0]);                                  /* vdig */
+	spin_us(1000);
+	bb = &pm2;
+	(void)bb_write(0x05, ldo2_3);                                   /* custom1 */
+	spin_us(1000);
+	bb = &pm1;
+	(void)bb_write(0x08, ldo1[3]);                                  /* vana */
+	rxlog("main camera: back: S2MPB03 #1 LDO1 %#04x LDO3 %#04x LDO5 %#04x LDO6 %#04x LDO7 %#04x, #2 LDO3 %#04x%s%s\n",
+	    ldo1[0], ldo1[1], ldo1[2], ldo1[3], ldo1[4], ldo2_3, problem ? "; write: " : "", problem ? problem : "");
+pins_back:
+	bb = &pm1;
+	wr(BB_CFG(94), was94);
+	wr(BB_CFG(95), was95);
+	bb = &pm2;
+	wr(BB_CFG(47), was47);
+	wr(BB_CFG(48), was48);
+	bb = was;
+}
+
 /* (Test 294) cam_soak: the kernel's own reader, one line a second (every 30 frames) with the middle line's mean */
 bool redwood_r5q_cam_run(bool (*cb)(const uint8_t *frame, uint32_t bytes, void *ctx), void *ctx);
 static uint32_t soak_frames, soak_frames_max;
 void redwood_r5q_cam_front(bool front);
+void redwood_r5q_cam_sensor(uint32_t which);
 void redwood_r5q_cam_exposure(uint32_t lines, uint32_t gain, uint32_t frame_lines);
 
 static bool
@@ -3302,6 +3569,15 @@ camsensor_thread(__unused void *parameter, __unused wait_result_t result)
 {
 	uint32_t soak = 0, front = 0;
 
+	uint32_t main_level = 0;
+
+	/* (Test 342) cammain=N: the main sensor's (the IMX586's) probe instead, at sony_stream's levels */
+	if (PE_parse_boot_argn("cammain", &main_level, sizeof(main_level)) && main_level != 0) {
+		lck_mtx_lock(&r5q_pmic_lock);
+		mainsensor_probe(main_level);
+		lck_mtx_unlock(&r5q_pmic_lock);
+		thread_terminate(current_thread());
+	}
 	/* (Test 333) camfront=1: the front sensor's ID probe instead (the rear's pipeline untouched) */
 	if (PE_parse_boot_argn("camfront", &front, sizeof(front)) && front != 0) {
 		lck_mtx_lock(&r5q_pmic_lock);
@@ -3335,7 +3611,8 @@ camsensor_thread(__unused void *parameter, __unused wait_result_t result)
 			for (uint32_t s = 1; s <= count; s++) {
 				soak_frames = 0;
 				soak_frames_max = first;
-				redwood_r5q_cam_front(alt != 0 && (s & 1) != 0);
+				/* (Test 343) cam_soak_alt=2: the three cameras in turn (front, main, ultra-wide) */
+				redwood_r5q_cam_sensor(alt == 2 ? s % 3 : alt != 0 && (s & 1) != 0 ? 1 : 0);
 				rxlog("camera soak: short session %u of %u (%u frames)\n", s, count, first);
 				(void)redwood_r5q_cam_run(soak_frame, NULL);
 				rxlog("camera soak: short session %u over: %u frames\n", s, soak_frames);
@@ -3347,7 +3624,7 @@ camsensor_thread(__unused void *parameter, __unused wait_result_t result)
 			uint32_t soak_front = 0;
 
 			(void)PE_parse_boot_argn("cam_soak_front", &soak_front, sizeof(soak_front));
-			redwood_r5q_cam_front(soak_front != 0);
+			redwood_r5q_cam_sensor(soak_front);      /* (Test 343) 1 the front camera, 2 the main one */
 		}
 		rxlog("camera soak: a session for %u s (%u frames at ~30 fps), only the kernel reading\n", soak, soak_frames_max);
 		(void)redwood_r5q_cam_run(soak_frame, NULL);
@@ -3368,13 +3645,22 @@ camsensor_thread(__unused void *parameter, __unused wait_result_t result)
  */
 bool redwood_r5q_cam_run(bool (*cb)(const uint8_t *frame, uint32_t bytes, void *ctx), void *ctx);
 
-/* (Test 340) redwood_camera.c says which camera iOS asked for before each session: true = the front one (the IMX616) */
-static volatile bool cam_want_front;
+/*
+ * (Test 340) redwood_camera.c says which camera iOS asked for before each session: true = the front one (the IMX616).
+ * (Test 343) redwood_r5q_cam_sensor: 0 the S5K3L6 (ultra-wide), 1 the IMX616 (front), 2 the IMX586 (main).
+ */
+static volatile uint32_t cam_want_sensor;
 void redwood_r5q_cam_front(bool front);
+void redwood_r5q_cam_sensor(uint32_t which);
+void
+redwood_r5q_cam_sensor(uint32_t which)
+{
+	cam_want_sensor = which;
+}
 void
 redwood_r5q_cam_front(bool front)
 {
-	cam_want_front = front;
+	cam_want_sensor = front ? 1 : 0;
 }
 
 bool
@@ -3383,20 +3669,26 @@ redwood_r5q_cam_run(bool (*cb)(const uint8_t *frame, uint32_t bytes, void *ctx),
 	if (!redwood_platform_is("r5q") || cb == NULL) {
 		return false;
 	}
-	if (cam_want_front) {
+	if (cam_want_sensor != 0) {
 		/*
 		 * (Test 340) The front camera: the rear pipeline down first if a switch left it up (one receive path, one camera
 		 * block), then the IMX616's probe in its session mode (camfront level 7), all of it torn down at the end.
+		 * (Test 343) The main camera (the IMX586) the same way (cammain level 7).
 		 */
 		lck_mtx_lock(&r5q_pmic_lock);
 		if (cam_pipe_up) {
-			rxlog("camera sensor: the front camera asked for: the rear pipeline goes down first\n");
+			rxlog("camera sensor: the %s asked for: the S5K3L6's pipeline goes down first\n",
+			    cam_want_sensor == 1 ? "front camera" : "main camera");
 			cam_pipe_down();
 		}
 		rx_session_cb = cb;
 		rx_session_ctx = ctx;
 		rx_frame_done = false;
-		frontsensor_probe(7);
+		if (cam_want_sensor == 1) {
+			frontsensor_probe(7);
+		} else {
+			mainsensor_probe(7);
+		}
 		rx_session_cb = NULL;
 		rx_session_ctx = NULL;
 		rxlog_fast = false;

@@ -94,6 +94,8 @@ static uint32_t level;
 static bool broken, leaving;
 static bool r5q_real;            /* (r5q Test 290) cam_r5q=1: the S10 Lite's own S5K3L6 (see fake, below) */
 static bool r5q_front;           /* (r5q Test 340) this session is iOS's front camera: the IMX616 (RGGB), not the S5K3L6 */
+static uint32_t r5q_sensor;      /* (r5q Test 343) 0 the S5K3L6 (ultra-wide), 1 the IMX616 (front), 2 the IMX586 (main) */
+static const char *const r5q_names[3] = { "S5K3L6", "IMX616 (front)", "IMX586 (main)" };
 
 static int say(const char *format, ...) __printflike(1, 2);
 
@@ -3877,12 +3879,18 @@ r5q_session(void)
 	 * (r5q Test 340) iOS's front camera (this file's "front" entry, index 2) from the S10 Lite's own front sensor, the
 	 * IMX616, with the same frame shape (1028x772 RAW10, cropped in the sensor); cam_front=0 keeps the S5K3L6 for it.
 	 */
-	extern void redwood_r5q_cam_front(bool front);
-	uint32_t front_on = 1;
+	/*
+	 * (r5q Test 343) And iOS's back camera from the main one, the IMX586 (48 MP), likewise cropped to the middle 1028x772
+	 * of its 2000x1500 mode; cam_main=0 keeps the S5K3L6 (the ultra-wide) for it.
+	 */
+	extern void redwood_r5q_cam_sensor(uint32_t which);
+	uint32_t front_on = 1, main_on = 1;
 
 	(void)PE_parse_boot_argn("cam_front", &front_on, sizeof(front_on));
+	(void)PE_parse_boot_argn("cam_main", &main_on, sizeof(main_on));
 	r5q_front = front_on != 0 && hw_index == 2;
-	redwood_r5q_cam_front(r5q_front);
+	r5q_sensor = r5q_front ? 1 : hw_index != 2 && main_on != 0 ? 2 : 0;
+	redwood_r5q_cam_sensor(r5q_sensor);
 	ios_frames_done = ios_given = ios_writes_late = 0;
 	if (!ring_alloc(RAW10_STRIDE(ios_mode->width) * ios_mode->height)) {
 		return;
@@ -3899,10 +3907,10 @@ r5q_session(void)
 	ios_streaming = false;          /* (true at the first frame: until then a read waits 15 s, not 3: the bring-up takes seconds) */
 	ios_last_read = ios_ms();
 	lck_mtx_unlock(&ios_lock);
-	say("camera: the frames for iOS: the %s's own, %ux%u (%s)\n", r5q_front ? "IMX616 (front)" : "S5K3L6", ios_mode->width,
-	    ios_mode->height, r5q_front ? "RGGB" : "GRBG");
+	say("camera: the frames for iOS: the %s's own, %ux%u (%s)\n", r5q_names[r5q_sensor], ios_mode->width,
+	    ios_mode->height, r5q_sensor != 0 ? "RGGB" : "GRBG");
 	if (!redwood_r5q_cam_run(r5q_frame, NULL)) {
-		say("camera: the %s's session did not start\n", r5q_front ? "IMX616" : "S5K3L6");
+		say("camera: the %s's session did not start\n", r5q_names[r5q_sensor]);
 	}
 	lck_mtx_lock(&ios_lock);
 	ios_streaming = false;
@@ -3912,7 +3920,7 @@ r5q_session(void)
 	lck_mtx_unlock(&ios_lock);
 	wakeup(&ios_frames_done);
 	ring_free();
-	say("camera: the %s's frames for iOS stopped (%s): %llu done, %llu given\n", r5q_front ? "IMX616" : "S5K3L6",
+	say("camera: the %s's frames for iOS stopped (%s): %llu done, %llu given\n", r5q_names[r5q_sensor],
 	    !ios_open ? "closed" : ios_switch_to != 0 ? "another sensor asked for" : "nobody reads", ios_frames_done, ios_given);
 }
 
@@ -4013,7 +4021,7 @@ camdev_read(__unused dev_t dev, struct uio *uio, __unused int ioflag)
 	f.format = 1;
 	f.bayer = ios_source == SOURCE_CSID_TPG ? 0 : ios_source == SOURCE_SENSOR_PATTERN ? hw->pattern_bayer : hw->bayer;
 	if (r5q_real) {
-		f.bayer = r5q_front ? 0 : 1;    /* (r5q Test 340) the IMX616's RGGB (its crop at even offsets), the S5K3L6's GRBG */
+		f.bayer = r5q_sensor != 0 ? 0 : 1;     /* (r5q Test 340/343) the Sonys' RGGB (crops at even offsets), the S5K3L6's GRBG */
 	}
 	f.black = 64;
 	f.sequence = place[b].sequence;
