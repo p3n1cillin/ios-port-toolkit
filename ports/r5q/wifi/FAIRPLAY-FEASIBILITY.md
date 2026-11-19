@@ -70,3 +70,38 @@ been tested yet.
 - **Rules (unchanged):** this is reading Apple's binaries to judge interoperability. Any working route has to be
   Apple's own FairPlay code with the owner's own purchases. Writing our own FairPlay decryption, or faking an Apple
   device identity, would be circumvention and is out.
+
+## The FairPlay kext (2026-11-19): the device keys are Apple silicon's UID and GID keys
+
+- **Fetched** (the owner's OK): `kernelcache.release.iphone10b` (18,183,395 bytes) from the 20F66 IPSW on Apple's
+  CDN, one member by HTTP range (`ios165/fetch-from-ipsw.py`). It is IMG4 with an LZFSE payload (`bvx2` at offset
+  63), decoded with the system's liblzfse into a 50,888,732-byte arm64 Mach-O: an old-style prelinked kernelcache
+  (`__PRELINK_INFO`). Local only (`$IOS_WORK/fairplay/kc/`).
+- **The kext:** `com.apple.driver.FairPlayIOKit` 71.1.0, about 242 KB of `__TEXT`, 1.3 MB of `__text`; classes
+  `com_apple_driver_FairPlayIOKit` (matched on IOResources) and `com_apple_driver_FairPlayIOKitUserClient`
+  (entitlements `com.apple.private.FairPlayIOKitUserClient.access`, `...ProvInfoIOKitUserClient.access`).
+  `OSBundleLibraries` names only the standard KPIs (mach, private, unsupported, iokit, libkern, bsd), so as a binary
+  it would link against our XNU.
+- **But at run time it looks up `IOAESAccelerator` and calls `performAES` with Apple's hardware keys.** Its own
+  messages:
+  - `generateSeed`: "IOAESAccelerator::performAES **GID** returned" / "performAES **UID** returned";
+  - `getEncryptedSeedSegment`: performAES "in-field", "scrambler", "GID", "(scrambled)", "**(UID)**", plus
+    `PIKDecryptWithFixedSharedKey`;
+  - `generateInFieldSeed`, `encryptSUInfo`, `encryptWithWrappedKey`: performAES.
+  
+  Other user-client calls: `exchangeWithHoover` (an `AppleSTDP2700` display-port device, "probably means no Hoover
+  on the device"), `SendFPMessage` (the LSKD key-delivery path), and `GetProductID` from `IODeviceTree:/product`
+  `product-id`.
+- **Answer to question 2: the device binding is the UID and GID keys.** These are AES keys fused into each Apple
+  SoC's AES engine. Software cannot read them; they exist only inside Apple's silicon. The Snapdragon 855 has
+  neither the keys nor an AES engine that holds them. FairPlay's seed (the device identity its keys are wrapped to)
+  is made with them.
+- **Verdict.**
+  - Apple's own FairPlay code cannot do its job on this phone, because the keys it needs are not here.
+  - The only ways around that would be faking Apple's hardware keys or writing our own FairPlay decryption. Both
+    are circumvention and are out by this study's rules (and the real keys are secret anyway).
+  - So **App Store (FairPlay-encrypted) apps cannot run on this port.**
+  - What can run: apps whose code is not FairPlay-encrypted. That means Apple's own system apps (as now), apps the
+    owner builds from source and signs, and unencrypted builds a developer gives out. Whether the port's code
+    signing takes a self-signed app as is has not been tried yet.
+  - **Study closed:** feasible only for unencrypted apps.

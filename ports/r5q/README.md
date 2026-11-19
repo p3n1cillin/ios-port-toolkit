@@ -74,8 +74,9 @@ binaries, no build outputs and no phone backups are in this repository (see [the
 - **Microphone:** the WCD9340 codec never enumerates on SLIMbus and is silent over SPI too (Tests 265-266). What is ruled out is in WIFI-PLAN, "Tests 237-240" and after.
 - **Metal:** there is no GPU driver for iOS, so the map in Maps and live wallpapers are missing.
 - **Radios:** cellular; Bluetooth audio.
-- **FairPlay:** App Store apps don't run yet (their code is FairPlay-encrypted). Not ruled out: a feasibility study
-  of what decrypting them needs on this kernel is to come.
+- **FairPlay:** App Store apps can't run (their code is FairPlay-encrypted). The study (wifi/FAIRPLAY-FEASIBILITY.md)
+  found that Apple's FairPlay kext makes the device's keys with the SoC's fused UID and GID AES keys, which only
+  Apple silicon has. Apps without FairPlay encryption (Apple's own, ones built from source) are the route.
 
 Setting up a machine to build and run it: [docs/SETUP.md](../../docs/SETUP.md). Licences: the loader and the kernel
 drivers are Apple Public Source License 2.0 (modified from the donor port), the rest MIT; see
