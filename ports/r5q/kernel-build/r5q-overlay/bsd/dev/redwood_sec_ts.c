@@ -2318,6 +2318,55 @@ bb_read16(uint16_t reg, uint8_t *bytes, unsigned count)
  */
 static bool cam_pipe_up;
 
+/*
+ * (Test 328) iOS's exposure on the S5K3L6: redwood_camera.c passes on what iOS's auto-exposure asks for
+ * (REDWOOD_CAMERA_EXPOSURE) as lines, the sensor's analog gain (SMIA 0x0204, 32 = 1x) and frame lines; the session
+ * applies it between two frames over the sensor's own bus, under the grouped-parameter hold (0x0104). The bus: a kept
+ * copy of the probe's (whose own lives on the probe's stack), valid while the sensor is powered.
+ */
+static struct bitbang cam_bus_keep;
+static bool cam_bus_ok;
+static volatile bool exp_pending;
+static volatile uint32_t exp_lines, exp_gain, exp_frame;
+static uint32_t exp_applied;
+
+void redwood_r5q_cam_exposure(uint32_t lines, uint32_t gain, uint32_t frame_lines);
+void
+redwood_r5q_cam_exposure(uint32_t lines, uint32_t gain, uint32_t frame_lines)
+{
+	exp_lines = lines;
+	exp_gain = gain;
+	exp_frame = frame_lines;
+	exp_pending = true;
+}
+
+static void
+cam_exposure_apply(void)
+{
+	struct bitbang *was;
+	uint32_t fl, ln, g;
+	const char *problem = NULL;
+
+	if (!exp_pending || !cam_bus_ok) {
+		return;
+	}
+	exp_pending = false;
+	fl = exp_frame < 3268 ? 3268 : exp_frame > 0xfff0 ? 0xfff0 : exp_frame;    /* (~30 a second at the shortest) */
+	ln = exp_lines < 4 ? 4 : exp_lines > fl - 8 ? fl - 8 : exp_lines;
+	g = exp_gain < 32 ? 32 : exp_gain > 512 ? 512 : exp_gain;                  /* 1x .. 16x */
+	was = bb;
+	bb = &cam_bus_keep;
+	if ((problem = bb_write16(0x0104, 1, 1)) == NULL && (problem = bb_write16(0x0340, (uint16_t)fl, 2)) == NULL &&
+	    (problem = bb_write16(0x0202, (uint16_t)ln, 2)) == NULL && (problem = bb_write16(0x0204, (uint16_t)g, 2)) == NULL) {
+		problem = bb_write16(0x0104, 0, 1);
+	}
+	bb = was;
+	if (exp_applied++ < 12 || exp_applied % 30 == 0 || problem != NULL) {
+		rxlog("camera sensor: exposure from iOS: %u lines (%u.%02u ms), gain %u/32, frame %u lines: %s\n", ln,
+		    ln * 919 / 100000, (ln * 919 / 1000) % 100, g, fl, problem ? problem : "taken");
+	}
+}
+
 static uint32_t
 cam_session_frames(uint32_t *misses_out)
 {
@@ -2357,6 +2406,7 @@ cam_session_frames(uint32_t *misses_out)
 			break;
 		}
 		half ^= 1;
+		cam_exposure_apply();           /* (Test 328) iOS's exposure, between two frames */
 	}
 	*misses_out = misses;
 	return frames;
@@ -2598,6 +2648,8 @@ camsensor_probe(void)
 					/* (Test 276) the receive path before the stream starts, as Android orders it */
 					rx = camrx_on && cam_rx_up();
 
+					cam_bus_keep = cam;            /* (Test 328) for iOS's exposure from the session */
+					cam_bus_ok = true;
 					if (rx_session_cb != NULL && rx && rx_reached >= 6 && cam_table(tab, tab_size, "on")) {
 						uint32_t frames, misses = 0, persist = 1;
 
@@ -2682,6 +2734,7 @@ camsensor_probe(void)
 		rxlog("camera sensor: GPIO31/32: %s\n", problem);
 	}
 	rxlog("camera sensor: down 8: pins GPIO31/32 back (%#x %#x)\n", was31, was32);
+	cam_bus_ok = false;                     /* (Test 328) the sensor goes down: no more exposure writes */
 	wr(BB_CFG(31), was31);
 	wr(BB_CFG(32), was32);
 	/* everything back: reset low, the pin and MCLK off */

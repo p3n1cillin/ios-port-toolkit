@@ -3818,6 +3818,23 @@ r5q_frame(const uint8_t *frame, uint32_t bytes, __unused void *ctx)
 		lck_mtx_unlock(&ios_lock);
 		return false;
 	}
+	if (ios_ask.pending) {
+		/*
+		 * (r5q Test 328) iOS's auto-exposure on the S5K3L6: its gain is in this camera entry's units (GAIN_UNITY is 1x),
+		 * the S5K3L6's analog gain register takes 32 as 1x. Applied by the session between two frames; what iOS is told
+		 * for the next frames is what was asked (clamped there the same way).
+		 */
+		extern void redwood_r5q_cam_exposure(uint32_t lines, uint32_t gain, uint32_t frame_lines);
+		uint32_t unity = GAIN_UNITY ? GAIN_UNITY : 32;
+		uint32_t frame_lines = ios_ask.frame_lines < 3268 ? 3268 : ios_ask.frame_lines;
+		uint32_t lines = ios_ask.lines > frame_lines - 8 ? frame_lines - 8 : ios_ask.lines;
+
+		redwood_r5q_cam_exposure(lines, (uint32_t)((uint64_t)ios_ask.gain * 32 / unity), frame_lines);
+		ios_now.lines = lines;
+		ios_now.gain = ios_ask.gain;
+		ios_now.frame_lines = frame_lines;
+		ios_ask.pending = false;
+	}
 	for (int i = 0; i < RING; i++) {
 		if (place[i].state != PLACE_READING && (p < 0 || place[i].sequence < place[p].sequence)) {
 			p = i;
@@ -3858,7 +3875,7 @@ r5q_session(void)
 		place[i].sequence = 0;
 	}
 	ios_now.lines = 768;
-	ios_now.gain = 0x100;
+	ios_now.gain = 8 * (GAIN_UNITY ? GAIN_UNITY : 32);     /* (Test 328) the probe's 0x100 is 8x on the S5K3L6 */
 	ios_now.frame_lines = 3268;
 	ios_ask.pending = false;
 	ios_streaming = false;          /* (true at the first frame: until then a read waits 15 s, not 3: the bring-up takes seconds) */

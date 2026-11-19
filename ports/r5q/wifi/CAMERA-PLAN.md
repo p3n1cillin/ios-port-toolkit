@@ -691,3 +691,18 @@ candidate designs).
     `clk_rcg2_shared_ops`), and enable `cam_cc_camnoc_dcd_xo_clk` with `camnoc_axi`.
 - **Open:** a safe idle power-down now that teardowns are safe (the pipeline stays up while nothing reads); the
   exposure (the picture is dark: iOS's requests not applied yet); the paced bring-up could become fast again.
+- **Pushed: eedc182** (Test 327: the root cause fixed).
+- **Test 328 (kernel t328; `cam=5 cam_r5q=1`): iOS'S AUTO-EXPOSURE DRIVES THE SENSOR.**
+  - redwood_camera.c's `r5q_frame` passes iOS's pending REDWOOD_CAMERA_EXPOSURE on (`redwood_r5q_cam_exposure`):
+    gain converted from the camera entry's units (GAIN_UNITY = 1x: 32 for the back slot, 0x100 for the front) to the
+    S5K3L6's SMIA analog gain (32 = 1x, clamped 1x-16x); frame lines at least 3268 (~30 a second); lines up to the
+    frame less 8. iOS is told what was applied. The session (`cam_exposure_apply`) writes it between two frames over
+    the sensor's own bus (a kept copy of the probe's), under the grouped-parameter hold: 0x0104=1, 0x0340, 0x0202,
+    0x0204, 0x0104=0. At a session's start iOS is told 8x in its entry's units (the probe's 0x100 is 8x).
+  - The Camera app opened: "exposure from iOS: 1594 lines (14.64 ms), gain 512/32 (16x), frame 3268 lines: taken",
+    every request applied; iOS up. **The viewfinder now shows the sensor's grain** (16x gain on a dark scene)
+    instead of flat black: iOS's exposure loop reaches the sensor and comes back in the picture.
+  - The scene itself was dark (the phone lying on a surface): a picture of something lit needs the owner.
+- **Open (camera):** pointing it at light (owner); the shutter/photo; a safe idle power-down (teardowns are safe now);
+  the front/other sensors (all of iOS's cameras are the S5K3L6 for now); colour tuning for this sensor (iOS says "no
+  colour tuning ... no colour matrix, no lens shading"); a fast bring-up again (it is paced, ~6 s once per boot).
