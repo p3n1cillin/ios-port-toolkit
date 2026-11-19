@@ -74,6 +74,12 @@ frames" from "the hardware gives frames".
 - **Don't reuse another phone's pin tables.** The donor's `find_pins()` data-aborted on this phone.
 - **Stride:** the CSID writes RAW10 lines padded to 16 bytes (1028 pixels → 1296 bytes).
 
+- **Photos: save JPEG until HEVC encoding fits.** With no Apple video encoder hardware, Camera's default HEIC goes
+  through a software HEVC encoder in mediaserverd, which runs out of memory on a 12 MP still (`std::bad_alloc`,
+  mediaserverd killed, nothing saved). Camera's "Most Compatible" format is the preference
+  `CAMUserPreferenceCaptureEncodingBehavior` = 1 (domain com.apple.camera, user mobile): the still is then saved as
+  JPEG (4032x3024 encoded in ~160 ms on the S10 Lite).
+
 ## Privacy and licensing
 
 Never publish the vendor's sensor module files, the tables derived from them, or the sensor registry. The tables

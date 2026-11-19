@@ -706,3 +706,26 @@ candidate designs).
 - **Open (camera):** pointing it at light (owner); the shutter/photo; a safe idle power-down (teardowns are safe now);
   the front/other sensors (all of iOS's cameras are the S5K3L6 for now); colour tuning for this sensor (iOS says "no
   colour tuning ... no colour matrix, no lens shading"); a fast bring-up again (it is paced, ~6 s once per boot).
+- **Pushed: 6805124** (Test 328).
+- **The shutter (t328 kernel, Camera.app, 2026-11-19 14:31:59): THE PHOTOGRAPH IS TAKEN, NOT SAVED.**
+  - camera_device.c: "a photograph asked for StillImageCaptureNow", "StillImage: 4032x3024 made of every pixel in
+    124 ms", "the first picture given (4032x3024 420f)", "the photograph is given (1 so far)".
+  - Then mediaserverd's HEIC encoding (the software HEVC encoder VCPHEVC.videocodec): "Recon frame creation
+    failed", "Frame 3: Precompress failed", `std::bad_alloc`, **mediaserverd exited on SIGABRT** and launchd
+    restarted it. /var/mobile/Media/DCIM has only .MISC (no 100APPLE). iOS itself stayed up.
+  - **Next:** the still is 12 MP (camera_device.c line 435: { 4032, 3024, 30 } "Photo", upscaled from the sensor's
+    1028x772). Either a smaller still format there (e.g. 2016x1512 or the sensor's own size) so the software HEVC
+    encoder fits mediaserverd's memory, or Camera's "Most Compatible" (JPEG) format so HEVC is not used at all.
+- **THE SHUTTER SAVES A PHOTOGRAPH (t328 kernel, 2026-11-19 15:10).** The HEIC failure above is mediaserverd's
+  software HEVC encoder running out of memory on a 12 MP still. Camera's "Formats" setting is the preference
+  `CAMUserPreferenceCaptureEncodingBehavior` (domain com.apple.camera, user mobile; found in the dyld shared cache:
+  also `...Source`); unset = High Efficiency. Set to **1 (Most Compatible: JPEG)** with
+  `r5qd run /var/r5q/bin/cfpref com.apple.camera mobile CAMUserPreferenceCaptureEncodingBehavior int 1`, the Camera
+  app restarted (`phone.py rd kill Camera`), the shutter tapped:
+  - "StillImage: 4032x3024 made of every pixel in 166 ms", "the photograph is given", **"a photograph of 4032x3024
+    encoded in 162 ms"**, no crash; **/var/mobile/Media/DCIM/100APPLE/IMG_0001.JPG, 1,888,541 bytes**; its thumbnail
+    in the Camera app.
+  - Kept across reboots: `r5qd run /redwood/bin/var_store save` (/private/var is a RAM disk here).
+  - Also seen: assetsd exited on SIGSEGV once at 15:01 (before the JPEG run, after the HEIC crash); not seen since.
+- **Open (camera):** bake the JPEG preference into the image (or make the software HEVC encoder fit); a picture of a
+  lit scene (owner); idle power-down; colour tuning; the other sensors.

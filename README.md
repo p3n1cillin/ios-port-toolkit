@@ -3,9 +3,9 @@
 > **This repository** also carries the S10 Lite port's own working tree in [ports/r5q](ports/r5q/README.md)
 > (loader, kernel drivers, build pipeline, phone tool, iOS-side libraries and test tools, notes; up to Test 328:
 > Wi-Fi, sound, sensors with rotation, auto-brightness and CoreMotion device motion, Bluetooth under iOS's own
-> bluetoothd, and the phone's own rear camera streaming into iOS's Camera app under iOS's auto-exposure). Set-up:
-> [docs/SETUP.md](docs/SETUP.md). Licences: MIT, with the loader and kernel drivers under the Apple Public Source
-> License 2.0: [NOTICE.md](NOTICE.md).
+> bluetoothd, and the phone's own rear camera in iOS's Camera app: preview under iOS's auto-exposure, photos saved).
+> Set-up: [docs/SETUP.md](docs/SETUP.md). Licences: MIT, with the loader and kernel drivers under the Apple Public
+> Source License 2.0: [NOTICE.md](NOTICE.md).
 
 This toolkit captures how iOS 16.5 was made to boot natively on the **Samsung Galaxy S10 Lite** (SM-G770F,
 `r5q`, Snapdragon 855 / SM8150). As of Test 68 the phone runs to a usable home screen with:
