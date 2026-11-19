@@ -49,6 +49,10 @@ grep -q 'libr5q-\*' build.sh || sed -i 's|^\t\[ -f obj/libr5q-app.dylib \] \&\& 
 # /firmware, dumped into ../fw-bt -- the vendor's, never in the repository) in the root's /fw, where the kernel's
 # Bluetooth stage reads it (redwood_image_file("fw", ...)) as the GPU's firmware from ../fw-gpu
 grep -q 'fw-bt' build.sh || sed -i 's|^if \[ -d \.\./fw-gpu \]; then|if [ -d ../fw-bt ]; then mkdir -p root/fw; cp ../fw-bt/* root/fw/; fi      # (r5q: Bluetooth firmware)\n&|' build.sh
+# (2026-11-19) the camera driver's cam=5 cam_fake=1 needs a sensor table for its modes: a synthetic one (no vendor
+# data, pipeline/camfaketab.py) in ../fw-camfake, copied into the root's /fw like the Bluetooth firmware
+python3 $R5Q_PORT/pipeline/camfaketab.py $IOS_WORK/linux-source/fw-camfake >/dev/null
+grep -q 'fw-camfake' build.sh || sed -i 's|^if \[ -d \.\./fw-gpu \]; then|if [ -d ../fw-camfake ]; then mkdir -p root/fw; cp ../fw-camfake/* root/fw/; fi      # (r5q: synthetic camera table)\n&|' build.sh
 INJECT="$(printf '%s\n' '/redwood/lib/libredwood.dylib backboardd containermanagerd containermanagerd_system' '/redwood/lib/libredwood-sb.dylib SpringBoard' '/redwood/lib/libredwood-media.dylib mediaserverd' '/redwood/lib/libredwood-app.dylib Sileo' '/redwood/lib/libredwood-tweaks.dylib Preferences' "/redwood/lib/libr5q-app.dylib $APPS" "/redwood/lib/libr5q-bbd.dylib backboardd" "$EXTRA_LINE")"
 echo "inject: $(echo "$INJECT" | tr '\n' ';' | wc -c) bytes"
 env REST=1 PREBUILT=1 INJECT="$INJECT" ${GL:+GL="$GL"} ${EXTRA:+EXTRA="$EXTRA"} ${EXTRA_SHARE:+EXTRA_SHARE="$EXTRA_SHARE"} ${RC_JOBS:+RC_JOBS="$RC_JOBS"} ${RC:+RC="$RC"} ./build.sh > /tmp/userland-t$N.log 2>&1 || { tail -5 /tmp/userland-t$N.log; exit 1; }

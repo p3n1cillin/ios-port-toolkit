@@ -37,6 +37,8 @@ These files replace the donor's files of the same path in its `xnu/files/` tree 
   `bluetooth` service that MobileBluetooth looks for).
 - `bsd/dev/redwood_wifi.c` (Test 263): the Bluetooth line at 3 Mbit/s. `bsd/dev/redwood_adsp.c` (Tests 265-266):
   a polled GENI SPI probe of the WCD9340 (`mic=8`).
+- `bsd/dev/redwood_camera.c` (Tests 267-269): the donor's camera driver (the POCO X5 Pro's hardware path), here
+  refusing everything but its synthetic source (`cam=5 cam_fake=1`) on the S10 Lite, and saying why an open is refused.
 - `osfmk/arm/io_map.c` (Test 252): Apple's open-source XNU file (xnu-8796.121.2) with the I/O submap at 64 MB instead of
   8 MB, and its use logged; a full submap made `ml_io_map` wait for ever.
 

@@ -1,3 +1,4 @@
+/* Modified for the Galaxy S10 Lite (r5q) native iOS port, November 2026, from Apple's open-source XNU (xnu-8796.121.2) as the donor G986N-iOS (commit 946de0fed8e5) patches it: Apple Public Source License 2.0, see LICENSE and MODIFICATIONS.md in this directory. */
 /*
  * Copyright (c) 2007 Apple Inc. All rights reserved.
  *

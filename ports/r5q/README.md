@@ -22,11 +22,12 @@ binaries, no build outputs and no phone backups are in this repository (see [the
 | `pipeline/` | how a test is built now: the root volume, the test image, the run ([pipeline/README.md](pipeline/README.md)) |
 | `phone.py` | everything done with the phone from the PC: `cycle` (flash, restart, follow the log), `args`, `logs`, `smem`, `screenshot`, … |
 | `build_*.py`, `package_install_boot.py` | the build pipeline (kernel in a sandbox, loader, shim, BOOT image) |
+| `wifi/CAMERA-PLAN.md`, `wifi/CAMERA-FEASIBILITY.md` | the camera: how iOS 16.5 reaches it, the design, Tests 267-269 |
 | `wifi/BLUETOOTH-PLAN.md`, `wifi/BLUETOOTH-IOS-RESEARCH.md` | Bluetooth, Tests 244-262, and how iOS 16.5 reaches its controller |
 | `wifi/WIFI-PLAN.md` | everything since Test 111, step by step with what every test showed: Wi-Fi, sound, GPU, apps, sensors, CoreMotion, the compass, the microphone |
 | `SESSION.md` | the test-by-test log of the earlier stages |
 
-## State (Test 266)
+## State (Test 269)
 
 **Works:**
 
@@ -57,7 +58,9 @@ binaries, no build outputs and no phone backups are in this repository (see [the
 
 - **Microphone:** the WCD9340 codec never enumerates on SLIMbus and is silent over SPI too (Tests 265-266). What is ruled out is in WIFI-PLAN, "Tests 237-240" and after.
 - **Metal:** there is no GPU driver for iOS, so the map in Maps and live wallpapers are missing.
-- **Radios and camera:** camera, cellular; Bluetooth audio.
+- **Camera:** iOS's capture path works end to end with a synthetic picture (`cam=5 cam_fake=1`: Camera.app shows
+  the kernel's colour chart; wifi/CAMERA-PLAN.md). The phone's own sensors are not driven yet.
+- **Radios:** cellular; Bluetooth audio.
 - **FairPlay:** App Store apps won't run; this needs Apple's FairPlay kernel extension.
 
 Setting up a machine to build and run it: [docs/SETUP.md](../../docs/SETUP.md). Licences: the loader and the kernel
