@@ -41,6 +41,13 @@ These files replace the donor's files of the same path in its `xnu/files/` tree 
   refusing everything but its synthetic source (`cam=5 cam_fake=1`) on the S10 Lite, and saying why an open is refused.
 - `bsd/dev/redwood_sec_ts.c` (Tests 270-274): the camera regulators (two S2MPB03) read, and one camera sensor powered
   (S2MPB03 LDOs, L14, the camera power domain, MCLK, reset), its ID read over bit-banged I2C, all put back.
+- `bsd/dev/redwood_sec_ts.c` (Tests 275-323): the S5K3L6's receive path (CSI-PHY, CSID, IFE-lite into the loader's
+  camera block through the SMMU), `redwood_r5q_cam_run()` handing frames to `/dev/redwood-camera`, a persistent
+  pipeline (the camera stays up between iOS's sessions), timestamped per-step logging, and soak/hold test modes.
+- `bsd/dev/redwood_camera.c` (Tests 290-299): `cam_r5q=1` serving the S10 Lite's sensor for every camera iOS asks for
+  (mode 1028x772 kept on switches), and reads in flight counted so a session's end never frees the ring under them.
+- `bsd/dev/redwood_wifi.c` (Tests 276-305): `redwood_r5q_rpmh_level()` (an RPMh rail to a level) and
+  `redwood_r5q_rpmh_bcm()` (a bus clock manager's bandwidth vote, as Linux's bcm-voter) for others in the kernel.
 - `osfmk/arm/io_map.c` (Test 252): Apple's open-source XNU file (xnu-8796.121.2) with the I/O submap at 64 MB instead of
   8 MB, and its use logged; a full submap made `ml_io_map` wait for ever.
 

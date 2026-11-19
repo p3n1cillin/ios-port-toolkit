@@ -1,10 +1,10 @@
 # Native iOS porting toolkit (Android phones: Qualcomm first, MediaTek and Exynos/Tensor started)
 
 > **This repository** also carries the S10 Lite port's own working tree in [ports/r5q](ports/r5q/README.md)
-> (loader, kernel drivers, build pipeline, phone tool, iOS-side libraries and test tools, notes; up to Test 269:
+> (loader, kernel drivers, build pipeline, phone tool, iOS-side libraries and test tools, notes; up to Test 323:
 > Wi-Fi, sound, sensors with rotation, auto-brightness and CoreMotion device motion, Bluetooth under iOS's own
-> bluetoothd). Set-up: [docs/SETUP.md](docs/SETUP.md). Licences: MIT, with the loader and kernel drivers under the
-> Apple Public Source License 2.0: [NOTICE.md](NOTICE.md).
+> bluetoothd, and the phone's own rear camera streaming into iOS's Camera app). Set-up: [docs/SETUP.md](docs/SETUP.md).
+> Licences: MIT, with the loader and kernel drivers under the Apple Public Source License 2.0: [NOTICE.md](NOTICE.md).
 
 This toolkit captures how iOS 16.5 was made to boot natively on the **Samsung Galaxy S10 Lite** (SM-G770F,
 `r5q`, Snapdragon 855 / SM8150). As of Test 68 the phone runs to a usable home screen with:
@@ -338,6 +338,21 @@ bluetoothd runs **unpatched**, with:
 
 On the S10 Lite this gives LE scanning, classic discovery and a working Settings > Bluetooth. Details, including
 each failure on the way: [docs/BLUETOOTH.md](docs/BLUETOOTH.md).
+
+### 12. Camera: a CAMSS sensor into Camera.app
+
+First prove the iOS side with no sensor at all: a synthetic chart through `/dev/redwood-camera` and a camera vendor
+inside mediaserverd. Then bring up the real path one step per test, logging after each step:
+
+1. the rails and camcc;
+2. the sensor's power, MCLK and ID;
+3. its tables and exposure;
+4. CSI-PHY and CSID (count packets and errors);
+5. IFE-lite into a buffer below 4 GB through one SMMU stream match;
+6. a ping-pong session that hands frames to iOS.
+
+On the S10 Lite the S5K3L6's frames reach iOS this way. The recipe and the lessons that each cost a hang (slow AHB
+on TCXO, never voting a rail to 0 that the boot raised): [docs/CAMERA.md](docs/CAMERA.md).
 
 ## What to gather for a new phone, in this order
 

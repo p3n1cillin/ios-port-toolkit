@@ -92,6 +92,7 @@ extern void loader_log_putc(char c);
 
 static uint32_t level;
 static bool broken, leaving;
+static bool r5q_real;            /* (r5q Test 290) cam_r5q=1: the S10 Lite's own S5K3L6 (see fake, below) */
 
 static int say(const char *format, ...) __printflike(1, 2);
 
@@ -1111,7 +1112,7 @@ ctab_load(void)
 {
 	const uint8_t *at, *end;
 
-	ctab = (const struct ctab_head *)redwood_wifi_file(hw->tab, &ctab_size);
+	ctab = (const struct ctab_head *)redwood_wifi_file(r5q_real ? "camera-s5k3l6.tab" : hw->tab, &ctab_size);
 	if (ctab == NULL || ctab_size < sizeof(*ctab) || memcmp(ctab->magic, "RWCTAB02", 8) != 0 || ctab->modes == 0 ||
 	    ctab->modes > 16) {
 		say("camera: no %s (RWCTAB02) in fw/ of the small image (made from fw-camera/ when it is built)\n", hw->tab);
@@ -3364,9 +3365,29 @@ exposure_write(uint32_t lines, uint32_t gain, uint32_t frame_lines)
 	return true;
 }
 
+/*
+ * (r5q Test 299) Reads copying out of the ring right now. camdev_read() takes a place under ios_lock, then copies up to
+ * a frame out of the ring with the lock dropped; a session ending meanwhile (a switch, a close, nobody reading) freed
+ * the ring under that copy -- a read of freed, unmapped kernel memory. ring_free() now waits for them (callers never
+ * hold ios_lock).
+ */
+static int ring_readers;
+
 static void
 ring_free(void)
 {
+	lck_mtx_lock(&ios_lock);
+	for (int waits = 0; ring_readers > 0 && waits < 500; waits++) {         /* (at most 5 s: a copy takes < 1 ms) */
+		struct timespec ts = { 0, 10 * NSEC_PER_MSEC };
+
+		(void)msleep(&ring_readers, &ios_lock, PZERO, "redwood-camera-ring", &ts);
+	}
+	if (ring_readers > 0) {
+		say("camera: %d reads still copying out of the ring after 5 s: the ring is kept, not freed\n", ring_readers);
+		lck_mtx_unlock(&ios_lock);
+		return;
+	}
+	lck_mtx_unlock(&ios_lock);
 	if (page_tables != 0) {
 		kmem_free(kernel_map, page_tables, ring_tables_bytes);
 		page_tables = 0;
@@ -3632,6 +3653,13 @@ ios_session(void)
  * picture to show. cam_fake_fps: frames a second (default 5: QEMU's processor is slow).
  */
 static bool fake;
+/*
+ * (r5q Test 290, boot-arg cam_r5q=1 with cam=5) The S10 Lite's own camera behind /dev/redwood-camera: the S5K3L6
+ * (1028x772 RAW10, GRBG, SMIA registers -- the same kinds as this file's "wide" entry), driven by
+ * redwood_sec_ts.c's redwood_r5q_cam_run() (Tests 270-289), whichever sensor iOS asks for. Its table:
+ * fw/camera-s5k3l6.tab (pipeline/camsensor_v14.py, made locally from the phone's own module file).
+ */
+extern bool redwood_r5q_cam_run(bool (*cb)(const uint8_t *frame, uint32_t bytes, void *ctx), void *ctx);
 
 /* the bars' linear reflectance, R, G, B in thousandths */
 static const uint16_t fake_bars[8][3] = {
@@ -3774,6 +3802,84 @@ fake_session(void)
 	    "another sensor asked for" : "nobody reads", ios_frames_done, ios_given);
 }
 
+/*
+ * (r5q Test 290) A session from the S10 Lite's S5K3L6: redwood_r5q_cam_run() hands each frame received (1296-byte
+ * lines, as RAW10_STRIDE(1028)) to r5q_frame(), which copies it into a free place of the ring as fake_session() fills
+ * one, until iOS closes, asks for another camera, or stops reading.
+ */
+static bool
+r5q_frame(const uint8_t *frame, uint32_t bytes, __unused void *ctx)
+{
+	int p = -1;
+	uint32_t want = RAW10_STRIDE(ios_mode->width) * ios_mode->height;
+
+	lck_mtx_lock(&ios_lock);
+	if (!ios_open || ios_switch_to != 0 || ios_ms() - ios_last_read > IDLE_MS) {
+		lck_mtx_unlock(&ios_lock);
+		return false;
+	}
+	for (int i = 0; i < RING; i++) {
+		if (place[i].state != PLACE_READING && (p < 0 || place[i].sequence < place[p].sequence)) {
+			p = i;
+		}
+	}
+	if (p >= 0) {
+		place[p].state = PLACE_WRITING;
+	}
+	lck_mtx_unlock(&ios_lock);
+	if (p < 0) {
+		ios_writes_late++;
+		return true;
+	}
+	memcpy((void *)(ring + (uint64_t)p * ring_place_bytes), frame, bytes < want ? bytes : want);
+	lck_mtx_lock(&ios_lock);
+	ios_streaming = true;
+	place[p].state = PLACE_READY;
+	place[p].sequence = ++ios_frames_done;
+	place[p].time = mach_absolute_time();
+	place[p].exposure_lines = ios_now.lines;
+	place[p].gain = ios_now.gain;
+	place[p].frame_lines = ios_now.frame_lines;
+	lck_mtx_unlock(&ios_lock);
+	wakeup(&ios_frames_done);
+	return true;
+}
+
+static void
+r5q_session(void)
+{
+	ios_frames_done = ios_given = ios_writes_late = 0;
+	if (!ring_alloc(RAW10_STRIDE(ios_mode->width) * ios_mode->height)) {
+		return;
+	}
+	lck_mtx_lock(&ios_lock);
+	for (int i = 0; i < RING; i++) {
+		place[i].state = PLACE_FREE;
+		place[i].sequence = 0;
+	}
+	ios_now.lines = 768;
+	ios_now.gain = 0x100;
+	ios_now.frame_lines = 3268;
+	ios_ask.pending = false;
+	ios_streaming = false;          /* (true at the first frame: until then a read waits 15 s, not 3: the bring-up takes seconds) */
+	ios_last_read = ios_ms();
+	lck_mtx_unlock(&ios_lock);
+	say("camera: the frames for iOS: the S5K3L6's own, %ux%u (GRBG)\n", ios_mode->width, ios_mode->height);
+	if (!redwood_r5q_cam_run(r5q_frame, NULL)) {
+		say("camera: the S5K3L6's session did not start\n");
+	}
+	lck_mtx_lock(&ios_lock);
+	ios_streaming = false;
+	for (int i = 0; i < RING; i++) {
+		place[i].state = PLACE_FREE;
+	}
+	lck_mtx_unlock(&ios_lock);
+	wakeup(&ios_frames_done);
+	ring_free();
+	say("camera: the S5K3L6's frames for iOS stopped (%s): %llu done, %llu given\n", !ios_open ? "closed" : ios_switch_to != 0 ?
+	    "another sensor asked for" : "nobody reads", ios_frames_done, ios_given);
+}
+
 static const char *
 ios_res(void)
 {
@@ -3857,6 +3963,11 @@ camdev_read(__unused dev_t dev, struct uio *uio, __unused int ioflag)
 	}
 	place[b].state = PLACE_READING;
 	ios_given = place[b].sequence;
+	vm_offset_t ring_now = ring;    /* (Test 299) the ring as it is now: ring_free() waits for this read */
+	uint64_t place_bytes_now = ring_place_bytes;
+	uint32_t frame_bytes_now = ring_frame_bytes;
+
+	ring_readers++;
 	bzero(&f, sizeof(f));
 	memcpy(f.magic, REDWOOD_CAMERA_MAGIC, 8);
 	f.header_bytes = sizeof(f);
@@ -3882,9 +3993,9 @@ camdev_read(__unused dev_t dev, struct uio *uio, __unused int ioflag)
 	lck_mtx_unlock(&ios_lock);
 
 	error = uiomove((caddr_t)&f, (int)MIN(sizeof(f), (size_t)uio_resid(uio)), uio);
-	if (error == 0 && uio_resid(uio) > 0) {
-		vm_offset_t at = ring + (uint64_t)b * ring_place_bytes;
-		uint32_t n = (uint32_t)MIN((uint64_t)ring_frame_bytes, (uint64_t)uio_resid(uio));
+	if (error == 0 && uio_resid(uio) > 0 && ring_now != 0) {
+		vm_offset_t at = ring_now + (uint64_t)b * place_bytes_now;
+		uint32_t n = (uint32_t)MIN((uint64_t)frame_bytes_now, (uint64_t)uio_resid(uio));
 
 		uint64_t t0 = mach_absolute_time(), t1, t2;
 
@@ -3910,6 +4021,9 @@ camdev_read(__unused dev_t dev, struct uio *uio, __unused int ioflag)
 		place[b].state = PLACE_READY;
 	}
 	ios_last_read = ios_ms();
+	if (--ring_readers == 0) {
+		wakeup(&ring_readers);
+	}
 	lck_mtx_unlock(&ios_lock);
 	return error;
 }
@@ -4023,11 +4137,19 @@ static bool
 ios_select(unsigned index, uint32_t mode_n)
 {
 	select_sensor(index);
-	if (!fake) {
+	if (!fake && !r5q_real) {       /* (r5q Test 290: the POCO's pins, never mapped here: a data abort at 0x15000) */
 		find_pins();
 	}
 	if (!ctab_load()) {
 		return false;
+	}
+	if (r5q_real && ctab->modes > 2) {
+		/*
+		 * (r5q Test 290) Every select -- the first one and iOS's camera switches, which pass the switch's own
+		 * mode (4000x3000 picked for the front camera) -- gets the S5K3L6's 1028x772: the only mode
+		 * redwood_r5q_cam_run() streams, and two of its frames fit the loader's 4 MB camera block.
+		 */
+		mode_n = 2;
 	}
 	if (mode_n >= ctab->modes) {
 		uint64_t best = 0;
@@ -4084,6 +4206,9 @@ serve_ios(void)
 		return;
 	}
 	(void)PE_parse_boot_argn("cam_mode", &mode_n, sizeof(mode_n));
+	if (r5q_real && mode_n == ~0u) {
+		mode_n = 2;             /* (Test 290) the S5K3L6's 1028x772: one frame fits the loader's camera block twice */
+	}
 	if (!ios_select(hw_index, mode_n)) {
 		return;
 	}
@@ -4110,7 +4235,9 @@ serve_ios(void)
 		lck_mtx_lock(&ios_lock);
 		ios_wanted = false;
 		lck_mtx_unlock(&ios_lock);
-		if (fake) {
+		if (r5q_real) {
+			r5q_session();
+		} else if (fake) {
 			fake_session();
 		} else {
 			ios_session();
@@ -4184,8 +4311,9 @@ camera_thread(__unused void *parameter, __unused wait_result_t result)
 			}
 		}
 	}
-	if (fake) {
-		say("camera: cam=5 cam_fake=1: the %s camera's frames for iOS are a chart made here; nothing of the phone is touched\n",
+	if (fake || r5q_real) {
+		say(r5q_real ? "camera: cam=5 cam_r5q=1: the S10 Lite's S5K3L6 for every camera iOS asks for (%s's place)\n" :
+		    "camera: cam=5 cam_fake=1: the %s camera's frames for iOS are a chart made here; nothing of the phone is touched\n",
 		    hw->name);
 		serve_ios();
 		say("camera: done\n");
@@ -4249,7 +4377,11 @@ redwood_camera_init(void)
 		 */
 		extern bool redwood_platform_is(const char *name);
 
-		if (redwood_platform_is("r5q") && !fake) {
+		uint32_t r5q_n = 0;
+
+		r5q_real = redwood_platform_is("r5q") && level == 5 && !fake &&
+		    PE_parse_boot_argn("cam_r5q", &r5q_n, sizeof(r5q_n)) && r5q_n != 0;
+		if (redwood_platform_is("r5q") && !fake && !r5q_real) {
 			printf("camera: cam=%u refused on the S10 Lite: only cam=5 cam_fake=1 (the hardware path is the POCO X5 Pro's)\n",
 			    level);
 			level = 0;

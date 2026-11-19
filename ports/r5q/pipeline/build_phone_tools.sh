@@ -40,4 +40,5 @@ build r5q_sysctl  r5q_sysctl.c
 build r5q_reboot  r5q_reboot.c
 build magrec      magrec.c
 build sym_probe   sym_probe.c
+build klog        klog.c
 echo "phone tools in $OUT"

@@ -6322,6 +6322,76 @@ redwood_r5q_rpmh_level(const char *id, unsigned vlvl)
 	return -1;
 }
 
+/*
+ * (r5q Test 305, the camera) A bus clock manager (BCM) of cmd-db voted for bandwidth, as Linux's qcom bcm-voter does:
+ * the entry's aux data is { le32 unit; le16 width; u8 vcd; u8 reserved }; the vote is AB (x, bits 27:14) and IB
+ * (y, bits 13:0) in that unit, 14 bits each, with "valid" (bit 29) and "commit" (bit 30). `mask` != 0 makes it an
+ * enable-mask BCM's vote (ACV): y = mask, x = 0. avg/peak in kB/s; 0, 0 gives the vote back. Returns the command
+ * written, or 0.
+ */
+uint32_t
+redwood_r5q_rpmh_bcm(const char *id, uint64_t avg_kbps, uint64_t peak_kbps, uint32_t mask)
+{
+	static const volatile uint8_t *db;
+	static vm_offset_t tcs;
+	char want[8];
+
+	if (db == NULL) {
+		db = (const volatile uint8_t *)ml_io_map_unmappable(R5Q_CMD_DB_PHYS, R5Q_CMD_DB_SIZE, VM_WIMG_WCOMB);
+	}
+	if (tcs == 0) {
+		tcs = ml_io_map(R5Q_RSC_TCS_PHYS, R5Q_RSC_TCS_SIZE);
+	}
+	if (db == NULL || tcs == 0 || db[4] != 0xdb || db[5] != 0x30 || db[6] != 0x03 || db[7] != 0x0c) {
+		return 0;
+	}
+	bzero(want, sizeof(want));
+	for (int i = 0; i < 8 && id[i]; i++) {
+		want[i] = id[i];
+	}
+	for (int s = 0; s < 8; s++) {
+		const volatile uint8_t *h = db + 8 + 16 * s;
+		uint32_t hoff = (uint32_t)(h[2] | h[3] << 8), doff = (uint32_t)(h[4] | h[5] << 8), cnt = (uint32_t)(h[6] | h[7] << 8);
+
+		for (uint32_t i = 0; i < cnt && 144 + hoff + 24 * (i + 1) <= R5Q_CMD_DB_SIZE; i++) {
+			const volatile uint8_t *e = db + 144 + hoff + 24 * i;
+			bool same = true;
+			uint32_t addr, len, off, unit = 0, width = 0, cmd;
+			uint64_t x = 0, y = 0;
+
+			for (int k = 0; k < 8 && same; k++) {
+				same = e[k] == (uint8_t)want[k];
+			}
+			if (!same) {
+				continue;
+			}
+			addr = (uint32_t)(e[16] | e[17] << 8 | e[18] << 16 | (uint32_t)e[19] << 24);
+			len = (uint32_t)(e[20] | e[21] << 8);
+			off = (uint32_t)(e[22] | e[23] << 8);
+			if (len >= 6 && 144 + doff + off + 6 <= R5Q_CMD_DB_SIZE) {
+				const volatile uint8_t *a = db + 144 + doff + off;
+
+				unit = (uint32_t)(a[0] | a[1] << 8 | a[2] << 16 | (uint32_t)a[3] << 24);
+				width = (uint32_t)(a[4] | a[5] << 8);
+			}
+			if (mask != 0) {
+				y = mask;
+			} else if (unit != 0 && (avg_kbps != 0 || peak_kbps != 0)) {
+				/* Linux: y = peak * 1000 / unit; x = avg * 1000 * width / (unit * buswidth) -- buswidth taken as width */
+				y = (peak_kbps * 1000 + unit - 1) / unit;
+				x = (avg_kbps * 1000 + unit - 1) / unit;
+				y = y == 0 ? 1 : y > 0x3fff ? 0x3fff : y;
+				x = x > 0x3fff ? 0x3fff : x;
+			}
+			cmd = (1u << 30) | (1u << 29) | ((uint32_t)x << 14) | (uint32_t)y;
+			printf("rpmh: BCM %s at %#x (unit %u, width %u): AB %llu, IB %llu -> %#x\n", id, addr, unit, width, x, y, cmd);
+			return rsc_write(tcs, &addr, &cmd, 1) ? cmd : 0;
+		}
+	}
+	printf("rpmh: BCM %s is not in cmd-db\n", id);
+	return 0;
+}
+
 static bool
 rsc_write_one(vm_offset_t tcs_base, const uint32_t *addr, const uint32_t *data, unsigned n)
 {

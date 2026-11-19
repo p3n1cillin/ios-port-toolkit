@@ -49,6 +49,7 @@
  * include/linux/regulator/s2dos05.h (its SM8250 kernels).
  */
 #include <kern/clock.h>
+#include <kern/cpu_number.h>          /* (Test 312) the processor in every camera line */
 #include <kern/locks.h>
 #include <kern/thread.h>
 #include <libkern/libkern.h>
@@ -1562,27 +1563,50 @@ campmic_peek(void)
  */
 extern void loader_log_putc(char c);
 
+static bool rxlog_fast;         /* (Test 290) no pause after the step lines: a session for iOS waits on them */
 static void rxlog(const char *format, ...) __printflike(1, 2);
 
 static void
 rxlog(const char *format, ...)
 {
-	char line[320];
+	char line[360];
 	va_list list;
+	uint64_t now_ns = 0;
+	int at;
 
+	/* (Test 312) every camera line stamped: microseconds since boot and the processor, to time a hang to its step */
+	absolutetime_to_nanoseconds(mach_absolute_time(), &now_ns);
+	at = snprintf(line, sizeof(line), "[%llu.%06llu c%d] ", now_ns / 1000000000ull, (now_ns / 1000ull) % 1000000ull,
+	    cpu_number());
 	va_start(list, format);
-	vsnprintf(line, sizeof(line), format, list);
+	vsnprintf(line + at, sizeof(line) - at, format, list);
 	va_end(list);
 	for (const char *c = line; *c != 0; c++) {
 		loader_log_putc(*c);
 	}
 	printf("%s", line);
-	if (strncmp(line, "camera rx: step", 15) == 0) {
+	/*
+	 * (Test 300, cam_steplog_ms=N) every camera line followed by N ms: the PC fetches the log every ~2 s, and a hang that
+	 * stops the whole phone (the loader's USB core too) loses whatever was not fetched yet
+	 */
+	static uint32_t steplog_ms = ~0u;
+
+	if (steplog_ms == ~0u && !PE_parse_boot_argn("cam_steplog_ms", &steplog_ms, sizeof(steplog_ms))) {
+		steplog_ms = 0;
+	}
+	if (steplog_ms != 0 && steplog_ms != ~0u) {
+		delay_for_interval(steplog_ms, NSEC_PER_MSEC);
+		return;
+	}
+	if (strncmp(line + at, "camera rx: step", 15) == 0 && !rxlog_fast) {
 		delay_for_interval(300, NSEC_PER_MSEC);         /* (Test 278: the line out first; 300 ms again in Test 284, the probe in its own thread) */
 	}
 }
 
 static bool camsensor_on, camsensor_done, camrx_on;
+/* (Test 290) a session for the camera driver (redwood_camera.c): each done frame handed over, until it says stop */
+static bool (*rx_session_cb)(const uint8_t *frame, uint32_t bytes, void *ctx);
+static void *rx_session_ctx;
 static uint32_t camrx_level;    /* (Test 278) how far cam_rx_up() goes: 1 rails/GCC/PLL0, 2 RCGs/branches, 3 CPAS, 4 CSI-PHY, 5 CSID */
 extern bool redwood_r5q_rpmh_enable(const char *id);
 extern bool redwood_spmi_peek(uint16_t id, uint8_t reg, uint8_t *bytes, uint32_t count);
@@ -1662,6 +1686,14 @@ cam_table(const uint8_t *tab, uint64_t size, const char *want)
 extern int redwood_r5q_rpmh_level(const char *id, unsigned vlvl);
 static vm_offset_t rx_cc, rx_gcc, rx_phy, rx_csid, rx_cpas;
 static bool rx_pll_ours;
+/*
+ * (Test 317) The apps SMMU's lock (redwood_wifi.c), shared with Wi-Fi, the sound and the donor camera code. Wi-Fi writes
+ * TLBIASID + TLBSYNC to the apps SMMU whenever it maps memory for the radio; a TLB sync goes to every TBU, the camera's
+ * too. Tests 311-316 hung at the camera's power and SMMU transitions with Wi-Fi joined; the one run that survived (313,
+ * t295) had no Wi-Fi. The camera takes this lock around its GDSC power-up and collapse, the memory stage's bring-up
+ * (camera NoC, AXI, the SMMU match) and its teardown, so none of them overlaps a TLB sync.
+ */
+extern lck_mtx_t redwood_smmu_lock;
 static uint32_t rx_reached;      /* (Test 278) the last stage cam_rx_up() finished: cam_rx_down() undoes only those */
 
 #define CC(o)   (*(volatile uint32_t *)(rx_cc + (o)))
@@ -1702,6 +1734,9 @@ cam_rx_up(void)
 	/* (Test 285) Tests 279-284 hung ~3 s after PLL0 locked, whatever the step or thread: cam_nopll=1 keeps PLL0 off */
 	(void)PE_parse_boot_argn("cam_nopll", &nopll, sizeof(nopll));
 	(void)PE_parse_boot_argn("cam_pll600", &pll600, sizeof(pll600));
+	if (rx_session_cb != NULL) {
+		pll600 = 1;                     /* (Test 290) a session: the proven setting (Tests 287-289) */
+	}
 
 	(void)PE_parse_boot_argn("cam_settle", &settle, sizeof(settle));
 	rx_cc = ml_io_map(0x0ad00000UL, 0x10000);
@@ -1868,8 +1903,33 @@ cam_rx_up(void)
 	rx_reached = 5;
 	rxlog("camera rx: CSID RX cfg %#x %#x, RDI0 cfg %#x ctrl %#x\n", CSID(0x100), CSID(0x104), CSID(0x200), CSID(0x208));
 	if (camrx_level >= 6) {
+		/*
+		 * (Test 305) Bandwidth votes for the IFE's writes: camnoc HF -> MM1, mnoc -> MM0 (MM2 the SF side), LLCC SH0,
+		 * DDR MC0, as Linux's camera votes through the interconnect. Test 304 held the receive side alone (no memory
+		 * writes) 150 s without a hang; every session that wrote memory for long enough hung the whole phone. Kept
+		 * once cast: this voter may hold the boot's display votes on the same BCMs (never voted back to 0).
+		 */
+		static bool bw_voted;
+		extern uint32_t redwood_r5q_rpmh_bcm(const char *id, uint64_t avg_kbps, uint64_t peak_kbps, uint32_t mask);
+
+		uint32_t bw_on = 0;
+
+		/*
+		 * (Test 311) Opt-in (cam_bw=1): with the votes cast right before the IFE's first writes, every unpaced session
+		 * soak on kernel t305 died at its start (Tests 306, 309, 310), and the votes had fixed nothing (Test 305).
+		 */
+		(void)PE_parse_boot_argn("cam_bw", &bw_on, sizeof(bw_on));
+		if (!bw_voted && bw_on != 0) {
+			uint32_t mm0 = redwood_r5q_rpmh_bcm("MM0", 500000, 2000000, 0), mm1 = redwood_r5q_rpmh_bcm("MM1", 500000, 2000000, 0);
+			uint32_t mm2 = redwood_r5q_rpmh_bcm("MM2", 500000, 2000000, 0), sh0 = redwood_r5q_rpmh_bcm("SH0", 500000, 2000000, 0);
+			uint32_t mc0 = redwood_r5q_rpmh_bcm("MC0", 500000, 2000000, 0);
+
+			rxlog("camera rx: bandwidth votes: MM0 %#x MM1 %#x MM2 %#x SH0 %#x MC0 %#x (kept)\n", mm0, mm1, mm2, sh0, mc0);
+			bw_voted = mm0 != 0 && mm1 != 0 && sh0 != 0 && mc0 != 0;
+		}
 		/* (Test 288) the camera NoC (camnoc_axi: PLL0 even 300 / 2 = 150 MHz with cam_pll600) for the IFE's writes */
-		rxlog("camera rx: step: camera NoC\n");
+		lck_mtx_lock(&redwood_smmu_lock);         /* (Test 317) */
+		rxlog("camera rx: step: camera NoC (SMMU lock taken)\n");
 		CC(0xc170 + 4) = (CC(0xc170 + 4) & ~0x371fu) | (nopll ? 0x001u : pll600 ? 0x203u : 0x207u);
 		CC(0xc170) |= 1;
 		(void)rx_wait((volatile uint32_t *)(rx_cc + 0xc170), 1, 0, 500);
@@ -1879,6 +1939,7 @@ cam_rx_up(void)
 		if (cam_rx_memory_up()) {
 			rx_reached = 6;
 		}
+		lck_mtx_unlock(&redwood_smmu_lock);
 	}
 	return true;
 }
@@ -1899,6 +1960,12 @@ static volatile uint8_t *rx_buf;
 static uint64_t rx_buf_pa;
 static uint32_t rx_buf_size;
 static uint32_t rx_smr = ~0u, rx_s2cr_was;
+/*
+ * (Test 301) The SMMU match is put in once and kept for later sessions. Taking it away while the IFE could still write
+ * (its write master's "off" waits for a frame start, which a stopped sensor never sends) let a later write go out as
+ * an unmatched stream: Test 300 hung in the teardown, 36 s after the match was gone with the IFE still armed.
+ */
+static uint32_t rx_smr_kept = ~0u;
 static bool rx_frame_done;
 
 #define IFE(o)  (*(volatile uint32_t *)(rx_ife + (o)))
@@ -1926,6 +1993,12 @@ cam_rx_memory_up(void)
 		rx_buf[i] = 0xa5;               /* (what the IFE writes stands out against it) */
 	}
 	/* the SMMU: SID 0x840 mask 0x620 (all the IFEs' streams) in a free SMR, the S2CR of a non-translating boot bank */
+	if (rx_smr_kept != ~0u && *(volatile uint32_t *)(rx_smmu + 0x800 + 4 * rx_smr_kept) == 0x86200840u) {
+		rx_smr = rx_smr_kept;
+		rxlog("camera rx: smmu: SMR%u %#x kept from an earlier session (S2CR %#x); buffer %#llx\n", rx_smr,
+		    *(volatile uint32_t *)(rx_smmu + 0x800 + 4 * rx_smr), *(volatile uint32_t *)(rx_smmu + 0xc00 + 4 * rx_smr), rx_buf_pa);
+		goto smr_ready;
+	}
 	idr0 = *(volatile uint32_t *)(rx_smmu + 0x20);
 	idr1 = *(volatile uint32_t *)(rx_smmu + 0x24);
 	n = idr0 & 0xff;
@@ -1964,6 +2037,8 @@ cam_rx_memory_up(void)
 	rxlog("camera rx: smmu: SMR%u %#x, S2CR %#x (as SMR%u's); buffer %#llx (64 KB, 0xa5)\n", free_smr,
 	    *(volatile uint32_t *)(rx_smmu + 0x800 + 4 * free_smr), *(volatile uint32_t *)(rx_smmu + 0xc00 + 4 * free_smr), share,
 	    rx_buf_pa);
+	rx_smr_kept = rx_smr;
+smr_ready:
 	/* the CSID's RDI0 again: PLAIN16_10 with a 1024 x 16 crop (its path is halted and set up anew); camrx=7 keeps RAW10 */
 	CSID(0x208) = 2;
 	if (camrx_level < 7) {
@@ -2027,10 +2102,23 @@ cam_rx_memory_down(void)
 	}
 	delay_for_interval(20, NSEC_PER_MSEC);          /* (more than a frame at 120 a second, before the match goes) */
 	if (rx_smmu != 0 && rx_smr != ~0u) {
-		*(volatile uint32_t *)(rx_smmu + 0x800 + 4 * rx_smr) = 0;
-		*(volatile uint32_t *)(rx_smmu + 0xc00 + 4 * rx_smr) = rx_s2cr_was;
-		__asm__ volatile ("dsb sy" ::: "memory");
-		rxlog("camera rx: smmu: SMR%u taken away; global fault status %#x\n", rx_smr, *(volatile uint32_t *)(rx_smmu + 0x48));
+		uint32_t keep = 0;
+
+		/*
+		 * (Test 315) Keeping the match (Test 301) is opt-in again (cam_smrkeep=1): Test 314 hung bringing its second
+		 * session up with the match kept through the GDSC's collapse and power-up; t295 (taking it away) did not.
+		 */
+		(void)PE_parse_boot_argn("cam_smrkeep", &keep, sizeof(keep));
+		if (keep != 0) {
+			rxlog("camera rx: smmu: SMR%u kept; global fault status %#x\n", rx_smr, *(volatile uint32_t *)(rx_smmu + 0x48));
+		} else {
+			*(volatile uint32_t *)(rx_smmu + 0x800 + 4 * rx_smr) = 0;
+			*(volatile uint32_t *)(rx_smmu + 0xc00 + 4 * rx_smr) = rx_s2cr_was;
+			__asm__ volatile ("dsb sy" ::: "memory");
+			rx_smr_kept = ~0u;
+			rxlog("camera rx: smmu: SMR%u taken away; global fault status %#x\n", rx_smr,
+			    *(volatile uint32_t *)(rx_smmu + 0x48));
+		}
 		rx_smr = ~0u;
 	}
 	if (rx_buf != NULL && rx_buf_size > 0x10000) {
@@ -2114,25 +2202,33 @@ cam_rx_down(void)
 {
 	static const uint32_t branches[] = { 0xc01c, 0xc040, 0xc038, 0x6064, 0x6068, 0xc18c, 0xc168 };
 
+	lck_mtx_lock(&redwood_smmu_lock);         /* (Test 317) the teardown apart from any TLB sync */
+	/* (Test 312) a line before every block of the teardown: a hang names its block */
 	if (rx_reached >= 6 || rx_smr != ~0u) {      /* (also when the memory stage stopped after its match) */
+		rxlog("camera rx: down 1: memory stage (WM0, SMMU match)\n");
 		cam_rx_memory_down();           /* (Test 288) the write master off and the SMMU match away first */
+		rxlog("camera rx: down 2: camnoc branch 0xc18c %#x off\n", CC(0xc18c));
 		CC(0xc18c) &= ~1u;
 	}
 	if (rx_csid != 0 && rx_reached >= 5) {
+		rxlog("camera rx: down 3: CSID (RX %#x, RDI0 %#x)\n", CSID(0x100), CSID(0x200));
 		CSID(0x034) = 0;
 		CSID(0x208) = (CSID(0x208) & ~3u) | 2;
 		CSID(0x200) &= ~(1u << 31);
 		CSID(0x100) = 0;
 	}
 	if (rx_phy != 0 && rx_reached >= 4) {
+		rxlog("camera rx: down 4: CSI-PHY (lanes %#x)\n", PHY(0x814));
 		PHY(0x814) = 0; PHY(0x818) = 0; PHY(0x81c) = 0;
 		PHY(0x800) = 1; spin_us(1000); PHY(0x800) = 0;
 	}
 	if (rx_cc != 0) {
 		for (unsigned i = 0; i < sizeof(branches) / sizeof(branches[0]); i++) {
+			rxlog("camera rx: down 5: camcc branch %#x (%#x) off\n", branches[i], CC(branches[i]));
 			CC(branches[i]) &= ~1u;
 		}
 		if (rx_pll_ours) {
+			rxlog("camera rx: down 6: PLL0 (mode %#x) off\n", CC(0x0));
 			CC(0x0) &= ~1u;
 			CC(0x0c) &= ~7u;
 			CC(0x38) = 0;
@@ -2141,12 +2237,18 @@ cam_rx_down(void)
 		}
 	}
 	if (rx_gcc != 0) {
+		rxlog("camera rx: down 7: GCC camera AXI (hf %#x sf %#x) off\n", *(volatile uint32_t *)(rx_gcc + 0x30),
+		    *(volatile uint32_t *)(rx_gcc + 0x34));
 		*(volatile uint32_t *)(rx_gcc + 0x30) &= ~1u;
 		*(volatile uint32_t *)(rx_gcc + 0x34) &= ~1u;
 	}
-	(void)redwood_r5q_rpmh_level("mx.lvl", 0);
-	(void)redwood_r5q_rpmh_level("mmcx.lvl", 0);
-	rxlog("camera rx: down\n");
+	/*
+	 * (Test 292) The MMCX and MX votes stay. Voting them to 0 here (Tests 287-291) replaced the boot's own vote from
+	 * this same voter: camcc lost power (Test 291's second session read every camcc register as 0), and MX at 0 is
+	 * the likely cause of Test 290's hang after its session.
+	 */
+	rxlog("camera rx: down (MMCX and MX votes kept; SMMU lock given back)\n");
+	lck_mtx_unlock(&redwood_smmu_lock);
 }
 
 /* 16-bit register address, `count` bytes */
@@ -2172,6 +2274,59 @@ bb_read16(uint16_t reg, uint8_t *bytes, unsigned count)
 	}
 	bus_stop();
 	return problem;
+}
+
+/*
+ * (Test 322) A PERSISTENT PIPELINE. Every hang of Tests 290-321 came at a power or teardown transition (a session's
+ * start or end, iOS's camera switch, the Camera app opening), while streaming itself held for minutes (148 s in Test
+ * 321; 150 s holds in 304/307/308). iOS opens, switches and closes the camera all the time, so the camera now comes up
+ * once and stays up: a session only starts and stops handing frames to iOS; the sensor keeps streaming and IFE-lite
+ * keeps writing into the camera block in between. cam_persist=0 brings back a teardown after every session.
+ */
+static bool cam_pipe_up;
+
+static uint32_t
+cam_session_frames(uint32_t *misses_out)
+{
+	/*
+	 * (Test 290) A session for iOS: two frames in the camera block taken in turn (the write master pointed at the other
+	 * one as soon as one is done; it takes the new address at the next frame's start, the 75 % blanking of the longer
+	 * frame leaves time), each done one handed to the caller, until it says stop.
+	 */
+	uint32_t frames = 0, misses = 0;
+	static uint32_t half;
+
+	rxlog("camera sensor: SESSION: frames for iOS from the S5K3L6%s\n", cam_pipe_up ? " (the pipeline was already up)" : "");
+	while (misses < 50) {
+		int i;
+
+		for (i = 0; i < 1000 && !(IFE(0x2060) & 1); i++) {
+			delay_for_interval(100, NSEC_PER_USEC);
+		}
+		if (!(IFE(0x2060) & 1)) {
+			misses++;
+			continue;
+		}
+		IFE(0x2054) = 1;
+		IFE(0x2068) = 1;
+		IFE(0x2214) = (uint32_t)(rx_buf_pa + 0x100000u * (half ^ 1));
+		IFE(0x04ac) = 0x2;
+		frames++;
+		misses = 0;
+		if (frames % 30 == 0) {
+			/* (Test 312) a line a second: the IFE's bus/top/violation status, the CSID, the SMMU */
+			rxlog("camera sensor: SESSION: %u frames; IFE bus st0 %#x st1 %#x st2 %#x top %#x/%#x violation %#x WM0 st "
+			    "%#x/%#x addr %#x; CSID pkts %u ecc %#x crc %u; SMMU gfsr %#x\n", frames, IFE(0x205c), IFE(0x2060),
+			    IFE(0x2064), IFE(0x06c), IFE(0x070), IFE(0x07c), IFE(0x2200), IFE(0x2204), IFE(0x2214), CSID(0x160),
+			    CSID(0x164), CSID(0x168), rx_smmu ? *(volatile uint32_t *)(rx_smmu + 0x48) : 0);
+		}
+		if (!rx_session_cb((const uint8_t *)(rx_buf + 0x100000u * half), 1296 * 772, rx_session_ctx)) {
+			break;
+		}
+		half ^= 1;
+	}
+	*misses_out = misses;
+	return frames;
 }
 
 static void
@@ -2204,6 +2359,30 @@ camsensor_probe(void)
 		if ((ahb & 1) == 0) {
 			rxlog("camera sensor: the camera clock controller's bus clock is not enabled: nothing done\n");
 			return;
+		}
+		/*
+		 * (Test 302) Tests 299-301 hung at a camera register access in a teardown, each time at a different one, and
+		 * every session's log showed GCC_CAMERA_XO_CBCR (0x10b044) at 0x80000000: the camera's crystal clock not
+		 * enabled -- while slow_ahb, the camera's register bus, runs from that crystal (Test 287). Linux keeps the
+		 * camera's GCC AHB and XO clocks on for good (critical clocks). Now: the XO branch enabled and the AHB branch
+		 * forced on (its hardware gating, bit 1, off), and both left so (the next session finds them on).
+		 */
+		uint32_t gccfix = 0;
+
+		/*
+		 * (Test 314) Opt-in (cam_gccfix=1). Test 313: kernel t295 (before this) ran a 150 s session, 4500 frames, no
+		 * hang; t312 (with it) hung inside its first session's frames. Forcing the camera AHB's clock on (its
+		 * hardware gating off) is the prime suspect.
+		 */
+		(void)PE_parse_boot_argn("cam_gccfix", &gccfix, sizeof(gccfix));
+		if (gccb != 0 && gccfix != 0) {
+			*(volatile uint32_t *)(gccb + 0x44) |= 1u;
+			*(volatile uint32_t *)(gccb + 0x8) = (*(volatile uint32_t *)(gccb + 0x8) & ~(1u << 1)) | 1u;
+			for (us = 0; us < 1000 && (*(volatile uint32_t *)(gccb + 0x44) & (1u << 31)); us += 10) {
+				spin_us(10);
+			}
+			rxlog("camera sensor: GCC camera XO %#x, AHB %#x (bit 31 = off; both kept on from here)\n",
+			    *(volatile uint32_t *)(gccb + 0x44), *(volatile uint32_t *)(gccb + 0x8));
 		}
 	}
 	/* vio: L14 (PM8150 slave 1, LDO14 at 0x4d00: status 0x08, enable 0x46), then the vote */
@@ -2248,15 +2427,52 @@ camsensor_probe(void)
 	(void)redwood_spmi_peek(0x14d, 0x08, &l14[0], 1);
 	(void)redwood_spmi_peek(0x14d, 0x46, &l14[1], 1);
 	rxlog("camera sensor: L14 status %#04x enable %#04x after the vote\n", l14[0], l14[1]);
+	/*
+	 * (Test 292) camcc lives on MMCX. Tests 270-290 found it powered by the boot's vote; Test 291's second session
+	 * found it dead (every camcc register 0) after the first session's teardown had voted MMCX to 0. Our own vote
+	 * now comes first, and it stays (cam_rx_down no longer lowers it).
+	 */
+	rxlog("camera sensor: rails before camcc: mmcx %d, mx %d\n", redwood_r5q_rpmh_level("mmcx.lvl", 128),
+	    redwood_r5q_rpmh_level("mx.lvl", 192));
 	camcc_c = ml_io_map(0x0ad00000UL + 0xc000, 0x1000);
 	if (camcc_c != 0) {
 		was_gdsc_clk = *(volatile uint32_t *)(camcc_c + 0x1e4);
 		was_gdscr = *(volatile uint32_t *)(camcc_c + 0x1bc);
+		lck_mtx_lock(&redwood_smmu_lock);     /* (Test 317) the GDSC's power-up apart from any TLB sync */
+		{
+			/*
+			 * (Test 318) The multimedia NoC's SMMU TBUs powered by our vote, and kept: hlos1_vote_mmnoc_mmu_tbu_hf0 /
+			 * sf / hf1 (GCC 0x17d050 / 0x17d054 / 0x17d058, live DT). The IFE's streams (0x840 mask 0x620) cross
+			 * mnoc_hf_0_tbu and mnoc_hf_1_tbu. Linux's arm-smmu powers every TBU before TLB maintenance: a TLB sync
+			 * (Wi-Fi's TLBIASID + TLBSYNC on every radio mapping) that meets a TBU in a power transition never ends.
+			 * Tests 311-317 hung with the camera powered while r5qd/Wi-Fi was busy. Bit 0 SW_COLLAPSE (0 = our vote
+			 * on), bit 31 PWR_ON.
+			 */
+			static const struct { uint32_t off; const char *name; } tbus[] = {
+				{ 0x7d050, "mnoc tbu hf0" }, { 0x7d054, "mnoc tbu sf" }, { 0x7d058, "mnoc tbu hf1" },
+			};
+			static vm_offset_t gcc_tbu;
+
+			if (gcc_tbu == 0) {
+				gcc_tbu = ml_io_map(0x0017d000UL, 0x1000);
+			}
+			for (unsigned i = 0; gcc_tbu != 0 && i < sizeof(tbus) / sizeof(tbus[0]); i++) {
+				volatile uint32_t *g = (volatile uint32_t *)(gcc_tbu + (tbus[i].off & 0xfff));
+				uint32_t before = *g;
+
+				*g = before & ~1u;
+				for (us = 0; us < 5000 && !(*g & (1u << 31)); us += 10) {
+					spin_us(10);
+				}
+				rxlog("camera sensor: %s GDSC %#x -> %#x (bit 31 = powered; our vote kept)\n", tbus[i].name, before, *g);
+			}
+		}
 		*(volatile uint32_t *)(camcc_c + 0x1e4) = was_gdsc_clk | 1;
 		*(volatile uint32_t *)(camcc_c + 0x1bc) = was_gdscr & ~1u;
 		for (us = 0; us < 10000 && !(*(volatile uint32_t *)(camcc_c + 0x1bc) & (1u << 31)); us += 10) {
 			spin_us(10);
 		}
+		lck_mtx_unlock(&redwood_smmu_lock);
 		rxlog("camera sensor: CAM_CC_GDSC_CLK %#x -> %#x; titan_top_gdsc %#x -> %#x (bit 31 = powered)\n", was_gdsc_clk,
 		    *(volatile uint32_t *)(camcc_c + 0x1e4), was_gdscr, *(volatile uint32_t *)(camcc_c + 0x1bc));
 	}
@@ -2342,10 +2558,67 @@ camsensor_probe(void)
 					(void)PE_parse_boot_argn("cam_gain", &gain, sizeof(gain));
 					rxlog("camera sensor: exposure %u lines: %s; gain %#x: %s\n", exp_lines,
 					    bb_write16(0x0202, (uint16_t)exp_lines, 2) ?: "taken", gain, bb_write16(0x0204, (uint16_t)gain, 2) ?: "taken");
+					if (rx_session_cb != NULL) {
+						/* (Test 290) about 30 frames a second: frame length 3268 lines (the mode's 817 x 4) */
+						rxlog("camera sensor: frame length 3268 lines: %s\n", bb_write16(0x0340, 3268, 2) ?: "taken");
+					}
 					/* (Test 276) the receive path before the stream starts, as Android orders it */
 					rx = camrx_on && cam_rx_up();
 
-					if (cam_table(tab, tab_size, "on")) {
+					if (rx_session_cb != NULL && rx && rx_reached >= 6 && cam_table(tab, tab_size, "on")) {
+						uint32_t frames, misses = 0, persist = 1;
+
+						/*
+						 * (Test 293) The battery's lock let go while frames flow: the loop touches only IFE-lite
+						 * registers and the caller's ring, never the PMIC bus.
+						 */
+						lck_mtx_unlock(&r5q_pmic_lock);
+						frames = cam_session_frames(&misses);
+						lck_mtx_lock(&r5q_pmic_lock);
+						(void)PE_parse_boot_argn("cam_persist", &persist, sizeof(persist));
+						if (persist != 0) {
+							/*
+							 * (Test 322) The pipeline stays up: no stream off, no teardown, no power-down. The pins stay
+							 * the bit-banged bus's and `bb` the sensor's; the next session goes straight to its frames.
+							 */
+							cam_pipe_up = true;
+							rxlog("camera sensor: SESSION ends: %u frames handed over, %u misses at the end; THE PIPELINE "
+							    "STAYS UP (sensor streaming, IFE-lite writing)\n", frames, misses);
+							return;
+						}
+						/*
+						 * (Test 301) The write master off while the sensor still streams: its "off" is taken at the
+						 * next frame start (register update), which a stopped sensor never sends. 50 ms = more than a
+						 * frame at ~30 a second.
+						 */
+						uint32_t wm0first = 0;
+
+						/* (Test 315) opt-in again (cam_wm0first=1): the t295 order (the stream's off first) ran 150 s */
+						(void)PE_parse_boot_argn("cam_wm0first", &wm0first, sizeof(wm0first));
+						if (wm0first != 0) {
+							IFE(0x2208) = 0;
+							IFE(0x04ac) = 0x2;
+							delay_for_interval(50, NSEC_PER_MSEC);
+						}
+						rxlog("camera sensor: SESSION ends: %u frames handed over, %u misses at the end\n", frames, misses);
+						(void)cam_table(tab, tab_size, "off");
+					} else if (cam_table(tab, tab_size, "on")) {
+						/*
+						 * (Test 304, cam_hold=N) streaming held for N seconds (a line a second): with camrx=5, the receive
+						 * side alone (PLL0, CSI-PHY, CSID) with no IFE, camera NoC or AXI writes
+						 */
+						uint32_t hold = 0;
+
+						(void)PE_parse_boot_argn("cam_hold", &hold, sizeof(hold));
+						for (uint32_t s = 0; s < hold; s++) {
+							delay_for_interval(1000, NSEC_PER_MSEC);
+							if (rx) {
+								char when[24];
+
+								snprintf(when, sizeof(when), "held %u s", s + 1);
+								cam_rx_show(when);
+							}
+						}
 						for (int r = 0; r < 4; r++) {
 							uint8_t fc = 0, mode = 0;
 
@@ -2375,18 +2648,26 @@ camsensor_probe(void)
 	} else {
 		rxlog("camera sensor: GPIO31/32: %s\n", problem);
 	}
+	rxlog("camera sensor: down 8: pins GPIO31/32 back (%#x %#x)\n", was31, was32);
 	wr(BB_CFG(31), was31);
 	wr(BB_CFG(32), was32);
 	/* everything back: reset low, the pin and MCLK off */
+	rxlog("camera sensor: down 9: reset GPIO22 low, back to %#x/%#x; GPIO14 back to %#x\n", was22, was22io, was14);
 	wr(east + 0x1000UL * 22 + 4, 0);
 	spin_us(1000);
 	wr(east + 0x1000UL * 22, was22);
 	wr(east + 0x1000UL * 22 + 4, was22io);
 	wr(north + 0x1000UL * 14, was14);
+	rxlog("camera sensor: down 10: MCLK1 branch (%#x) off\n", *(volatile uint32_t *)(camcc + 0x03c));
 	*(volatile uint32_t *)(camcc + 0x03c) &= ~1u;
 	if (camcc_c != 0) {                                             /* (Test 273) the power domain back as found */
+		rxlog("camera sensor: down 11: titan_top_gdsc %#x -> %#x, GDSC clock -> %#x\n",
+		    *(volatile uint32_t *)(camcc_c + 0x1bc), was_gdscr, was_gdsc_clk);
+		lck_mtx_lock(&redwood_smmu_lock);     /* (Test 317) the GDSC's collapse apart from any TLB sync */
 		*(volatile uint32_t *)(camcc_c + 0x1bc) = was_gdscr;
 		*(volatile uint32_t *)(camcc_c + 0x1e4) = was_gdsc_clk;
+		spin_us(100);
+		lck_mtx_unlock(&redwood_smmu_lock);
 		rxlog("camera sensor: titan_top_gdsc back: %#x\n", *(volatile uint32_t *)(camcc_c + 0x1bc));
 	}
 	bb = &pm;
@@ -2411,14 +2692,113 @@ pins_back:
 	bb = was;
 }
 
+/* (Test 294) cam_soak: the kernel's own reader, one line a second (every 30 frames) with the middle line's mean */
+bool redwood_r5q_cam_run(bool (*cb)(const uint8_t *frame, uint32_t bytes, void *ctx), void *ctx);
+static uint32_t soak_frames, soak_frames_max;
+
+static bool
+soak_frame(const uint8_t *frame, uint32_t bytes, __unused void *ctx)
+{
+	soak_frames++;
+	if (soak_frames % 30 == 0 && bytes >= 1296u * 400u) {
+		uint32_t sum = 0;
+
+		for (uint32_t i = 0; i < 1280; i++) {
+			if (i % 5 != 4) {
+				sum += frame[1296u * 386u + i];         /* RAW10: four high bytes, then a byte of low bits */
+			}
+		}
+		rxlog("camera soak: %u frames (%u s); middle line mean %u of 255\n", soak_frames, soak_frames / 30, sum / 1024u);
+	}
+	return soak_frames < soak_frames_max;
+}
+
 /* (Test 284) the camera probe's own thread: the battery's lock held while it runs, the touch thread left alone */
 static void
 camsensor_thread(__unused void *parameter, __unused wait_result_t result)
 {
+	uint32_t soak = 0;
+
+	/*
+	 * (Test 294, cam_soak=N) A whole session with nobody but the kernel reading: Tests 292-293 went down ~3-4 s into
+	 * the first session that lasted (iOS reading). This says whether the hardware streaming for N seconds alone does it.
+	 */
+	if (PE_parse_boot_argn("cam_soak", &soak, sizeof(soak)) && soak != 0) {
+		uint32_t first = 0;
+
+		/*
+		 * (Test 295, cam_soak_first=N) As iOS does it: a short session of N frames, taken down, then the long one.
+		 * Tests 292-293 went down in the second session; Test 294's single 20 s session did not.
+		 */
+		if (PE_parse_boot_argn("cam_soak_first", &first, sizeof(first)) && first != 0) {
+			uint32_t count = 1;
+
+			/* (Test 300, cam_soak_n=K) K short sessions first: iOS's hangs came at the third session after boot */
+			(void)PE_parse_boot_argn("cam_soak_n", &count, sizeof(count));
+			for (uint32_t s = 1; s <= count; s++) {
+				soak_frames = 0;
+				soak_frames_max = first;
+				rxlog("camera soak: short session %u of %u (%u frames)\n", s, count, first);
+				(void)redwood_r5q_cam_run(soak_frame, NULL);
+				rxlog("camera soak: short session %u over: %u frames\n", s, soak_frames);
+			}
+			soak_frames = 0;
+		}
+		soak_frames_max = soak * 30;
+		rxlog("camera soak: a session for %u s (%u frames at ~30 fps), only the kernel reading\n", soak, soak_frames_max);
+		(void)redwood_r5q_cam_run(soak_frame, NULL);
+		rxlog("camera soak: over: %u frames; the phone is still up\n", soak_frames);
+		thread_terminate(current_thread());
+	}
 	lck_mtx_lock(&r5q_pmic_lock);
 	camsensor_probe();
 	lck_mtx_unlock(&r5q_pmic_lock);
 	thread_terminate(current_thread());
+}
+
+/*
+ * (r5q Test 290) For redwood_camera.c's /dev/redwood-camera on the S10 Lite (boot-arg cam_r5q=1): the S5K3L6 powered,
+ * configured (1028x772 RAW10, about 30 frames a second), received and written into the loader's camera block, each
+ * frame handed to `cb` (the frame, 1296-byte lines, 772 of them) until it returns false; then everything put back as
+ * the probe does. Blocks for the whole session; under the battery's lock, as the probe.
+ */
+bool redwood_r5q_cam_run(bool (*cb)(const uint8_t *frame, uint32_t bytes, void *ctx), void *ctx);
+
+bool
+redwood_r5q_cam_run(bool (*cb)(const uint8_t *frame, uint32_t bytes, void *ctx), void *ctx)
+{
+	if (!redwood_platform_is("r5q") || cb == NULL) {
+		return false;
+	}
+	if (cam_pipe_up) {
+		/* (Test 322) the pipeline is up from an earlier session: straight to the frames, nothing powered or set up */
+		uint32_t frames, misses = 0;
+
+		rx_session_cb = cb;
+		rx_session_ctx = ctx;
+		frames = cam_session_frames(&misses);
+		rx_session_cb = NULL;
+		rx_session_ctx = NULL;
+		rxlog("camera sensor: SESSION ends: %u frames handed over, %u misses at the end; the pipeline stays up\n", frames,
+		    misses);
+		return true;
+	}
+	lck_mtx_lock(&r5q_pmic_lock);
+	rx_session_cb = cb;
+	rx_session_ctx = ctx;
+	rxlog_fast = true;
+	camsensor_on = true;
+	camsensor_done = false;
+	camrx_on = true;
+	camrx_level = 7;
+	rx_reached = 0;
+	rx_frame_done = false;
+	camsensor_probe();
+	rx_session_cb = NULL;
+	rx_session_ctx = NULL;
+	rxlog_fast = false;
+	lck_mtx_unlock(&r5q_pmic_lock);
+	return true;
 }
 
 static void

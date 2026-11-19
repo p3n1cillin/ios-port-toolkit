@@ -31,6 +31,10 @@ keeps it in maintenance mode instead of starting iOS (a volume key held at the s
   python phone.py restart [SECS]    the same without the flash: end the run, restart, follow the new run
   python phone.py live [SECONDS]    while iOS runs (live mode): its kernel log as it is written
   python phone.py stop              end the iOS run now (it returns to the loader as at its time limit)
+  python phone.py alive             (2026-11-19) iOS running, maintenance mode, or nothing (exit 0/1/2). Not `raw
+                                    devices`: the loader's USB answers "xnuloader fastboot" while iOS runs too
+  python phone.py wlog [FILE [SECS]] (2026-11-19) the kernel log over Wi-Fi (wifi/klog.c via r5qd) every second into
+                                    FILE, independent of USB; stops 60 s after the phone goes silent
   python phone.py screenshot [PNG]  the phone's screen
   python phone.py raw ARGS...       any fastboot command (e.g. raw oem part userdata)
   python phone.py wifi-join [--forget]  the Wi-Fi network iOS joins: asks for its name and password here, keeps only
@@ -55,8 +59,13 @@ SLOTS = {'boot-manager-0': LOG_AREA, 'boot-manager-1': LOG_AREA + 1024 * 4096,
          'early-driver-stage-a': LOG_AREA + 2048 * 4096, 'early-driver-stage-b': LOG_AREA + 3072 * 4096}
 
 
-def fb(*args, check=True):
-    r = subprocess.run([FASTBOOT, *args], capture_output=True, text=True, timeout=600)
+def fb(*args, check=True, timeout=600):
+    try:
+        r = subprocess.run([FASTBOOT, *args], capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        if check:
+            raise SystemExit(f'fastboot {" ".join(args)}: no answer in {timeout} s')
+        return f'FAIL (no answer in {timeout} s)'
     out = (r.stdout + r.stderr).strip()
     if check and r.returncode:
         raise SystemExit(f'fastboot {" ".join(args)}: {out}')
@@ -353,6 +362,11 @@ def main():
     if len(sys.argv) < 2:
         raise SystemExit(__doc__)
     cmd, rest = sys.argv[1], sys.argv[2:]
+    if cmd == 'alive':
+        alive()
+    if cmd == 'wlog':
+        wlog(rest[0] if rest else time.strftime('wlog-%Y%m%d-%H%M%S.txt'), float(rest[1]) if len(rest) > 1 else 600)
+        return
     if cmd not in ('rd', 'respring', 'sh', 'ps', 'tools', 'rescue', 'unlock', 'home', 'open'):  # (Wi-Fi, or their own way)
         wait_for_phone()
     if cmd == 'tools':
@@ -559,12 +573,26 @@ def follow_run(out, follow):
     deadline, text = time.time() + follow, ''
     tmp = out / 'live.tmp'
     time.sleep(5)
+    misses = 0
     while time.time() < deadline:
-        fb('oem', 'log', check=False)
-        if 'FAIL' not in fb('get_staged', str(tmp), check=False) and tmp.exists():
+        # (2026-11-19, Tests 306-310) short timeouts: one stuck call used to end the capture silently (600 s each), so
+        # the log stopped at ~35 s while iOS ran on for minutes; a gap is now written into the log as it happens
+        got = 'FAIL' not in fb('oem', 'log', check=False, timeout=20)
+        got = got and 'FAIL' not in fb('get_staged', str(tmp), check=False, timeout=40)
+        if not got:
+            misses += 1
+            text += f'\n== [follower: USB snapshot failed at {time.strftime("%H:%M:%S")} ({misses} in a row)] ==\n'
+            (out / 'live.txt').write_text(text, encoding='utf-8', errors='replace')
+            time.sleep(2)
+            continue
+        misses = 0
+        if tmp.exists():
             # (2026-11-19) every snapshot merged into one growing log: the ring is 2 MB and wraps in seconds once
             # userland logs, so keeping only the last snapshot lost a run's early kernel lines (Test 252)
             text = merge_log(text, tmp.read_bytes().decode(errors='replace'))
+            # (2026-11-19, Test 299) live.txt kept current, so a run can be read while it is followed (it used to be
+            # written only when the window closed; live.tmp is only the last snapshot)
+            (out / 'live.txt').write_text(text, encoding='utf-8', errors='replace')
         time.sleep(2)
     (out / 'live.txt').write_text(text, encoding='utf-8', errors='replace')
     tmp.unlink(missing_ok=True)
@@ -634,6 +662,41 @@ def r5qd(*words):
     return r5qd_client.main(list(words))
 
 
+def wlog(out_path, seconds):
+    """(2026-11-19, camera Tests 306-310) the kernel log over Wi-Fi, independent of the loader's USB: wifi/klog.c (the
+    kernel's message buffer) through r5qd every second, merged into one growing file written after every poll, with
+    the PC's time on every gap. Puts klog on the phone first. Ends after `seconds`, or when r5qd stops answering for
+    60 s (the phone gone): the file then holds the kernel's last words up to ~1 s before."""
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / 'wifi'))
+    import r5qd_client
+    out = pathlib.Path(out_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    ip = r5qd_client.IP_FILE.read_text().strip()
+    klog = pathlib.Path(__file__).resolve().parent / 'port/build/phone-tools/klog'
+    deadline, text, silent_since = time.time() + seconds, '', None
+    while time.time() < deadline:
+        try:
+            if 'klog' not in text[:0] and not getattr(wlog, 'put', False):
+                data = klog.read_bytes()
+                r5qd_client.request(ip, f'put /var/r5q/bin/klog {len(data)}', data, timeout=30)
+                wlog.put = True
+            snap = r5qd_client.request(ip, 'run /var/r5q/bin/klog 65536', timeout=15)
+            silent_since = None
+            text = merge_log(text, snap)
+        except Exception as e:      # (a dropped connection: the phone may be going down)
+            now = time.strftime('%H:%M:%S')
+            silent_since = silent_since or time.time()
+            text += f'\n== [wlog: r5qd silent at {now}: {type(e).__name__}] ==\n'
+            if time.time() - silent_since > 60:
+                out.write_text(text, encoding='utf-8', errors='replace')
+                print(f'wlog: r5qd silent for 60 s since {time.strftime("%H:%M:%S", time.localtime(silent_since))}: '
+                      f'the phone is likely gone; {out}')
+                return
+        out.write_text(text, encoding='utf-8', errors='replace')
+        time.sleep(1)
+    print(f'wlog: {out}')
+
+
 def tools():
     """every built on-phone tool into /var/r5q/bin over Wi-Fi"""
     src = pathlib.Path(__file__).resolve().parent / 'port/build/phone-tools'
@@ -677,6 +740,37 @@ def rescue():
     set_args(['std'])
     settime()
     print(fb('oem', 'continue', check=False).splitlines()[0])
+
+
+def alive():
+    """(2026-11-19, after Tests 292-295 were misread as deaths) what the phone is doing now. In live mode the loader keeps
+    serving USB on core 0 while iOS runs on core 7, so "xnuloader fastboot" answers either way; the loader's
+    `oem args show` works only in maintenance mode (FAIL while iOS runs), and r5qd answers over Wi-Fi only while iOS
+    runs. Exit 0 = iOS running, 1 = maintenance mode (no iOS), 2 = nothing answers."""
+    usb = live_ios = False
+    try:
+        r = subprocess.run([FASTBOOT, 'getvar', 'product'], capture_output=True, text=True, timeout=8)
+        usb = 'xnuloader' in r.stdout + r.stderr
+        if usb:
+            r = subprocess.run([FASTBOOT, 'oem', 'args', 'show'], capture_output=True, text=True, timeout=8)
+            live_ios = 'FAIL' in r.stdout + r.stderr
+    except subprocess.TimeoutExpired:
+        pass
+    wifi = False
+    try:
+        r = subprocess.run([sys.executable, str(pathlib.Path(__file__).resolve().parent / 'phone.py'), 'rd', 'ping'],
+                           capture_output=True, text=True, timeout=15)
+        wifi = r.returncode == 0 and 'Traceback' not in r.stderr
+    except subprocess.TimeoutExpired:
+        pass
+    if live_ios or wifi:
+        print(f'iOS RUNNING (USB live mode: {"yes" if live_ios else "no"}; r5qd over Wi-Fi: {"answers" if wifi else "silent"})')
+        sys.exit(0)
+    if usb:
+        print('MAINTENANCE MODE: the loader answers, iOS is not running')
+        sys.exit(1)
+    print('NOTHING ANSWERS: no USB (fastboot) and no r5qd over Wi-Fi')
+    sys.exit(2)
 
 
 def screenshot(dest):

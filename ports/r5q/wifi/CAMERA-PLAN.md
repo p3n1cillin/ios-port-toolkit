@@ -320,3 +320,313 @@ candidate designs).
   2. the hand-over to iOS: an r5q back end in redwood_camera.c's `/dev/redwood-camera` session (the donor's
      `ios_session`). Its frame ring goes in the 4 MB camdma block (three 1 MB places plus spare); its power, receive
      and capture steps are the ones proven here.
+- **Test 290 (kernel t290, root test275; `cam=5 cam_r5q=1`): THE S5K3L6 BEHIND /dev/redwood-camera.**
+  - New boot-arg `cam_r5q=1` (with `cam=5`): redwood_camera.c's iOS side (the one proven with the synthetic chart
+    in Test 269) serves the S10 Lite's own S5K3L6 for every camera iOS asks for. The table is
+    `fw/camera-s5k3l6.tab`; `find_pins()` (the POCO's pins) is skipped, it data-aborted at 0x15000.
+  - The session: `r5q_session()` in redwood_camera.c calls `redwood_r5q_cam_run(cb, ctx)` in redwood_sec_ts.c.
+    That runs the Test 289 bring-up (power, ID, tables, exposure, CSI-PHY, CSID, IFE-lite, SMMU) with PLL0 at
+    600 MHz, sets the frame length to 3268 lines (about 30 fps), then loops: wait for IFE bus status1 bit 0
+    (100 us polls, up to 100 ms), clear it, point WM0 at the other 1 MB half of the camdma block, register
+    update, and hand the finished half to the callback (`r5q_frame`, which copies it into the frame ring that
+    Camera.app reads). It stops when the callback says so (close, switch, nobody reading) and takes everything
+    down again.
+  - **Result:** "frame length 3268 lines: taken", "SESSION: frames for iOS from the S5K3L6", and **2 frames
+    handed to iOS**. Then Camera.app switched to the front camera. That select passed the switch's own mode
+    (`ios_switch_mode`), which picked **mode 0, 4000x3000**: too big for the 1 MB halves, and not a mode
+    `redwood_r5q_cam_run` streams. "Nobody reads: 0 done", and the phone then hung into the loader (fastboot).
+  - **Fix (Test 291):** `ios_select` forces mode 2 (1028x772) for every select when `cam_r5q` is on.
+- **Test 291 (kernel t291; `cam=5 cam_r5q=1`, mode 2 forced): the switch is fine, the second session finds camcc dead.**
+  - The first session again: sensor ID, tables, frame length 3268, CSI-PHY, CSID, IFE-lite, SMMU, **2 frames handed
+    over** (RX: 1548 packets, ECC 0, CRC 0; RDI0 992020/992020 bytes; no SMMU fault; 2,000,750 bytes written =
+    two frames in the two 1 MB halves). Still dark (mean high byte 15).
+  - Camera.app then asked for the front camera; the select now keeps **mode 2, 1028x772**.
+  - **The second session: `CAM_CC_GDSC_CLK 0 -> 0; titan_top_gdsc 0 -> 0`, MCLK RCG cfg 0, and the sensor never
+    answered.** Every camcc register read 0: camcc had no power. Cause: `cam_rx_down` voted MMCX (and MX) to 0.
+    camcc lives on MMCX, and the boot's own vote, from the same HLOS voter, is what had kept it up through
+    Tests 270-290. Our zero replaced it.
+  - The phone stayed up this time (Test 290's hang likely came from the same zero votes, MX in particular).
+  - **Fix (Test 292):** the sensor probe votes MMCX 128 / MX 192 before it touches camcc, and `cam_rx_down` keeps
+    both votes.
+  - **Lesson (for every port):** an RPMh level vote replaces this voter's earlier vote, including the boot's. Never
+    "release" a rail to 0 that you did not raise from 0 yourself.
+- **Test 292 (kernel t292; votes kept): REAL FRAMES READ BY iOS, through the camera switch.**
+  - First session (the back camera): 3 frames handed over (RX 2322 packets, ECC 0, CRC 0; no SMMU fault). The
+    teardown now leaves camcc powered (`titan_top_gdsc back: 0x7022f001`).
+  - Camera.app switched to the front camera. **The second session came up fully** ("rails before camcc: mmcx 3,
+    mx 3", GDSC powered, the sensor answered, the same tables), and **mediaserverd read real frames**:
+    `frame 2 read: 1000512 bytes ... copied in 260 us`, then `frame 2: exposure 7.8 ms, gain 1.0x, green 449 above
+    black; lux index 101, about 5351 K`, then frame 3. So the sensor saw real light this time (green 449 above
+    the black level), and iOS's own exposure/white-balance code ran on it.
+  - **Then the phone went down** (the next screenshot showed the loader; the reset overwrote the RAM ring).
+  - Likely cause: `redwood_r5q_cam_run` holds `r5q_pmic_lock` for the whole session. The touch thread takes it
+    every 5 s for the battery gauge, so it stalls for as long as the session runs, and Tests 279-283 hung whenever
+    the touch thread was held up for more than ~3 s. The first sessions were too short to show it.
+  - **Fix (Test 293):** the lock is let go for the streaming loop (which touches only IFE-lite registers and the
+    caller's ring) and taken back for the teardown. The session also logs every 300 frames.
+- **Test 293 (kernel t293; the battery lock let go while frames flow): the same end.** Session 1 (3 frames) and the
+  switch as before; session 2 up, iOS read frames 2 and 3 (green 449 above black, lux index 101), and the phone went
+  down again, about 3-4 s after the second session's PLL0 lock (timestamps around it: 08:20:10 -> the last line
+  08:20:14). No "300 frames so far" line, so it never reached 10 s. So the lock was not (the whole) cause.
+  - Re-reading Tests 276-289: Test 287 kept PLL0 on for more than 3 s (the 300 ms pauses after each step) without a
+    hang, so PLL0's time alone is not it. What is new in a session: IFE-lite writing memory continuously through the
+    camera NoC for seconds (Tests 288-289 stopped the write master after one frame), and iOS reading.
+  - **Test 294 (`camsensor=1 cam_soak=20`, no `cam=5`):** a 20 s session whose only reader is the kernel (one
+    line a second with the middle line's mean). Hangs ~3 s in: the streaming hardware path. Survives: the iOS side.
+- **Test 294 (kernel t294; `camsensor=1 cam_soak=20`, no iOS camera): THE HARDWARE STREAMS FOR 20 s.** One session,
+  read only by the kernel: **600 frames, 0 misses; RX 464,400 packets, ECC 0, CRC 0; RDI0 992020/992020 bytes a
+  frame**; one line a second throughout ("30 frames (1 s) ... 600 frames (20 s)"), then the teardown and "the phone
+  is still up". The live log went on for 2 more minutes with no panic. So PLL0, the camera NoC, the GCC AXI,
+  IFE-lite writing continuously and the SMMU match are fine for 20 s.
+  - The picture: middle line mean 15 of 255 (the black level) all along: the phone lay face down.
+  - Found later in fastboot (the loader), at some time after 08:31; the reset wiped the RAM ring, so when and why
+    is unknown.
+  - Left: (a) the second session after a teardown (Tests 292-293 always died in the second one), (b) iOS reading.
+  - **Test 295 (`cam_soak_first=3`):** a 3-frame session, taken down, then the 20 s one, as iOS's switch does it;
+    followed for 400 s to see a later death.
+- **Test 295 (kernel t295; `cam_soak=20 cam_soak_first=3`): TWO SESSIONS, BOTH FINE.** 3 frames, teardown
+  (`titan_top_gdsc back: 0x7022f001`), then 20 s: 600 frames, RX 464,400 packets, ECC 0, CRC 0, "the phone is still
+  up", and the live log ran on to the end of the 400 s watch with no panic.
+  - The picture: middle line mean **127 of 255, the same in every one-second line**; Test 294's was 15 (black)
+    throughout. iOS's "green 449 above black" in Tests 292-293 is the same mid-grey (64 + 449 = 513 of 1023). A
+    perfectly constant middle line for 20 s is suspicious (a flat field or a test pattern rather than a scene):
+    to look at with a whole-frame dump.
+  - **Re-reading Tests 292-293:** each live log's file time is the end of its watch window (boot + FOLLOW), not
+    the last timestamped line. The phone was *not* proven dead right after frame 3; it was found in the loader
+    after the window. **Every run with a working session (292-295) ended in the loader some minutes later; Test 291
+    (whose second session never powered) did not.** So the problem is a later death after a camera session.
+  - **Test 296 (the t295 kernel again, FOLLOW=900):** a 15-minute watch to catch when it dies and its last words.
+- **Test 296 (t295 kernel, FOLLOW=900): no death at all.** iOS ran its whole time; the run ended in the orderly
+  way at 1015 s ("iOS returned": sound, audio DSP and GPU stopped and put back). **Correction to Tests 292-295:**
+  `phone.py raw devices` says "xnuloader fastboot" *while iOS runs too* (live mode: the loader serves USB on core 0
+  while iOS runs on core 7), and each live.txt ends when its FOLLOW window ends. So "found in the loader" after
+  those runs was either the run's time limit or a misreading. **None of Tests 292-295 is a proven death.** New
+  tool: `phone.py alive` (exit 0 iOS running / 1 maintenance mode / 2 nothing answers).
+- **Test 297 (t295 kernel; `cam=5 cam_r5q=1`):** at boot, mediaserverd opened the camera on its own: back camera
+  (2-3 frames), the switch to the front, **96 frames read by iOS**, then iOS stopped the stream. `alive` = iOS
+  running; then the Camera app was opened, and iOS was gone within ~30 s.
+- **Test 298 (the same image):** the follow captured nothing (an early-capture gap); a plain `phone.py restart`
+  showed iOS fully up (SpringBoard, Wi-Fi joined). With the camera on, iOS was gone ~2 minutes after boot. On a
+  third restart, iOS stayed up until **the Camera app was opened (09:25:04): gone by 09:25:34.** Reproduced.
+- **Test 299 (kernel t299: `ring_free()` waits for reads in flight):** a real race in camdev_read (it copies up to
+  1 MB out of the ring with ios_lock dropped, and a session's end freed the ring under it). Fixed: `ring_readers`
+  counted under ios_lock, the ring's base and sizes taken under the lock, `ring_free()` waits up to 5 s. **Not the
+  cause:** boot-time sessions fine (back, front, 108 frames to iOS, "closed"), then the Camera app opened at
+  09:28:45 and iOS was gone by 09:29:16.
+  - The merged log ends at 09:28:43 with a userland line (`IOServiceMatching failed for: AppleM2ScalerCSCDriver`)
+    and nothing after: **the loader's USB stopped answering too, so it is a whole-system hang**, not a panic (no
+    panic buffer saved). The camera driver's own lines never got out (the PC fetches the log every ~2 s).
+  - Pattern: every hang came at the **third camera session after boot** (290: back, front, the 4000x3000 one;
+    297-299: back and front at boot, then the Camera app). Runs with two sessions (292, 293, 295) survived.
+  - phone.py's follower now writes live.txt as it grows (it was written only when the window closed).
+- **Test 300 (`camsensor=1 cam_soak=20 cam_soak_first=3 cam_soak_n=5 cam_steplog_ms=1500`, no iOS):** five short
+  sessions, then 20 s, with 1.5 s after every camera line so the last step before a hang reaches the PC.
+- **Test 300 (kernel t300; five short sessions then 20 s, `cam_steplog_ms=1500`, no iOS): HUNG IN THE FIRST
+  TEARDOWN.** With 1.5 s after every camera line, the first session ran (3 frames, RX 113,004 packets, ECC 0, CRC 0),
+  then "SMR69 taken away; global fault status 0", 24 picture rows (36 s at 1.5 s each), "the whole frame ... mean
+  high byte 15", and nothing more: the next line, "camera rx: down", never came. So the hang is in `cam_rx_down`'s
+  register writes, which had run cleanly dozens of times.
+  - What made it likely here: the order of the teardown. The session ended with the sensor's "off" table first;
+    then `cam_rx_memory_down` wrote WM0 cfg 0 + register update 0x2, **but a register update is taken at the next
+    frame start, and a stopped sensor sends none**, so the write master stayed armed; then the SMMU match was taken
+    away. Anything that started a frame afterwards (the CSI-PHY reset in the teardown) let IFE-lite write as an
+    **unmatched stream**: an SMMU fault, and the camera NoC stalls the bus. The 36 s between the match's removal and
+    the rest of the teardown widened the window; iOS's many sessions (open, switch, close) hit it sooner or later.
+  - The GPU's MX/CX votes were checked and ruled out: they go through the GPU's own RSC (another voter; RPMh takes
+    the highest of the voters).
+- **Test 301 (kernel t301):** (1) the SMMU match is put in once and kept for later sessions (`rx_smr_kept`; it only
+  lets the IFE's own streams through untranslated), so there is no unmatched window; (2) a session ends with WM0
+  off + register update **while the sensor still streams**, 50 ms (more than a frame), then the sensor's "off".
+  Test 300's harsh soak again.
+- **Test 301 (kernel t301; the SMMU match kept, WM0 off before the stream's off; Test 300's soak): the teardown now
+  gets through ("SMR69 kept; global fault status 0", "camera rx: down"), and then hangs one step later**, before
+  "titan_top_gdsc back" (the pins, MCLK off, the GDSC). iOS gone.
+  - Caution about this soak: `cam_steplog_ms` sleeps while the probe holds `r5q_pmic_lock`. Test 284 already
+    showed the probe in its own thread hung the same way, so the touch thread waiting on that lock is not the cause.
+  - **The loader's watcher (core 0) keeps a record that survives the reset** ("N s: the kernel has logged X bytes,
+    heartbeat H; the last of it:"; `phone.py logs`, firmware-ring-now.bin / boot-manager-*.txt). For the iOS run
+    that died, the kernel's last lines were "SESSION ends: 2 frames handed over" and "table off": the hang came
+    between the sensor's "off" and the first CSID/PHY read.
+  - **Three hangs, three different camera register accesses in a teardown** (299-ish: before the CSID read;
+    300: in cam_rx_down's writes; 301: at the pins/MCLK/GDSC). A random hang on access points at the register bus's
+    clock. Every session's log says `GCC camera hf_axi 0x1 sf_axi 0x1 xo 0x80000000`: **GCC_CAMERA_XO_CBCR
+    (0x10b044) is not enabled**, while slow_ahb (the camera's register bus) runs from TCXO since Test 287, and
+    GCC_CAMERA_AHB (0x10b008) runs under hardware gating (0x80000003). Linux keeps the camera's GCC AHB and XO
+    clocks always on (critical clocks).
+- **Test 302 (kernel t302):** at the start of camera use, GCC_CAMERA_XO enabled and GCC_CAMERA_AHB forced on (HW_CTL
+  cleared), both kept on afterwards. Test 300's harsh soak again.
+- **Test 302 (kernel t302; GCC camera XO and AHB on): "GCC camera XO 0x1, AHB 0x1" (both running), and the same
+  hang** as Test 300 (after "the whole frame", before "down"). So those clocks were not it.
+  - **What kind of hang:** none of the hung runs (loader starts 750-770) saved the loader's "iOS returned" or "final
+    reset" record, so the loader's own watcher (which ends a run whose heartbeat is silent for 50 s) never got to.
+    Both cores stopped at once: a hardware bus hang, then the watchdog's reset.
+  - In Tests 300 and 302 the camera thread was **asleep** (between paced lines) when it hung: no camera register
+    was being touched. Something in the running camera hardware stops the bus by itself after a while.
+  - The thread through every hang since Test 276: PLL0-fed clocks running. Tests 279-286 (slow_ahb on PLL0) hung
+    ~3 s after PLL0 locked; Test 285 (`cam_nopll=1`, every camera clock from TCXO) never hung; since Test 287 (only
+    the data path on PLL0) the hangs come after tens of seconds.
+- **Test 303 (the t302 kernel; `cam_nopll=1`, three short sessions then 120 s, no pacing):** every camera clock
+  from TCXO. Whether frames still come at 19.2 MHz, and whether 2 minutes pass without a hang.
+- **Test 303 (`cam_nopll=1`: every camera clock from TCXO; three short sessions, then 120 s): no hang, and no
+  data.** "RX irq 0, packets 0", 50 misses each session; iOS up afterwards. At 19.2 MHz the receive side takes
+  nothing (the CSI-PHY's clock is too slow for the lanes). So with PLL0 off there is no hang, but no camera either.
+- **Test 304 (kernel t304; `camrx=5 cam_pll600=1 cam_hold=150`): THE RECEIVE SIDE ALONE FOR 150 s, NO HANG.**
+  PLL0 at 600, CSI-PHY 2, CSID streaming with no IFE, camera NoC or AXI writes: "held 1 s: 73,484 packets" ...
+  "held 150 s: **11,152,021 packets, ECC 0, CRC errors 0**", 992020/992020 bytes every frame, then a clean teardown
+  ("titan_top_gdsc back: 0x7022f001"); iOS up. The probe held `r5q_pmic_lock` the whole 150 s too, so that theory is
+  finally out.
+  - **So the hang is in the memory-write path:** IFE-lite -> camera NoC -> multimedia NoC -> DDR. We had never
+    cast a bandwidth vote for it. On SM8150 the camera's writes cross `qnm_camnoc_hf` (BCM MM1) to
+    `qns_mem_noc_hf` (MM0) (the SF side MM2), then LLCC (SH0) and DDR (MC0). Without our votes those clocks follow
+    whatever the other voters ask; an in-flight camera write over a NoC that is dropped or slowed under it can
+    stall the bus.
+- **Test 305 (kernel t305):** new `redwood_r5q_rpmh_bcm(name, avg, peak, mask)` in redwood_wifi.c (cmd-db aux
+  `{unit, width}`, AB/IB in that unit, 14 bits each, valid + commit; Linux's bcm-voter). The camera's memory stage
+  votes MM0, MM1, MM2, SH0 and MC0 (0.5 GB/s average, 2 GB/s peak) once, and keeps them (this voter may hold the
+  boot's display votes on the same BCMs). Test 300's paced soak, with a 150 s main session.
+- **Test 305 (kernel t305; the bandwidth votes):** "BCM MM0 at 0x50084 (unit 1670000, width 64): AB 300, IB 1198",
+  MM1 and MM2 the same, SH0 (unit 3910000) AB 128 IB 512, MC0 (unit 2050000) AB 244 IB 976, all committed. **The
+  same hang** as Test 301 (after "down", before the GDSC line). So bandwidth starvation was not it either; the
+  votes stay in (they are right to have).
+- **Test 306 (t305 kernel; an unpaced 3 short + 150 s soak):** **iOS died ~30 s after boot, before the camera
+  started**: the log ends with Bluetooth's bring-up, "stage 3: HCI_Reset: sent", with no answer, just before the
+  switch to 3 Mbit/s (a serial engine's GCC clock change). A separate hazard, not the camera's (noted for later).
+  The camera lines of finished runs are found again after a reset in the loader's ring (`rxlog` ->
+  `loader_log_putc`; firmware-ring-now.bin): Test 304's 150 holding lines, intact.
+  - GPU temperatures 52-59 °C in every run, the battery full: not heat or power.
+- **Where it stands:** the receive side alone runs 150 s (304). Full unpaced sessions of ~20 s run (294-296). The
+  paced runs hung while the **memory stage** (camera NoC, GCC AXI, IFE-lite, the SMMU match) stayed up but idle
+  for over a minute after only 3 frames, and iOS's long Camera-app session hung. So the trigger looks like the
+  memory stage being up for more than ~30-60 s, not the amount written.
+- **Test 307 (t305 kernel; `camrx=6 cam_pll600=1 cam_hold=150`):** the memory stage held 150 s, IFE-lite writing
+  the cropped frame into the 64 KB low block every frame.
+- **Test 307 (t305 kernel; `camrx=6 cam_pll600=1 cam_hold=150`): the memory stage held 150 s, no hang.** IFE-lite
+  wrote the cropped frame (32768/32768 bytes) into the 64 KB low block every frame: "held 150 s: 11,151,343
+  packets, ECC 0, CRC 0", a clean teardown, iOS up. Being up a long time is not the trigger.
+- **Test 308 (t305 kernel; `camrx=7 cam_pll600=1 cam_hold=150`): whole frames into the 4 MB camera block held
+  150 s, no hang.** 11,152,055 packets, ECC 0, CRC 0, 992020/992020 bytes a frame, the frame at 0xd8200000 (last
+  byte 0xf443f), a clean teardown, iOS up. **The full level-7 hardware path is stable for minutes.** What is left
+  is the session machinery (ping-pong IMAGE_ADDR rewrites, bus IRQ_CLEAR1/GLOBAL_CLEAR per frame, the callback,
+  the lock juggling). Its writes were checked against the spec (0x2054 IRQ_CLEAR1, 0x2068 IRQ_GLOBAL_CLEAR,
+  0x2214 IMAGE_ADDR, 0x4ac REG_UPDATE): right registers.
+- **Test 309 (t305 kernel; Test 306 again):** died the same way as 306, ~34 s after boot, after Bluetooth's
+  "stage 3: HCI_Reset: sent", and the loader's ring shows the camera probe never started. **A Bluetooth bring-up
+  hang, independent of the camera** (2 of the last ~12 starts). To look at on its own.
+- **Test 310:** Test 306's unpaced session soak with Bluetooth off (`-bt -bt_vsc -bt_baud`).
+- **Test 310 (t305 kernel; the session soak, `-bt`): the follower's log ended at ~35 s again, but the run's
+  surviving kernel bytes (the boot-manager slot, just before the next boot's "Loading DxeCore") go to
+  `[117.813498]` (Bluetooth stage 4: the `-bt` removal had not taken).** So in Tests 306, 309 and 310 **iOS did not
+  die at 35 s: the USB follower went silent** (each fastboot call had a 600 s timeout; one stuck `oem log` ended the
+  capture without a word) while iOS ran on for minutes. The "Bluetooth hang" reading of 306/309 is withdrawn.
+- **Logging fixed (2026-11-19), so no run is lost again:**
+  1. `follow_run`: 20 s / 40 s timeouts per call, a `== [follower: USB snapshot failed at HH:MM:SS] ==` line in
+     the log for every failed snapshot, live.txt written after every snapshot.
+  2. **A second channel over Wi-Fi:** wifi/klog.c (`proc_kmsgbuf`, the kernel's message buffer, last N bytes) and
+     `phone.py wlog FILE SECS`: through r5qd every second, merged, written after every poll, a gap line with the
+     PC's time when r5qd is silent, ending 60 s after the phone goes silent.
+  3. **Kernel t312:** every camera line stamped `[seconds.microseconds cCPU]`; the session logs once a second (IFE
+     bus status 0-2, top status, violation, WM0 status and address, CSID packets/ECC/CRC, SMMU global fault
+     status); every teardown block has its own line before it runs ("down 1: memory stage" ... "down 11:
+     titan_top_gdsc"), so a hang names its block.
+  4. Test 311 (the t311 kernel, bandwidth votes opt-in/off; the unpaced 150 s session soak) runs with both
+     followers.
+- **Test 311 (kernel t311; the unpaced soak, with the Wi-Fi follower): a real hang, caught.** Both channels went
+  silent at the same moment (11:33:35). The Wi-Fi log has the kernel's last lines: the first short session ran
+  (3 frames, RX 3096 packets, ECC 0, CRC 0), "SMR69 kept; global fault status 0" at 78.586 s, then nothing (the
+  4 MB scan and the picture rows never came). Bluetooth's stage 3 ended at 78.576 s in the same instant; Test 310,
+  with Bluetooth off, ended in the loader too, so Bluetooth is not needed for the hang.
+- **Test 312 (kernel t312: stamped verbose lines; Bluetooth off): hung inside its first session.** "[78.592737 c1]
+  SESSION: frames for iOS" and no "SESSION ends" (~100 ms later for 3 frames): the hang came while frames flowed.
+  The hold runs (307, 308) never hung on the same hardware path.
+- **Test 313 (the t295 kernel, from before today's changes; the same 3 + 150 s soak, Bluetooth off): NO HANG.**
+  **4,500 frames, 0 misses, "the phone is still up"**, iOS running afterwards. **So the hang is a regression from
+  a change after t295.** Of those, t299 (ring_readers) is not used in a soak, t301 (match kept, WM0 off before the
+  stream's off) acts only at a session's end, t305's votes have been off since t311, t312 is logging. Left: **t302,
+  GCC_CAMERA_AHB forced on (its hardware gating cleared) and GCC_CAMERA_XO enabled**, active from the probe's
+  first step. Overriding that clock's hardware gating likely breaks the handshake the camera's register bus relies
+  on. (Wi-Fi did not come up in this boot, so only the USB follower recorded it.)
+- **Test 314 (kernel t314):** the GCC forcing opt-in (`cam_gccfix=1`), off; everything else kept (match kept, WM0
+  order, verbose lines). The same 3 + 150 s soak, Bluetooth on (standard), both followers.
+- **Test 314 (kernel t314; the GCC forcing off): still a hang, now at the second session's start.** The Wi-Fi log
+  shows session 1 complete and its teardown clean step by step ("down 1" ... "down 11", "titan_top_gdsc back:
+  0x7022f001", the S2MPB03 back), then session 2: supplies on, GDSC powered (0xf822f000), "[78.679080 c0] THE
+  SENSOR ANSWERS", then nothing (the tables and the receive path come next). So the GCC forcing was not the cause.
+  The USB follower failed from the hang on, and said so in the log (113 "snapshot failed" lines); nothing was lost.
+  - What remains from after t295: Test 301's two changes. The kept SMMU match stays installed through the camera
+    GDSC's collapse and power-up into the next session, exactly where this hang is.
+- **Test 315 (kernel t315):** both Test 301 changes opt-in (`cam_smrkeep=1`, `cam_wm0first=1`), off: t295's session
+  behaviour with today's verbose logging. The same 3 x 3 short + 150 s soak, both followers.
+- **Test 315 (kernel t315: Test 301's changes off too, i.e. t295's session behaviour + verbose logging): still a
+  hang**, at session 2's memory stage ("[78.670121 c0] SMR69 0x86200840 ... buffer 0xd8200000", then nothing).
+  With every camera change of today switched off, it still hangs; the t295 baseline did not.
+- **Test 316 (the t315 kernel; no Wi-Fi traffic from the PC, USB follower only): hung too**, around the camera's
+  start (the follower failed from 12:16:31; iOS had joined Wi-Fi: "wifi: join: CONNECTED", r5qd listening).
+- **The difference was never in the camera code: it was Wi-Fi.** The only run that survived, the t295 baseline
+  (313), was **the one boot in which Wi-Fi never came up**. The Wi-Fi driver writes `TLBIASID` + `TLBSYNC` to the
+  apps SMMU (redwood_wifi.c, radio_space) whenever it maps memory for the radio; a TLB sync is broadcast to every
+  TBU of that SMMU, the camera's too. **The r5q camera path never took `redwood_smmu_lock`**, the lock Wi-Fi, the
+  sound and the donor camera code share: the camera's GDSC power-up/collapse, its SMMU match install/removal and its
+  camera NoC/AXI bring-up and teardown could all overlap a TLB sync in flight, and a sync caught by a TBU in a
+  power transition never completes: the whole bus hangs. That fits every hang: session boundaries (311, 314, 315,
+  the iOS switch), the Camera app (opened over Wi-Fi via r5qd), the paced runs (minutes of exposure).
+- **Test 317 (kernel t317):** the camera takes `redwood_smmu_lock` around the GDSC's power-up and collapse, the
+  memory stage's bring-up (camera NoC, AXI, SMMU match) and the whole of `cam_rx_down`. Not during streaming (Wi-Fi
+  must keep mapping). The 3 x 3 short + 150 s soak with Wi-Fi joined and `wlog` traffic every second.
+- **Test 317 (kernel t317; the SMMU lock around the camera's transitions): further, still a hang.** Two whole short
+  sessions with Wi-Fi traffic, then session 3 hung after "table init" (bit-banged sensor writes: no SoC camera
+  register touched there). Right before the end: `map_with_linking_np: [208(klog)]` (r5qd running klog over
+  Wi-Fi). The same in 314 (klog) and 311/315 (`tcp connect incoming ... r5qd`). **The hang lands when Wi-Fi is busy
+  while the camera is powered**, wherever the camera is, not at a camera step.
+  - Downstream Linux's arm-smmu powers on every TBU's GDSC before any TLB maintenance; a TLB sync that meets a TBU in
+    a power transition never completes. Our port never votes the multimedia TBUs: the live DT has them as GCC
+    votable GDSCs `hlos1_vote_mmnoc_mmu_tbu_hf0` 0x17d050, `_sf` 0x17d054, `_hf1` 0x17d058 (aggre-NoC TBUs
+    0x17d040-0x17d04c, Turing 0x17d05c/60). CAMERA-RX-SPEC (Test 288) had assumed hf0/hf1 on "because the display
+    runs"; nothing of ours votes them. The IFE's streams cross mnoc_hf_0_tbu and mnoc_hf_1_tbu.
+- **Test 318 (kernel t318):** at the camera's start (under the SMMU lock) the three mnoc TBU GDSCs are voted on
+  (SW_COLLAPSE cleared, PWR_ON waited for), their before/after values logged, and the votes kept. The 3 x 3 short +
+  150 s soak with Wi-Fi traffic.
+- **Test 318 (kernel t318; the mnoc TBU votes):** the three TBU GDSCs read **0x80000001 before our vote: already
+  powered** (bit 31) by other voters, our vote off (bit 0); after: 0x80000000. So the TBUs were not collapsed. The
+  phone still died early in session 1, right after `map_with_linking_np: [206(klog)]` again. klog (my Wi-Fi log
+  tool) ran right before the end in 311, 314, 315, 317 and 318: suspect that the tool itself (proc_kmsgbuf copying
+  the message buffer under its lock while the camera thread prints through printf and the loader-ring hook with
+  interrupts off per character) can freeze the CPUs; the hypervisor watchdog then resets the phone.
+- **Test 319 (the t318 kernel; no klog, USB follower only): hung too**, around the camera's start (12:44:16 = boot
+  + ~78 s); the follower lost the last lines and the slots held only an older run (812 s). So klog is not needed
+  for the hang.
+- **Test 320 (the t318 kernel; Wi-Fi and Bluetooth off: no wifi_modem/rails/wlfw/smmu, no bt):** the soak with
+  no Wi-Fi at all, like the one run that survived (313).
+- **Test 320 (the t318 kernel; Wi-Fi and Bluetooth off, 0 joins): still a hang**, right after session 2. **So Wi-Fi
+  is not needed for it**; the Wi-Fi/SMMU reading of Tests 316-318 was wrong as the root cause (the SMMU lock and the
+  TBU votes stay: right to have, harmless).
+  - What had changed with the code was the **test's shape**: the surviving t295 baseline ran 1 short session +
+    150 s; since Test 309 the soaks ran 3-5 short sessions + 150 s (`cam_soak_n`, which t295 cannot do).
+- **Test 321 (the t318 kernel; the baseline's shape, Wi-Fi on): streamed 148 s (4,440 frames), then died around
+  the session's end**, at its stop and teardown.
+- **The pattern of every hang, 290-321: a power or teardown transition** (a session's start or end, the iOS camera
+  switch, the Camera app opening, the stretched teardowns of the paced runs). **Streaming itself holds** (148 s
+  here; the 150 s holds of 304/307/308).
+- **Test 322 (kernel t322): A PERSISTENT PIPELINE.** The camera comes up once and stays up. A session only starts
+  and stops handing frames to iOS (`cam_session_frames()`); when the caller says stop, the sensor keeps streaming,
+  IFE-lite keeps writing into the camera block, nothing is torn down or powered off, and `cam_pipe_up` sends the
+  next session straight to its frames. `cam_persist=0` brings back the teardown after every session. The 5 short +
+  150 s soak with Wi-Fi traffic.
+- **Test 322 (kernel t322, the persistent pipeline; 5 short + 150 s soak with Wi-Fi traffic): NO HANG.** All six
+  sessions; the second to sixth "(the pipeline was already up)"; 4,500 frames, 0 misses in the long one; "the phone
+  is still up"; afterwards iOS running, USB and Wi-Fi both answering.
+- **Test 323 (the t322 kernel; `cam=5 cam_r5q=1`): THE CAMERA APP RUNS ON THE S10 LITE'S OWN CAMERA, STABLE.**
+  - At boot mediaserverd's sessions (back, the switch to the front, 115 frames, closed) all on the persistent
+    pipeline: CSID 71,208 packets, ECC 0, CRC 0, no IFE violation, SMMU global fault 0.
+  - The Camera app opened (`phone.py open com.apple.camera`, 13:26:15): **iOS alive every 10 s for minutes** (before
+    this fix it died within 30 s every time). The green camera-in-use dot on; 1,740 then 2,223 frames to iOS in one
+    session ("camera: frame 1500 read: 1000512 bytes ... copied in 129 us"); CSID 10.5 M packets, ECC 0, CRC 0.
+  - Two camera flips (the flip button): each a 2-frame session and a new one, "(the pipeline was already up)", no
+    power cycle, iOS up.
+  - iOS asked for location access for photo tags: answered "Don't Allow" (privacy-preserving default).
+  - **The picture is dark:** a fixed short exposure (768 lines = 7.8 ms, gain 1x; frames "green 0 above black").
+    iOS's auto-exposure requests (REDWOOD_CAMERA_EXPOSURE) are not applied on the r5q path yet. Next.
+- **Root cause, as far as it is known:** the S5K3L6's receive and memory path is stable while streaming (minutes,
+  zero errors), but power/teardown transitions of the Titan block (the GDSC, PLL0, the camera NoC and AXI, the IFE
+  write master, the SMMU match) occasionally hang the whole SoC bus; many transitions in a row (iOS's open/switch/
+  close, the multi-session soaks) made it near-certain. The exact transition is not pinned down. The persistent
+  pipeline avoids them. **Open:** a safe idle power-down (the sensor keeps streaming while nothing reads: power).
