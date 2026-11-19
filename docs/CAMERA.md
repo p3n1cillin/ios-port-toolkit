@@ -80,6 +80,35 @@ frames" from "the hardware gives frames".
   `CAMUserPreferenceCaptureEncodingBehavior` = 1 (domain com.apple.camera, user mobile): the still is then saved as
   JPEG (4032x3024 encoded in ~160 ms on the S10 Lite).
 
+- **A second sensor on another CSI-PHY: move the PHY's own clocks too.** Each CSI-PHY has its own camcc timer RCG
+  and two branches (SM8150: 0x24 apart per PHY, PHY 0 at 0x6004 / 0x601c / 0x6020), besides its register block
+  (0x0ac65000 + 0x1000 × N) and the CSID's `phy_sel` (RX_CFG0 bits 20+). On the S10 Lite the front IMX616 is on
+  CSI-PHY 3, the rear S5K3L6 on 2.
+
+- **Use the session's clocks in every bring-up, test probes included.** A probe that brought the receive path up with
+  slow_ahb on PLL0 (the non-session default) hung the phone ~5 s after the stream started, exactly like the early
+  hangs. The proven setting (PLL0 at 600, slow_ahb on the crystal) must apply whatever calls the bring-up.
+
+- **"Every line's CRC bad, headers fine" is a too-fast link, not a bad settle count. Prove it with the test
+  pattern.** Settles from 12 to 48 changed nothing. The sensor's solid-colour test pattern (SMIA 0x0600/0x0601 = 1,
+  colours 0x0602-0x0609, four different 10-bit values) makes every received byte checkable. Each line was right
+  until about three quarters across, then a group was two bytes short and the tail was junk, on all lanes alike.
+  The vendor's mode drove the output PLL at ~1.6-2 Gb/s a lane (past where D-PHY needs deskew). Lowering its
+  multiplier (0x030e/f: 257 → 160, ~1 Gb/s) gave zero wrong bytes and CRC 0; below ~0.8 Gb/s the sensor sent nothing.
+  Sweep such settings in one boot (bring the path up and down per value: cheap since the RCG parking fix) instead of
+  one test per guess.
+
+- **A frame shape the pipeline already takes: crop in the sensor.** The CSID cannot crop packed RAW10, but SMIA
+  sensors can: the digital crop (0x0408/0x040a offset, 0x040c/0x040e size) plus the output size (0x034c/0x034e).
+  Even offsets keep the Bayer order. The IMX616's 1632x1224 binned mode, cropped to the middle 1028x772, gives the
+  rear sensor's frame shape, so the CSID, IFE-lite, the stride and the camera block need no change. Then resample
+  its lens shading grids over the crop window (`camtuning_v14.py --crop`), or the corner gains land on the frame's
+  edges.
+
+- **Exposure per sensor.** iOS keeps one set of numbers; convert per sensor: lines by the ratio of the line times,
+  frame lines likewise, the gain into the sensor's coding (Samsung SMIA 32 = 1x; Sony `1024 - 1024 / gain`), and the
+  coarse time within the sensor's margin (Sony: frame − 48).
+
 ## Privacy and licensing
 
 Never publish the vendor's sensor module files, the tables derived from them, or the sensor registry. The tables

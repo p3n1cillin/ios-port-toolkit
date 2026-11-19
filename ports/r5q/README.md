@@ -27,7 +27,7 @@ binaries, no build outputs and no phone backups are in this repository (see [the
 | `wifi/WIFI-PLAN.md` | everything since Test 111, step by step with what every test showed: Wi-Fi, sound, GPU, apps, sensors, CoreMotion, the compass, the microphone |
 | `SESSION.md` | the test-by-test log of the earlier stages |
 
-## State (Test 331)
+## State (Test 341)
 
 **Works:**
 
@@ -52,10 +52,18 @@ binaries, no build outputs and no phone backups are in this repository (see [the
 
 **Partly:**
 
-- **Camera:** the phone's own rear sensor (S5K3L6) in iOS's Camera app: preview at 1028x772, iOS's auto-exposure
-  driving the sensor, instant camera switches, photos saved (JPEG; HEIC's software encoder runs out of memory), the
-  camera powered off when the app closes. Every iOS camera is this one sensor for now; no colour tuning yet; a
-  picture of a lit scene still to be seen. How it was made stable: wifi/CAMERA-PLAN.md, docs/CAMERA.md.
+- **Camera:** the phone's own sensors in iOS's Camera app, both at 1028x772:
+  - back camera: the rear S5K3L6;
+  - front camera: the IMX616 since Test 340/341, cropped in the sensor, on CSI-PHY 3 with its output clock
+    lowered to ~1 Gb/s a lane; CRC-clean;
+  - iOS's auto-exposure drives each sensor in its own terms;
+  - each sensor has its vendor colour tuning (lens shading, white-balance lights; made locally from the phone's
+    own files);
+  - switching cameras works, photos are saved as JPEG (HEIC's software encoder runs out of memory), and the camera
+    powers off when the app closes;
+  - not yet: the main IMX586 and other rear modules, and a picture of a lit scene.
+
+  How it was made stable: wifi/CAMERA-PLAN.md, docs/CAMERA.md.
 - **Compass:** the Compass app shows a heading, then freezes. Indoor interference is suspected; still being checked.
 
 **Not yet:**

@@ -790,3 +790,83 @@ candidate designs).
   0x200 io 0x3"; **"the bus GPIO19/20 answers at: 0x1a"**, **"ID 0616: THE IMX616 ANSWERS"**; everything back as
   found ("LDO1 0x1c LDO5 0x0e"); iOS up. Its tables made locally (`fw-camera-r5q/camera-imx616.tab`, never in the
   repository). Next: its tables, CSI-PHY 3, and the CSID cropping the middle 1028x772 of the 1632x1224 mode.
+- **Test 334 (kernel t334, new root with `camera-imx616.tab` in /fw; `camsensor=1 camfront=2`): the IMX616's
+  frames.** After the ID: `init` (730 writes) and `res3` (1632x1224@120, 4x4 binned), then under the grouped hold
+  the sensor's own digital crop (Sony/SMIA `0x0408`/`0x040a` offsets 306/226, `0x040c`/`0x040e` 1028x772; even
+  offsets keep RGGB), output size `0x034c`/`0x034e` 1028x772 and frame length `0x0340` 5160 (~30 fps at the
+  tables' 24 MHz; ~24 at the TCXO's 19.2). The crop happens in the sensor because the CSID cannot crop packed RAW10;
+  the result has the rear sensor's frame shape, so CSID, IFE-lite, the 1296-byte stride and the camera block stay
+  as proven. The receive path now takes its CSI-PHY as a parameter (`cam_phy_index`, `cam_phy_settle`): the PHY's
+  registers at `0x0ac65000 + 0x1000 * N`, the CSID's `RX_CFG0 = 0x00032103 | (N << 20)`, and the PHY's own camcc
+  clocks moved 0x24 per index (`cam_phy_clk()`: PHY 2's timer RCG 0x604c and branches 0x6064/0x6068 become
+  0x6070/0x6088/0x608c for PHY 3, as SM8150's camcc lays them out). Then `on`, 5 s of IFE frame-done counts and the
+  middle line's mean, `off`, `cam_rx_down()`, PHY 2 / settle 14 back, and the probe's own power-down.
+- **Test 334 result: everything up to the stream, then a hang.** The ID again, then "crop 1028x772 at 306,226 and
+  frame 5160 lines: taken", PLL0 locked, the PHY's own clocks moved as planned ("RCG 0x6070", "branch 0x608c",
+  "branch 0x6088", all on), "CSI-PHY 3 configured (lane enable 0xd5, settle 12)", "CSID RX cfg 0x332103", the
+  camera NoC, SMR69, IFE-lite, "table on: 1 writes taken". Then silence in the kernel's camera lines while the rest
+  of the log ran ~30 s more (TCP closes 30 s after connections opened at that moment); the 5 s result never came,
+  and the phone came back in maintenance mode (the boot-manager slots still held Test 333's run). This is the
+  stalled-core signature of Tests 279-286: the probe has no session callback, so `cam_rx_up` left out the session's
+  `pll600` clocks and put slow_ahb (the camera's register bus, RCG 0x7058 cfg 0x20e) on PLL0, which hung every time
+  before Test 287. Fix: `cam_rx_up` uses the session clocks for any PHY other than 2 as well (kernel t336 on);
+  Test 335 checks it with the t334 kernel and `cam_pll600=1`.
+- **Test 335 (the t334 kernel + `cam_pll600=1`): THE FRONT SENSOR STREAMS, no hang.** "FRAMES IN 5 s: 1; middle
+  line mean 26 of 255" (the write master was not re-armed: one frame), "packets 102942, ECC 0, **CRC errors
+  65535**; RDI0 ... bytes 992020/992020" (exactly 1285 x 772: the sensor's crop is right), "the whole frame: 999580
+  of 4194304 bytes written ... (one frame: 1296 x 772)", the teardown clean (RCGs parked, PLL0 off), iOS up. The
+  rear S5K3L6 runs at RX irq 0xff / CRC 0 / PHY status 0x40; the front at RX irq 0x800ff / every payload CRC bad /
+  PHY status 0x11-0x51. Headers right and payloads wrong = the link's timing: Test 336 sweeps the settle count.
+- **Test 336 (kernel t336; `camfront=3`): a settle sweep, six bring-ups in one boot, no hang.** With the write master
+  re-armed after each frame: **26-27 frames a second** (frame length 5160 at the 19.2 MHz MCLK). Settle 12, 20, 28,
+  36, 48 all alike: ~20,900 packets a second, CRC errors = packets - 2 per frame (each frame's 772 image lines bad,
+  two other packets good), ECC 0, 992020 bytes a frame, middle line ~27 of 255. Settle 6: no link (73 packets, ECC
+  errors, no bytes). So not the settle count. Test 337: the sensor's solid-colour test pattern, each received byte
+  checked against the known value, errors counted per lane and bit.
+- **Test 337 (kernel t337; `camfront=4`): the solid-colour pattern.** 133 frames in 5 s (26.6 a second); the
+  groups exactly as encoded ("aa55aa5566" for R 0x2aa / Gr 0x155 rows, "cc33cc3333" for Gb 0x333 / B 0x0cc rows:
+  lanes in the right order, polarity right, no bit errors), but **150,920 of 992,020 bytes wrong, in all 772 rows,
+  evenly over the four lanes and eight bits**: every line right up to byte ~962 (pixel ~770 of 1028, three
+  quarters across), two wrong bytes there (0x6e 0xf6), then the rest of the line shifted by two bytes. The payload
+  is two bytes off its word count: the CRC fails. A fault at a fixed place in each line is the sensor's crop or
+  output, not the link. Test 338: five crops in one boot, each checked against the pattern.
+- **Test 338 (kernel t338; `camfront=5`): five crops, all alike.** Digital crop at 306,226 / at the left edge 4,0 /
+  the window cut in the analog array (x 1224-5351, y 920-4023, digital 2,2) / the mode's own frame length (1290
+  lines: 105 frames a second): ~150,500 of 992,020 bytes wrong, all rows, all lanes. The middle row's bytes at the
+  first error: "...aa 55 aa 55 66 | aa 55 66 | aa 55 aa 55 66 ..." -- a group two bytes short, the pattern clean
+  after it; the first error moves (byte ~890-960); the line's last bytes are junk ("00 00 ff ff ..."). Bytes are
+  lost from the second half of every line. 1024 wide (308,226) was worse (the line junk from byte ~192). res3's
+  output PLL (0x030d = 3, 0x030e/f = 0x101) gives ~2 Gb/s a lane at the tables' 24 MHz (~1.6 at our 19.2): past the
+  rate where D-PHY wants deskew. Test 339 sweeps that multiplier down (0x101, 200, 160, 128, 100), settle 28.
+- **Test 339 (kernel t339; `camfront=6`): THE FRONT LINK IS CLEAN AT A SLOWER OUTPUT CLOCK.** The IMX616's output PLL
+  multiplier (0x030e/f) swept, the solid-colour pattern checked byte by byte each time:
+  - 257 (res3's own; ~1.64 Gb/s a lane at 19.2 MHz): ~150,800 bytes wrong, CRC errors on every line (as before);
+  - **200 (~1.28 Gb/s) and 160 (~1.02 Gb/s): 0 of 992,020 bytes wrong, CRC 0, ECC 0, RX irq 0xff, PHY status like the
+    rear sensor's**; 26-27 frames a second;
+  - 128 and 100: no output at all (0 packets: too slow for the line).
+  The stock rate is past what this receive path takes without deskew; **160 from now on** (~1.28 Gb/s once MCLK is the
+  tables' 24 MHz), settle 28.
+- **Test 340 prep (kernel t340): the front camera for iOS.**
+  - `redwood_camera.c`: iOS's front slot (the camera entry with index 2) runs from the IMX616
+    (`redwood_r5q_cam_front(true)` before the session; `cam_front=0` keeps the S5K3L6 for it); frames are reported
+    as **RGGB** (0) for the front camera and GRBG (1) for the rear. Before this, the front slot had said BGGR, the
+    POCO OV16A1Q's order, over the S5K3L6's GRBG picture.
+  - `redwood_sec_ts.c`: `redwood_r5q_cam_run` takes the rear pipeline down if a switch left it up, then runs
+    `frontsensor_probe(7)`. That is power, ID, init + res3, the crop, IOP 160, CSI-PHY 3 / settle 28, the receive
+    path, "on", then **the same `cam_session_frames` loop** as the rear camera (the battery's lock let go), "off",
+    and everything down. The front camera keeps no pipeline across switches.
+  - iOS's exposure on the IMX616: lines × 919/729 (its line is ~7.29 µs against the S5K3L6's 9.19), frame lines ×
+    5160/3268, coarse time ≤ frame − 48, analog gain as Sony's code 1024 − 1024/gain.
+  - Kernel soak without the owner: `cam_soak_alt=1` alternates short sessions front/rear, `cam_soak_front=1` makes
+    the long one the front camera's; the soak reader asks for an exposure at frame 15 (both sensors).
+- **Test 340 result: THE FRONT CAMERA STREAMS THROUGH THE SESSION PATH, switching with the rear.** Six short sessions
+  alternating front/rear. Each front one logs "the front camera asked for: the rear pipeline goes down first",
+  "THE IMX616 ANSWERS", "output PLL multiplier 160", "SESSION: frames for iOS from the IMX616 (front)", the exposure
+  "taken", "30 frames handed over, 0 misses", "the front camera goes down". Each rear one is a fresh bring-up that
+  stays up. Then **20 s from the front camera: 600 frames, 464,400 packets, ECC 0, CRC 0, SMMU gfsr 0**, no IFE
+  violation; "the phone is still up", iOS running. (Middle line ~20 of 255: a dim room; the rear's 15.)
+- **The IMX616's colour tuning:** the vendor partition's `com.samsung.tuned.sony_imx616.bin` (15.8 MB, local only)
+  goes through `camtuning_v14.py` with the new `--crop 0.1875,0.1846,0.8174,0.8154`. That resamples the lens
+  shading grids over the sensor's middle 1028x772, so the corner gains (4.8x at the sensor's corners) become ~2.1x at
+  the frame's. It has an identity colour matrix and ten reference lights. build_root_app.sh installs it as the front
+  slot's `camera-ov16a1q.isp`.

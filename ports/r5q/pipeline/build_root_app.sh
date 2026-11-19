@@ -63,6 +63,11 @@ if [ -f $IOS_WORK/linux-source/fw-camera-r5q/camera-s5k3l6.isp ]; then
 		cp $IOS_WORK/linux-source/fw-camera-r5q/camera-s5k3l6.isp $IOS_WORK/linux-source/fw-camfake/camera-$slot.isp
 	done
 fi
+# (Test 341) the front slot runs from the IMX616 since Test 340: its own tuning (camtuning_v14.py from the vendor's
+# com.samsung.tuned.sony_imx616.bin with --crop 0.1875,0.1846,0.8174,0.8154, the sensor's middle 1028x772; local only)
+if [ -f $IOS_WORK/linux-source/fw-camera-r5q/camera-imx616.isp ]; then
+	cp $IOS_WORK/linux-source/fw-camera-r5q/camera-imx616.isp $IOS_WORK/linux-source/fw-camfake/camera-ov16a1q.isp
+fi
 grep -q 'fw-camfake' build.sh || sed -i 's|^if \[ -d \.\./fw-gpu \]; then|if [ -d ../fw-camfake ]; then mkdir -p root/fw; cp ../fw-camfake/* root/fw/; fi      # (r5q: synthetic camera table)\n&|' build.sh
 INJECT="$(printf '%s\n' '/redwood/lib/libredwood.dylib backboardd containermanagerd containermanagerd_system' '/redwood/lib/libredwood-sb.dylib SpringBoard' '/redwood/lib/libredwood-media.dylib mediaserverd' '/redwood/lib/libredwood-app.dylib Sileo' '/redwood/lib/libredwood-tweaks.dylib Preferences' "/redwood/lib/libr5q-app.dylib $APPS" "/redwood/lib/libr5q-bbd.dylib backboardd" "$EXTRA_LINE")"
 echo "inject: $(echo "$INJECT" | tr '\n' ';' | wc -c) bytes"

@@ -5,7 +5,12 @@ userland/src/camera_isp.c isp_load_tuning; the donor's tools/camtuning.py writes
 /vendor/lib64/camera/com.samsung.tuned.<maker>_<sensor>.bin (the vendor's: kept in fw-camera-r5q/ and never in
 the repository; so is what this makes of it).
 
-usage: camtuning_v14.py TUNED.bin OUT.isp     (camtuning_v14.py TUNED.bin -   lists what is there only)
+usage: camtuning_v14.py TUNED.bin OUT.isp [--crop X0,Y0,X1,Y1]     (camtuning_v14.py TUNED.bin -   lists only)
+
+--crop: the frame is only that part of the sensor's picture (fractions of its width and height; the IMX616's front
+frames, cropped in the sensor to the middle 1028x772 of 1632x1224: 0.1875,0.1846,0.8174,0.8154): the lens shading
+grids are resampled (bilinear) over that window, so the corner gains meant for the sensor's corners are not put on
+the frame's edges.
 
 The V1.4.0 layout (worked out 2026-11-19 on com.samsung.tuned.lsi_s5k3l6.bin; the module files' is in
 camsensor_v14.py):
@@ -92,7 +97,32 @@ def references(syms):
     return [(rg, bg, cct) for (rg, bg), cct in zip(points, REFERENCE_CCTS)]
 
 
+def crop_grids(values, window):
+    """the four 17 x 13 grids of `values` resampled over window (x0, y0, x1, y1), fractions of the full picture"""
+    x0, y0, x1, y1 = window
+    out = []
+    for c in range(4):
+        g = values[c * GRID:(c + 1) * GRID]
+        for j in range(13):
+            v = (y0 + (y1 - y0) * j / 12) * 12
+            jj = min(int(v), 11)
+            fv = v - jj
+            for i in range(17):
+                u = (x0 + (x1 - x0) * i / 16) * 16
+                ii = min(int(u), 15)
+                fu = u - ii
+                a, b = g[jj * 17 + ii], g[jj * 17 + ii + 1]
+                c_, d = g[(jj + 1) * 17 + ii], g[(jj + 1) * 17 + ii + 1]
+                out.append((a * (1 - fu) + b * fu) * (1 - fv) + (c_ * (1 - fu) + d * fu) * fv)
+    return tuple(out)
+
+
 def main():
+    window = None
+    if '--crop' in sys.argv:
+        k = sys.argv.index('--crop')
+        window = tuple(float(x) for x in sys.argv[k + 1].split(','))
+        del sys.argv[k:k + 2]
     if len(sys.argv) < 3:
         sys.exit(__doc__)
     data = open(sys.argv[1], 'rb').read()
@@ -101,6 +131,8 @@ def main():
     syms = symbols(data)
     ccm = module(syms, 'cc13', 9)
     lsc = module(syms, 'lsc34', 4 * GRID)
+    if window is not None:
+        lsc = [(lf, lt, [(cf, ct, crop_grids(v, window)) for cf, ct, v in ranges]) for lf, lt, ranges in lsc]
     refs = references(syms)
 
     for what, tree in (('colour matrix', ccm), ('lens shading', lsc)):
