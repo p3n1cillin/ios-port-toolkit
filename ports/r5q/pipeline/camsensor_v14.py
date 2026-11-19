@@ -124,7 +124,8 @@ def main():
     for name in ('pwrup', 'pwrdn'):
         out += name.encode().ljust(8, b'\0') + struct.pack('<I', len(power[name]))
         for t, v, d in power[name]:
-            out += struct.pack('<HHBBBBI', t, v // 1000 if t == 0 else v, 0, 0, 0, 0, d * 1000)
+            # MCLK (type 0) in kHz; a supply's voltage in mV when it is given in uV (the IMX616's 2900000: 2026-11-19)
+            out += struct.pack('<HHBBBBI', t, v // 1000 if t == 0 or v > 0xffff else v, 0, 0, 0, 0, d * 1000)
     out += struct.pack('<I', len(tables))
     for name, writes in tables:
         out += name.encode().ljust(8, b'\0') + struct.pack('<I', len(writes))

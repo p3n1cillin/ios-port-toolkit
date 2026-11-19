@@ -2877,6 +2877,153 @@ cam_pipe_down(void)
 	cam_pipe_up = false;
 }
 
+/*
+ * (Test 333, camfront=1) The FRONT camera, the IMX616 (live DT qcom,cam-sensor@1 on CCI0 master 1; Samsung's
+ * sm8150-camera-sensor-r5q-r01.dtsi; module file com.samsung.sensormodule.1_sony_imx616.bin): powered as its module
+ * file's power-up says (vana 2.9 V S2MPB03 #2 LDO5, vdig 1.05 V LDO1, vio 1.8 V L14, reset high 10 ms, MCLK 2 ms),
+ * its bus GPIO19/20 (NORTH) driven by hand, its ID (0x0616 at 0x0016, 7-bit 0x1a) read, everything put back.
+ * MCLK2: camcc RCG 0x5044 / branch 0x505c from TCXO (19.2 MHz; the sensor's tables want 24: enough for the ID),
+ * GPIO15 function cam_mclk; reset GPIO82 (SOUTH).
+ */
+static void
+frontsensor_probe(void)
+{
+	struct bitbang pm = { .sda = 47, .scl = 48, .address = 0x56 }, cam = { .sda = 19, .scl = 20, .address = 0x1a }, *was = bb;
+	vm_offset_t north = ml_io_map(0x03900000UL, 0x1000UL * 33), east = ml_io_map(0x03500000UL, 0x1000UL * 49);
+	vm_offset_t south = ml_io_map(0x03d00000UL, 0x1000UL * 83), camcc = ml_io_map(0x0ad00000UL + 0x5000, 0x1000);
+	vm_offset_t camcc_c = ml_io_map(0x0ad00000UL + 0xc000, 0x1000);
+	uint32_t was47, was48, was15, was19, was20, was82, was82io, was_gdscr = 0, was_gdsc_clk = 0;
+	uint8_t ldo1 = 0, ldo5 = 0, id[2] = { 0 };
+	const char *problem = NULL;
+	int us;
+
+	if (north == 0 || east == 0 || south == 0 || camcc == 0 || camcc_c == 0) {
+		rxlog("front camera: no mapping\n");
+		return;
+	}
+	rxlog("front camera: the IMX616 (7-bit 0x1a on GPIO19/20, MCLK2 GPIO15, reset GPIO82): its ID\n");
+	rxlog("front camera: L14 vote: %s\n", redwood_r5q_rpmh_enable("ldoa14") ? "done" : "NOT DONE");
+	/* vana, vdig: S2MPB03 #2 (0x56 on GPIO47/48, EAST): LDO5 2.9 V (1.8 V + 44 x 25 mV), then LDO1 1.05 V (0.7 V + 28 x 12.5 mV) */
+	pm.tlmm = east;
+	bb = &pm;
+	was47 = rd(BB_CFG(47));
+	was48 = rd(BB_CFG(48));
+	wr(BB_CFG(47), 0);
+	wr(BB_CFG(48), 0);
+	spin_us(50);
+	if (!bb_recover("S2MPB03 #2") || (problem = bb_read(0x03, &ldo1, 1)) != NULL || (problem = bb_read(0x07, &ldo5, 1)) != NULL) {
+		rxlog("front camera: S2MPB03 #2: %s: nothing switched on\n", problem ? problem : "the bus stays low");
+		goto pins_back;
+	}
+	rxlog("front camera: S2MPB03 #2 LDO1 %#04x LDO5 %#04x as found; LDO5 on at 2.9 V, then LDO1 at 1.05 V\n", ldo1, ldo5);
+	if ((problem = bb_write(0x07, 0x80 | 44)) != NULL) {
+		goto power_back;
+	}
+	spin_us(1000);
+	if ((problem = bb_write(0x03, 0x80 | 28)) != NULL) {
+		goto power_back;
+	}
+	spin_us(1000);
+	{
+		uint8_t n1 = 0, n5 = 0;
+
+		(void)bb_read(0x03, &n1, 1);
+		(void)bb_read(0x07, &n5, 1);
+		rxlog("front camera: S2MPB03 #2 LDO1 %#04x LDO5 %#04x now\n", n1, n5);
+	}
+	/* the camera's power domain and clock controller, as the rear sensor's probe does */
+	rxlog("front camera: rails mmcx %d mx %d\n", redwood_r5q_rpmh_level("mmcx.lvl", 128), redwood_r5q_rpmh_level("mx.lvl", 192));
+	was_gdsc_clk = *(volatile uint32_t *)(camcc_c + 0x1e4);
+	was_gdscr = *(volatile uint32_t *)(camcc_c + 0x1bc);
+	lck_mtx_lock(&redwood_smmu_lock);
+	*(volatile uint32_t *)(camcc_c + 0x1e4) = was_gdsc_clk | 1;
+	*(volatile uint32_t *)(camcc_c + 0x1bc) = was_gdscr & ~1u;
+	for (us = 0; us < 10000 && !(*(volatile uint32_t *)(camcc_c + 0x1bc) & (1u << 31)); us += 10) {
+		spin_us(10);
+	}
+	lck_mtx_unlock(&redwood_smmu_lock);
+	rxlog("front camera: titan_top_gdsc %#x -> %#x\n", was_gdscr, *(volatile uint32_t *)(camcc_c + 0x1bc));
+	/* reset high (10 ms), then MCLK2 from TCXO on GPIO15 (2 ms) */
+	was82 = rd(south + 0x1000UL * 82);
+	was82io = rd(south + 0x1000UL * 82 + 4);
+	wr(south + 0x1000UL * 82 + 4, 0);
+	wr(south + 0x1000UL * 82, (1u << 9));                           /* GPIO, output, low first */
+	spin_us(1000);
+	wr(south + 0x1000UL * 82 + 4, 2);                               /* high: out of reset */
+	spin_us(10000);
+	*(volatile uint32_t *)(camcc + 0x044 + 4) = 1;                  /* MCLK2 RCG CFG: TCXO, divider 1 */
+	*(volatile uint32_t *)(camcc + 0x044) |= 1;                     /* CMD: update */
+	for (us = 0; us < 10000 && (*(volatile uint32_t *)(camcc + 0x044) & 1); us += 10) {
+		spin_us(10);
+	}
+	*(volatile uint32_t *)(camcc + 0x05c) |= 1;                     /* the branch */
+	for (us = 0; us < 10000 && (*(volatile uint32_t *)(camcc + 0x05c) & (1u << 31)); us += 10) {
+		spin_us(10);
+	}
+	was15 = rd(north + 0x1000UL * 15);
+	wr(north + 0x1000UL * 15, (1u << 2) | (1u << 6));               /* cam_mclk, 4 mA, no pull */
+	spin_us(2000);
+	rxlog("front camera: MCLK2 RCG cmd %#x cfg %#x branch %#x; GPIO15 %#x; reset GPIO82 %#x io %#x\n",
+	    *(volatile uint32_t *)(camcc + 0x044), *(volatile uint32_t *)(camcc + 0x048), *(volatile uint32_t *)(camcc + 0x05c),
+	    rd(north + 0x1000UL * 15), rd(south + 0x1000UL * 82), rd(south + 0x1000UL * 82 + 4));
+	/* the bus GPIO19/20 by hand: what answers, then the ID */
+	cam.tlmm = north;
+	bb = &cam;
+	was19 = rd(BB_CFG(19));
+	was20 = rd(BB_CFG(20));
+	cam.cfg_sda = 3;                                                /* GPIO, pull-up, 2 mA, input */
+	cam.cfg_scl = 3;
+	wr(BB_CFG(19), 3);
+	wr(BB_CFG(20), 3);
+	spin_us(50);
+	if (!bb_recover("the front sensor's bus")) {
+		rxlog("front camera: GPIO19/20: the bus stays low\n");
+	} else {
+		char seen[160];
+		int at = 0;
+
+		for (unsigned a = 0x08; a < 0x78 && at < (int)sizeof(seen) - 6; a++) {
+			uint8_t b;
+
+			cam.address = (uint8_t)a;
+			if (bb_read16(0x0000, &b, 1) == NULL) {
+				at += snprintf(seen + at, sizeof(seen) - at, " %#04x", a);
+			}
+		}
+		rxlog("front camera: the bus GPIO19/20 answers at:%s\n", at ? seen : " nothing");
+		cam.address = 0x1a;
+		problem = bb_read16(0x0016, id, 2);
+		rxlog("front camera: 7-bit 0x1a: ID %s %02x%02x%s\n", problem ? problem : "", id[0], id[1],
+		    problem == NULL && id[0] == 0x06 && id[1] == 0x16 ? ": THE IMX616 ANSWERS" : "");
+	}
+	wr(BB_CFG(19), was19);
+	wr(BB_CFG(20), was20);
+	/* everything back: MCLK off, reset low, the domain, the LDOs */
+	wr(north + 0x1000UL * 15, was15);
+	*(volatile uint32_t *)(camcc + 0x05c) &= ~1u;
+	wr(south + 0x1000UL * 82 + 4, 0);
+	spin_us(1000);
+	wr(south + 0x1000UL * 82, was82);
+	wr(south + 0x1000UL * 82 + 4, was82io);
+	lck_mtx_lock(&redwood_smmu_lock);
+	*(volatile uint32_t *)(camcc_c + 0x1bc) = was_gdscr;
+	*(volatile uint32_t *)(camcc_c + 0x1e4) = was_gdsc_clk;
+	spin_us(100);
+	lck_mtx_unlock(&redwood_smmu_lock);
+	bb = &pm;
+	problem = NULL;
+power_back:
+	(void)bb_write(0x03, ldo1);
+	spin_us(1000);
+	(void)bb_write(0x07, ldo5);
+	rxlog("front camera: back: S2MPB03 #2 LDO1 %#04x LDO5 %#04x%s%s\n", ldo1, ldo5, problem ? "; write: " : "",
+	    problem ? problem : "");
+pins_back:
+	wr(BB_CFG(47), was47);
+	wr(BB_CFG(48), was48);
+	bb = was;
+}
+
 /* (Test 294) cam_soak: the kernel's own reader, one line a second (every 30 frames) with the middle line's mean */
 bool redwood_r5q_cam_run(bool (*cb)(const uint8_t *frame, uint32_t bytes, void *ctx), void *ctx);
 static uint32_t soak_frames, soak_frames_max;
@@ -2902,8 +3049,15 @@ soak_frame(const uint8_t *frame, uint32_t bytes, __unused void *ctx)
 static void
 camsensor_thread(__unused void *parameter, __unused wait_result_t result)
 {
-	uint32_t soak = 0;
+	uint32_t soak = 0, front = 0;
 
+	/* (Test 333) camfront=1: the front sensor's ID probe instead (the rear's pipeline untouched) */
+	if (PE_parse_boot_argn("camfront", &front, sizeof(front)) && front != 0) {
+		lck_mtx_lock(&r5q_pmic_lock);
+		frontsensor_probe();
+		lck_mtx_unlock(&r5q_pmic_lock);
+		thread_terminate(current_thread());
+	}
 	/*
 	 * (Test 294, cam_soak=N) A whole session with nobody but the kernel reading: Tests 292-293 went down ~3-4 s into
 	 * the first session that lasted (iOS reading). This says whether the hardware streaming for N seconds alone does it.

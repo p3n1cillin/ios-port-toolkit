@@ -769,3 +769,24 @@ candidate designs).
     image: `MSYS_NO_PATHCONV=1` exported in the same shell as test.sh breaks its Python steps' paths.)
   - Root `test332-root.apfs.new` is the one to use from now on (the tuning in /fw). Whether the shading looks right
     needs a lit scene (owner).
+
+## The front camera, the IMX616 (2026-11-19)
+
+- **Desk work** (live DT `qcom,cam-sensor@1` under `cci@ac4a000`; Samsung's `sm8150-camera-sensor-r5q-r01.dtsi`;
+  Linux `pinctrl-sm8150.c` and `s2mpb03.c`/`.h` from github.com/sm8150-samsung/android_kernel_samsung_r5q):
+  - front = yaw 0 (`@1`, and its "full"-mode twin `@8`); slave 0x34 (7-bit 0x1a); CSI-PHY 3; CCI0 master 1 =
+    **GPIO19/20** (CCI pin groups: CCI0 m0 17/18, m1 19/20; CCI1 m0 31/32 (the S5K3L6's), m1 33/34);
+  - MCLK2 on **GPIO15** (NORTH, function 1 cam_mclk), 24 MHz; reset **GPIO82** (SOUTH);
+  - supplies: vio 1.8 V L14; vdig 1.05 V **S2MPB03 #2 LDO1** (reg 0x03, 0.7 V + 12.5 mV steps: 0x9c); vana 2.9 V
+    **S2MPB03 #2 LDO5** (reg 0x07, 1.8 V + 25 mV steps: 0xac); the same chip as the S5K3L6's LDO2/LDO6;
+  - module file `com.samsung.sensormodule.1_sony_imx616.bin` (local): ID 0x616 at 0x16, 4 lanes, RGGB; modes from
+    6528x4896@24 down to **1632x1224@120** (2048-byte RAW10 lines, 2.5 MB a frame: bigger than the 1 MB halves; a
+    first version can crop the middle 1028x772 in the CSID, a later one needs a bigger camera block);
+    power-up: vana 1 ms, vdig 1 ms, vio 1 ms, reset 10 ms, MCLK 2 ms.
+- **Test 333 (kernel t333; `camsensor=1 camfront=1`): `frontsensor_probe()`**: power, MCLK2 from TCXO (19.2 MHz; the
+  tables want 24, fine for the ID), reset, a scan of GPIO19/20 and the ID at 0x16 from 0x1a; all put back.
+- **Test 333 result: THE IMX616 ANSWERS, first try.** "S2MPB03 #2 LDO1 0x1c LDO5 0x0e as found" -> "LDO1 0x9c LDO5
+  0xac now" (1.05 V, 2.9 V); titan GDSC powered; "MCLK2 RCG cmd 0 cfg 0x1 branch 0x1; GPIO15 0x44; reset GPIO82
+  0x200 io 0x3"; **"the bus GPIO19/20 answers at: 0x1a"**, **"ID 0616: THE IMX616 ANSWERS"**; everything back as
+  found ("LDO1 0x1c LDO5 0x0e"); iOS up. Its tables made locally (`fw-camera-r5q/camera-imx616.tab`, never in the
+  repository). Next: its tables, CSI-PHY 3, and the CSID cropping the middle 1028x772 of the 1632x1224 mode.
