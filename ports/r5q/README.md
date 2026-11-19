@@ -27,7 +27,7 @@ binaries, no build outputs and no phone backups are in this repository (see [the
 | `wifi/WIFI-PLAN.md` | everything since Test 111, step by step with what every test showed: Wi-Fi, sound, GPU, apps, sensors, CoreMotion, the compass, the microphone |
 | `SESSION.md` | the test-by-test log of the earlier stages |
 
-## State (Test 269)
+## State (Test 274)
 
 **Works:**
 
@@ -59,7 +59,8 @@ binaries, no build outputs and no phone backups are in this repository (see [the
 - **Microphone:** the WCD9340 codec never enumerates on SLIMbus and is silent over SPI too (Tests 265-266). What is ruled out is in WIFI-PLAN, "Tests 237-240" and after.
 - **Metal:** there is no GPU driver for iOS, so the map in Maps and live wallpapers are missing.
 - **Camera:** iOS's capture path works end to end with a synthetic picture (`cam=5 cam_fake=1`: Camera.app shows
-  the kernel's colour chart; wifi/CAMERA-PLAN.md). The phone's own sensors are not driven yet.
+  the kernel's colour chart; wifi/CAMERA-PLAN.md). On the hardware side, one sensor (the S5K3L6) is powered and
+  answers on its bus (Test 274); its frames are not captured yet.
 - **Radios:** cellular; Bluetooth audio.
 - **FairPlay:** App Store apps won't run; this needs Apple's FairPlay kernel extension.
 

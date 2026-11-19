@@ -1473,6 +1473,306 @@ static struct bitbang charger_bus = { .sda = PIN_CHG_SDA, .scl = PIN_CHG_SCL, .a
 static bool charger_dump_on, charger_dump_off;
 static unsigned charger_dumps;
 
+/*
+ * (r5q Test 270, boot-arg campmic=1) The cameras' power, read only: two Samsung S2MPB03 regulator chips at 0x56 on
+ * bit-banged I2C (DT i2c@1: GPIO94 SDA / 95 SCL, NORTH tile; i2c@2: GPIO47 / 48, EAST tile). Their LDOs feed the
+ * camera sensors (the DT's 1.1/1.8/2.8 V supplies of the camera nodes). Registers 0x00 (the chip's ID) and 0x02-0x2f
+ * are read once, ~30 s after boot, in the battery's thread under r5q_pmic_lock; 0x01 (an interrupt latch, which a
+ * read may clear) is not. Nothing is written to the chips; the pins are set as the DT's (GPIO, no pull, 2 mA) for the
+ * read and put back as found.
+ */
+static bool campmic_on, campmic_done;
+
+static void
+campmic_bus(const char *name, uint64_t tile_phys, unsigned sda_pin, unsigned scl_pin)
+{
+	struct bitbang bus = { .sda = sda_pin, .scl = scl_pin, .address = 0x56 }, *was = bb;
+	uint32_t was_sda, was_scl;
+	uint8_t id = 0, regs[0x30];
+	const char *problem = NULL;
+	char line[200];
+
+	bus.tlmm = ml_io_map(tile_phys, 0x1000UL * (scl_pin > sda_pin ? scl_pin : sda_pin) + 0x1000);
+	if (bus.tlmm == 0) {
+		printf("camera power: %s: no mapping\n", name);
+		return;
+	}
+	bb = &bus;
+	was_sda = rd(BB_CFG(sda_pin));
+	was_scl = rd(BB_CFG(scl_pin));
+	printf("camera power: %s: GPIO%u cfg %#x io %#x, GPIO%u cfg %#x io %#x (as found)\n", name, sda_pin, was_sda,
+	    rd(BB_IO(sda_pin)), scl_pin, was_scl, rd(BB_IO(scl_pin)));
+	bus.cfg_sda = 0;
+	bus.cfg_scl = 0;
+	wr(BB_CFG(sda_pin), 0);
+	wr(BB_CFG(scl_pin), 0);
+	spin_us(50);
+	if (!bb_recover(name)) {
+		problem = "the bus stays low";
+	}
+	if (problem == NULL) {
+		problem = bb_read(0x00, &id, 1);
+	}
+	for (unsigned r = 0x02; problem == NULL && r < sizeof(regs); r += 2) {
+		problem = bb_read((uint8_t)r, regs + r, 2);
+	}
+	wr(BB_CFG(sda_pin), was_sda);
+	wr(BB_CFG(scl_pin), was_scl);
+	bb = was;
+	if (problem != NULL) {
+		printf("camera power: %s: S2MPB03 at 0x56: %s\n", name, problem);
+		return;
+	}
+	printf("camera power: %s: S2MPB03 at 0x56 answers: ID %#04x\n", name, id);
+	for (unsigned r = 0x00; r < sizeof(regs); r += 16) {
+		int at = snprintf(line, sizeof(line), "camera power: %s %02x:", name, r);
+
+		for (unsigned i = 0; i < 16; i++) {
+			at += (r + i < 2) ? snprintf(line + at, sizeof(line) - at, " --") :
+			    snprintf(line + at, sizeof(line) - at, " %02x", regs[r + i]);
+		}
+		printf("%s\n", line);
+	}
+}
+
+static void
+campmic_peek(void)
+{
+	if (!campmic_on || campmic_done) {
+		return;
+	}
+	campmic_done = true;
+	campmic_bus("S2MPB03 #1 (i2c@1)", 0x03900000UL, 94, 95);
+	campmic_bus("S2MPB03 #2 (i2c@2)", 0x03500000UL, 47, 48);
+}
+
+/*
+ * (r5q Test 271, boot-arg camsensor=1) One camera sensor powered, its chip ID read, everything put back: DT
+ * qcom,cam-sensor@2 (slave 0x5A on CCI 1 master 0 = GPIO31 SDA / 32 SCL, NORTH; CSIPHY 2), chosen because its MCLK is
+ * 19.2 MHz, TCXO itself, no camera PLL. Its supplies: vio PM8150 L14 1.8 V (RPMh "ldoa14", a proxy-enabled supply,
+ * probably on already), vana S2MPB03 #2 LDO6 2.8 V (reg 0x08: 1.8 V + n x 25 mV, n 0x28), vdig S2MPB03 #2 LDO2 1.05 V
+ * (reg 0x04: 0.7 V + n x 12.5 mV, n 0x1c); MCLK1 = camcc (0xad00000) RCG 0x5024 from TCXO (source 0, divider 1),
+ * branch 0x503c, on GPIO14 (NORTH, function 1 cam_mclk, 4 mA); reset GPIO22 (EAST, GPIO, high = out of reset).
+ * The sensor's I2C is bit-banged on its CCI pins as GPIOs (pull-up as the DT), not through the CCI. The chip ID:
+ * 16-bit register 0x0000, 2 bytes (Samsung's sensors). Then: reset low, MCLK off, both LDOs back as found (off).
+ */
+static bool camsensor_on, camsensor_done;
+extern bool redwood_r5q_rpmh_enable(const char *id);
+extern bool redwood_spmi_peek(uint16_t id, uint8_t reg, uint8_t *bytes, uint32_t count);
+
+/* 16-bit register address, `count` bytes */
+static const char *
+bb_read16(uint16_t reg, uint8_t *bytes, unsigned count)
+{
+	const char *problem = NULL;
+
+	bus_start();
+	if (!bus_put(bb->address << 1)) {
+		problem = "no acknowledge of its address";
+	} else if (!bus_put((uint8_t)(reg >> 8)) || !bus_put((uint8_t)reg)) {
+		problem = "no acknowledge of the register number";
+	} else {
+		bus_start();
+		if (!bus_put(bb->address << 1 | 1)) {
+			problem = "no acknowledge of its address for the read";
+		} else {
+			for (unsigned i = 0; i < count; i++) {
+				bytes[i] = bus_get(i + 1 == count);
+			}
+		}
+	}
+	bus_stop();
+	return problem;
+}
+
+static void
+camsensor_probe(void)
+{
+	struct bitbang pm = { .sda = 47, .scl = 48, .address = 0x56 }, cam = { .sda = 31, .scl = 32, .address = 0x5a }, *was = bb;
+	vm_offset_t north = ml_io_map(0x03900000UL, 0x1000UL * 33), east = ml_io_map(0x03500000UL, 0x1000UL * 49);
+	vm_offset_t camcc = ml_io_map(0x0ad00000UL + 0x5000, 0x1000);
+	uint32_t was47, was48, was14, was22, was22io, was31, was32, was_gdsc_clk = 0, was_gdscr = 0;
+	vm_offset_t camcc_c = 0;
+	uint8_t ldo2 = 0, ldo6 = 0, l14[2] = { 0 }, id[2] = { 0 };
+	const char *problem = NULL;
+	int us;
+
+	if (!camsensor_on || camsensor_done || north == 0 || east == 0 || camcc == 0) {
+		return;
+	}
+	camsensor_done = true;
+	{
+		/* camcc's registers are reached through GCC_CAMERA_AHB_CLK (0x10b008): unclocked, a read could hang the bus */
+		vm_offset_t gccb = ml_io_map(0x0010b000UL, 0x1000);
+		uint32_t ahb = gccb ? *(volatile uint32_t *)(gccb + 0x8) : 0x80000000u;
+
+		/*
+		 * (Test 272) Test 271 read 0x80000003: enabled (bit 0) under hardware gating (bit 1), which reads "off" while
+		 * idle and runs on access (Linux gcc-sm8150: hwcg_bit 1). camcc's power, MMCX, is the display's too (on).
+		 * So what is required is "enabled", not "running".
+		 */
+		printf("camera sensor: GCC_CAMERA_AHB_CBCR %#x (bit 0 enabled, bit 1 hardware-gated, bit 31 idle/off)\n", ahb);
+		if ((ahb & 1) == 0) {
+			printf("camera sensor: the camera clock controller's bus clock is not enabled: nothing done\n");
+			return;
+		}
+	}
+	/* vio: L14 (PM8150 slave 1, LDO14 at 0x4d00: status 0x08, enable 0x46), then the vote */
+	(void)redwood_spmi_peek(0x14d, 0x08, &l14[0], 1);
+	(void)redwood_spmi_peek(0x14d, 0x46, &l14[1], 1);
+	printf("camera sensor: L14 status %#04x enable %#04x before; vote: %s\n", l14[0], l14[1],
+	    redwood_r5q_rpmh_enable("ldoa14") ? "done" : "NOT DONE");
+	/* vana, vdig: S2MPB03 #2 */
+	pm.tlmm = east;
+	bb = &pm;
+	was47 = rd(BB_CFG(47));
+	was48 = rd(BB_CFG(48));
+	wr(BB_CFG(47), 0);
+	wr(BB_CFG(48), 0);
+	spin_us(50);
+	if (!bb_recover("S2MPB03 #2") || (problem = bb_read(0x04, &ldo2, 1)) != NULL || (problem = bb_read(0x08, &ldo6, 1)) != NULL) {
+		printf("camera sensor: S2MPB03 #2: %s: nothing switched on\n", problem ? problem : "the bus stays low");
+		goto pins_back;
+	}
+	printf("camera sensor: S2MPB03 #2 LDO2 %#04x LDO6 %#04x as found; LDO6 on at 2.8 V, then LDO2 on at 1.05 V\n", ldo2, ldo6);
+	if ((problem = bb_write(0x08, 0x80 | 0x28)) != NULL) {
+		goto power_back;
+	}
+	spin_us(1000);
+	if ((problem = bb_write(0x04, 0x80 | 0x1c)) != NULL) {
+		goto power_back;
+	}
+	spin_us(2000);
+	{
+		uint8_t now2 = 0, now6 = 0;
+
+		(void)bb_read(0x04, &now2, 1);
+		(void)bb_read(0x08, &now6, 1);
+		printf("camera sensor: S2MPB03 #2 LDO2 %#04x LDO6 %#04x now\n", now2, now6);
+	}
+	/*
+	 * (Test 273) Test 272: the MCLK RCG stayed "root off" (cmd 0x80000000) with its branch enabled, and L14 read off
+	 * before the vote (not read after). Now: L14 read again; camcc's GDSC clock (CAM_CC_GDSC_CLK 0xc1e4, Linux's
+	 * critical one) on and titan_top_gdsc (GDSCR 0xc1bc: bit 0 SW_COLLAPSE, bit 31 PWR_ON) powered before the MCLK;
+	 * both put back afterwards.
+	 */
+	(void)redwood_spmi_peek(0x14d, 0x08, &l14[0], 1);
+	(void)redwood_spmi_peek(0x14d, 0x46, &l14[1], 1);
+	printf("camera sensor: L14 status %#04x enable %#04x after the vote\n", l14[0], l14[1]);
+	camcc_c = ml_io_map(0x0ad00000UL + 0xc000, 0x1000);
+	if (camcc_c != 0) {
+		was_gdsc_clk = *(volatile uint32_t *)(camcc_c + 0x1e4);
+		was_gdscr = *(volatile uint32_t *)(camcc_c + 0x1bc);
+		*(volatile uint32_t *)(camcc_c + 0x1e4) = was_gdsc_clk | 1;
+		*(volatile uint32_t *)(camcc_c + 0x1bc) = was_gdscr & ~1u;
+		for (us = 0; us < 10000 && !(*(volatile uint32_t *)(camcc_c + 0x1bc) & (1u << 31)); us += 10) {
+			spin_us(10);
+		}
+		printf("camera sensor: CAM_CC_GDSC_CLK %#x -> %#x; titan_top_gdsc %#x -> %#x (bit 31 = powered)\n", was_gdsc_clk,
+		    *(volatile uint32_t *)(camcc_c + 0x1e4), was_gdscr, *(volatile uint32_t *)(camcc_c + 0x1bc));
+	}
+	/* MCLK1: 19.2 MHz from TCXO; GPIO14 cam_mclk */
+	*(volatile uint32_t *)(camcc + 0x024 + 4) = 1;                  /* CFG: TCXO, divider 1 */
+	*(volatile uint32_t *)(camcc + 0x024) |= 1;                     /* CMD: update */
+	for (us = 0; us < 10000 && (*(volatile uint32_t *)(camcc + 0x024) & 1); us += 10) {
+		spin_us(10);
+	}
+	*(volatile uint32_t *)(camcc + 0x03c) |= 1;                     /* the branch on */
+	for (us = 0; us < 10000 && (*(volatile uint32_t *)(camcc + 0x03c) & (1u << 31)); us += 10) {
+		spin_us(10);
+	}
+	was14 = rd(north + 0x1000UL * 14);
+	wr(north + 0x1000UL * 14, (1u << 2) | (1u << 6));               /* cam_mclk, 4 mA, no pull */
+	printf("camera sensor: MCLK1: RCG cmd %#x cfg %#x, branch %#x (bit 31 = off); GPIO14 %#x\n",
+	    *(volatile uint32_t *)(camcc + 0x024), *(volatile uint32_t *)(camcc + 0x028), *(volatile uint32_t *)(camcc + 0x03c),
+	    rd(north + 0x1000UL * 14));
+	/* reset: GPIO22 out high */
+	was22 = rd(east + 0x1000UL * 22);
+	was22io = rd(east + 0x1000UL * 22 + 4);
+	wr(east + 0x1000UL * 22 + 4, 0);
+	wr(east + 0x1000UL * 22, (1u << 9));                            /* GPIO, output (low first) */
+	spin_us(1000);
+	wr(east + 0x1000UL * 22 + 4, 2);                                /* high: out of reset */
+	spin_us(10000);
+	/* the chip ID over the CCI pins, bit-banged */
+	cam.tlmm = north;
+	bb = &cam;
+	was31 = rd(BB_CFG(31));
+	was32 = rd(BB_CFG(32));
+	cam.cfg_sda = 3;                                                /* GPIO, pull-up, 2 mA, input */
+	cam.cfg_scl = 3;
+	wr(BB_CFG(31), 3);
+	wr(BB_CFG(32), 3);
+	spin_us(50);
+	/*
+	 * (Test 274) Test 273: power, the power domain and MCLK all on, still no acknowledge at 0x5A. Qualcomm's camera
+	 * DTs give the 8-bit (write) address: 0x5A is 7-bit 0x2D. Both are tried, each at 0x0000 and 0x0016, and a scan
+	 * of the whole bus says who is there at all.
+	 */
+	problem = bb_recover("the sensor's bus") ? NULL : "the bus stays low";
+	if (problem == NULL) {
+		static const uint8_t tries[] = { 0x2d, 0x5a };
+		char seen[160];
+		int at = 0;
+
+		for (unsigned a = 0x08; a < 0x78 && at < (int)sizeof(seen) - 6; a++) {
+			uint8_t b;
+
+			cam.address = (uint8_t)a;
+			if (bb_read(0x00, &b, 1) == NULL || bb_read16(0x0000, &b, 1) == NULL) {
+				at += snprintf(seen + at, sizeof(seen) - at, " %#04x", a);
+			}
+		}
+		printf("camera sensor: the bus GPIO31/32 answers at:%s\n", at ? seen : " nothing");
+		problem = "no answer";
+		for (unsigned t = 0; t < sizeof(tries) && problem != NULL; t++) {
+			cam.address = tries[t];
+			if ((problem = bb_read16(0x0000, id, 2)) == NULL || (problem = bb_read16(0x0016, id, 2)) == NULL) {
+				printf("camera sensor: THE SENSOR ANSWERS at 7-bit %#04x: chip ID %02x%02x (CCI 1 master 0)\n", tries[t],
+				    id[0], id[1]);
+			} else {
+				printf("camera sensor: 7-bit %#04x: %s\n", tries[t], problem);
+			}
+		}
+	} else {
+		printf("camera sensor: GPIO31/32: %s\n", problem);
+	}
+	wr(BB_CFG(31), was31);
+	wr(BB_CFG(32), was32);
+	/* everything back: reset low, the pin and MCLK off */
+	wr(east + 0x1000UL * 22 + 4, 0);
+	spin_us(1000);
+	wr(east + 0x1000UL * 22, was22);
+	wr(east + 0x1000UL * 22 + 4, was22io);
+	wr(north + 0x1000UL * 14, was14);
+	*(volatile uint32_t *)(camcc + 0x03c) &= ~1u;
+	if (camcc_c != 0) {                                             /* (Test 273) the power domain back as found */
+		*(volatile uint32_t *)(camcc_c + 0x1bc) = was_gdscr;
+		*(volatile uint32_t *)(camcc_c + 0x1e4) = was_gdsc_clk;
+		printf("camera sensor: titan_top_gdsc back: %#x\n", *(volatile uint32_t *)(camcc_c + 0x1bc));
+	}
+	bb = &pm;
+	problem = NULL;
+power_back:
+	if (problem != NULL) {
+		printf("camera sensor: S2MPB03 #2 write: %s\n", problem);
+	}
+	(void)bb_write(0x04, ldo2);
+	spin_us(1000);
+	(void)bb_write(0x08, ldo6);
+	{
+		uint8_t now2 = 0, now6 = 0;
+
+		(void)bb_read(0x04, &now2, 1);
+		(void)bb_read(0x08, &now6, 1);
+		printf("camera sensor: S2MPB03 #2 back: LDO2 %#04x LDO6 %#04x\n", now2, now6);
+	}
+pins_back:
+	wr(BB_CFG(47), was47);
+	wr(BB_CFG(48), was48);
+	bb = was;
+}
+
 static void
 charger_dump(void)
 {
@@ -1585,6 +1885,16 @@ step_watch(void)
 		    !any_finger_down()) {
 			lck_mtx_lock(&r5q_pmic_lock);
 			charger_dump();         /* (Test 87: charger_dump=1, reads only) */
+			lck_mtx_unlock(&r5q_pmic_lock);
+		}
+		if (r5q && ticks == 30 * 1000000 / POLL_US && (rd(GPIO_IO(PIN_INT)) & 1) && !any_finger_down()) {
+			lck_mtx_lock(&r5q_pmic_lock);
+			campmic_peek();         /* (Test 270: campmic=1, the cameras' regulators, reads only) */
+			lck_mtx_unlock(&r5q_pmic_lock);
+		}
+		if (r5q && ticks == 40 * 1000000 / POLL_US && (rd(GPIO_IO(PIN_INT)) & 1) && !any_finger_down()) {
+			lck_mtx_lock(&r5q_pmic_lock);
+			camsensor_probe();      /* (Test 271: camsensor=1, one camera sensor powered, its ID read, all back) */
 			lck_mtx_unlock(&r5q_pmic_lock);
 		}
 		delay(POLL_US);
@@ -1729,6 +2039,10 @@ redwood_sec_ts_init(void)
 		uint32_t dump = 0;
 
 		charger_dump_on = PE_parse_boot_argn("charger_dump", &dump, sizeof(dump)) && dump != 0;
+		dump = 0;
+		campmic_on = PE_parse_boot_argn("campmic", &dump, sizeof(dump)) && dump != 0;
+		dump = 0;
+		camsensor_on = PE_parse_boot_argn("camsensor", &dump, sizeof(dump)) && dump != 0;
 	}
 	if (steps == 0) {
 		return;

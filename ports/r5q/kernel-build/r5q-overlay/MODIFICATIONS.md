@@ -39,6 +39,8 @@ These files replace the donor's files of the same path in its `xnu/files/` tree 
   a polled GENI SPI probe of the WCD9340 (`mic=8`).
 - `bsd/dev/redwood_camera.c` (Tests 267-269): the donor's camera driver (the POCO X5 Pro's hardware path), here
   refusing everything but its synthetic source (`cam=5 cam_fake=1`) on the S10 Lite, and saying why an open is refused.
+- `bsd/dev/redwood_sec_ts.c` (Tests 270-274): the camera regulators (two S2MPB03) read, and one camera sensor powered
+  (S2MPB03 LDOs, L14, the camera power domain, MCLK, reset), its ID read over bit-banged I2C, all put back.
 - `osfmk/arm/io_map.c` (Test 252): Apple's open-source XNU file (xnu-8796.121.2) with the I/O submap at 64 MB instead of
   8 MB, and its use logged; a full submap made `ml_io_map` wait for ever.
 
