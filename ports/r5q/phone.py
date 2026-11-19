@@ -9,7 +9,20 @@ keeps it in maintenance mode instead of starting iOS (a volume key held at the s
   python phone.py continue          start iOS
   python phone.py poweroff | reboot
   python phone.py cycle IMAGE [SECS [ARGS...]]  the whole test cycle (ARGS: new extra boot-args for it), no hands: end the run, catch the restart, flash BOOT,
-                                    verify, restart, follow the new run's log for SECS (default 120)
+                                    verify, restart, follow the new run's log for SECS (default 120). ARGS that all
+                                    start with + or - (or the word std) are changes to the standard set in
+                                    phone-args.txt: `cycle IMG 120 +bt=4 -torch` = standard, bt=4 added, torch taken
+                                    out; `cycle IMG 120 std` = the standard set again. Other ARGS replace the set as
+                                    given. A run that ends the system is said, with the lines before it.
+  python phone.py rescue            (2026-11-19) back to a running iOS from anything: a stuck USB link ("no link")
+                                    is cleared by restarting the phone from iOS over Wi-Fi (r5q_reboot); a phone left
+                                    in maintenance mode by a test that ended the system is restarted into its
+                                    listening window, its log slots saved first (the crash's record, before a new run
+                                    overwrites it), and iOS started with the standard boot-args
+  python phone.py unlock | home     the screen woken and the lock screen swiped away | the home gesture
+  python phone.py open BUNDLE_ID    an app opened (unlocked first; e.g. com.apple.Preferences, or a URL)
+  python phone.py tools             every built on-phone tool (port/build/phone-tools, made by
+                                    pipeline/build_phone_tools.sh) put into /var/r5q/bin over Wi-Fi
   python phone.py args [ARGS... | --clear | --show]  extra kernel boot-args kept on the phone for every start
                                     (key=value replaces the image's; -key removes it); iOS restarts with them
   python phone.py smem [FILE]        the shared memory while iOS runs, decoded (the modem's state and crash reason)
@@ -340,8 +353,18 @@ def main():
     if len(sys.argv) < 2:
         raise SystemExit(__doc__)
     cmd, rest = sys.argv[1], sys.argv[2:]
-    if cmd not in ('rd', 'respring', 'sh', 'ps'):      # (those go over Wi-Fi to r5qd, not over USB)
+    if cmd not in ('rd', 'respring', 'sh', 'ps', 'tools', 'rescue', 'unlock', 'home', 'open'):  # (Wi-Fi, or their own way)
         wait_for_phone()
+    if cmd == 'tools':
+        tools()
+        return
+    if cmd in ('unlock', 'home', 'open'):
+        wait_for_phone()
+        {'unlock': unlock, 'home': home}[cmd]() if cmd != 'open' else open_app(rest[0])
+        return
+    if cmd == 'rescue':
+        rescue()
+        return
     if cmd == 'logs':
         logs(rest[0] if rest else pathlib.Path(__file__).parent / 'port/build/phone-logs')
     elif cmd == 'read':
@@ -447,8 +470,26 @@ def gone(seconds):
     return False
 
 
+STD_ARGS = pathlib.Path(__file__).resolve().parent / 'phone-args.txt'
+
+
+def merge_args(words):
+    """(2026-11-19) +key=value / -key / std: changes to the standard boot-args in phone-args.txt; anything else as is"""
+    if not words or not all(w == 'std' or w[:1] in '+-' for w in words):
+        return words
+    std = STD_ARGS.read_text().split() if STD_ARGS.exists() else []
+    keep = {w.split('=')[0]: w for w in std}
+    for w in words:
+        if w.startswith('+'):
+            keep[w[1:].split('=')[0]] = w[1:]
+        elif w.startswith('-'):
+            keep.pop(w[1:].split('=')[0], None)
+    return list(keep.values())
+
+
 def set_args(words):
     """(in the listening window) the extra boot-args kept on the phone"""
+    words = merge_args(words)
     tmp = pathlib.Path(tempfile.gettempdir()) / 'r5q-args.txt'
     tmp.write_bytes(' '.join(words).encode())
     fb('stage', str(tmp))
@@ -501,6 +542,18 @@ def cycle(image, follow, new_args=None):
     follow_run(out, follow)
 
 
+def merge_log(have, snap):
+    """the new part of a ring snapshot appended to what we have: found by the overlap of our last 4 KB in it"""
+    if not have:
+        return snap
+    for size in (4096, 1024, 256):
+        tail = have[-size:]
+        at = snap.rfind(tail)
+        if at >= 0:
+            return have + snap[at + len(tail):]
+    return have + '\n== [log gap: the ring wrapped between two snapshots] ==\n' + snap
+
+
 def follow_run(out, follow):
     print(f'5/5 following the new run for {follow} s -> {out / "live.txt"}', flush=True)
     deadline, text = time.time() + follow, ''
@@ -509,8 +562,10 @@ def follow_run(out, follow):
     while time.time() < deadline:
         fb('oem', 'log', check=False)
         if 'FAIL' not in fb('get_staged', str(tmp), check=False) and tmp.exists():
-            text = tmp.read_bytes().decode(errors='replace')
-        time.sleep(3)
+            # (2026-11-19) every snapshot merged into one growing log: the ring is 2 MB and wraps in seconds once
+            # userland logs, so keeping only the last snapshot lost a run's early kernel lines (Test 252)
+            text = merge_log(text, tmp.read_bytes().decode(errors='replace'))
+        time.sleep(2)
     (out / 'live.txt').write_text(text, encoding='utf-8', errors='replace')
     tmp.unlink(missing_ok=True)
     for marker in ['clock: ', 'exec /sbin/launchd.ios', 'systemShellDidFinishLaunching', 'panic(', 'HUNG',
@@ -519,7 +574,109 @@ def follow_run(out, follow):
     for line in text.splitlines():
         if line.startswith('clock: ') or ('boot-args = ' in line and ' epoch=' in line):
             print('    ' + (line if line.startswith('clock') else 'boot-args: epoch=' + line.split(' epoch=')[1].split()[0]))
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if 'ends the system' in line or 'XNU RETURN' in line:
+            # (2026-11-19) a test that ends the system: said here, with what came before it; `phone.py rescue` next
+            print('    THE SYSTEM ENDED during this run. The lines before it:')
+            for before in [x for x in lines[max(0, i - 15):i] if x.strip()]:
+                print('      | ' + before[:200])
+            print('    -> the phone is likely in the loader now: `python phone.py rescue` saves the crash record and '
+                  'starts iOS with the standard boot-args')
+            break
     print(f'cycle done: {out}')
+
+
+def unlock():
+    """(2026-11-19) wake the screen and swipe the lock screen away (no passcode is set)"""
+    touch('tap', ['375', '900'])
+    time.sleep(1.5)
+    touch('swipe', ['375', '1615', '375', '400', '200'])
+    time.sleep(1.5)
+
+
+def home():
+    """the home gesture: a quick swipe up from the bottom edge"""
+    touch('swipe', ['375', '1620', '375', '900', '120'])
+    time.sleep(1.5)
+
+
+def r5qd_out(line):
+    """one r5qd request, its whole answer back as text"""
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / 'wifi'))
+    import r5qd_client
+    return r5qd_client.request(r5qd_client.IP_FILE.read_text().strip(), line)
+
+
+def open_app(bundle):
+    """(2026-11-19) an app opened from the PC. openurl first; only if iOS refuses it (exit 1: a locked screen) is the
+    screen unlocked and openurl tried again -- an unlock tap while an app is already in front would tap the app"""
+    target = bundle if ':' in bundle else 'app:' + bundle
+    for attempt in range(2):
+        out = r5qd_out(f'run /var/r5q/bin/openurl {target}')
+        if 'exit 0' in out:
+            print(f'opened {bundle}')
+            time.sleep(3)
+            return
+        if attempt == 0:
+            unlock()
+    print(f'{bundle} not opened: ' + out.strip().splitlines()[-1] if out.strip() else '(no answer)')
+
+
+def usb_ok():
+    out = fb('getvar', 'product', check=False)
+    return 'product: xnuloader' in out
+
+
+def r5qd(*words):
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / 'wifi'))
+    import r5qd_client
+    return r5qd_client.main(list(words))
+
+
+def tools():
+    """every built on-phone tool into /var/r5q/bin over Wi-Fi"""
+    src = pathlib.Path(__file__).resolve().parent / 'port/build/phone-tools'
+    built = sorted(p for p in src.iterdir() if p.is_file() and not p.name.startswith('.')) if src.exists() else []
+    if not built:
+        raise SystemExit(f'nothing in {src}: run pipeline/build_phone_tools.sh (in WSL) first')
+    for p in built:
+        print(f'{p.name}: ', end='', flush=True)
+        r5qd('put', str(p), f'/var/r5q/bin/{p.name}')
+
+
+def rescue():
+    """back to a running iOS: a stuck USB link cleared from iOS, the crash record saved, iOS started (standard args)"""
+    if not usb_ok():
+        print('USB: no answer from the loader ("no link"?): restarting the phone from iOS over Wi-Fi', flush=True)
+        try:
+            r5qd('put', str(pathlib.Path(__file__).resolve().parent / 'port/build/phone-tools/r5q_reboot'),
+                 '/var/r5q/bin/r5q_reboot')
+            r5qd('run', '/var/r5q/bin/r5q_reboot')
+        except Exception as e:      # (the connection drops as the phone goes down)
+            print(f'    ({type(e).__name__}: the phone went down, as it should)')
+        for _ in range(60):
+            time.sleep(3)
+            if usb_ok():
+                break
+        if not usb_ok():
+            raise SystemExit('the loader does not answer on USB after the restart either: the cable or the PC side')
+        print('USB: the loader answers again')
+    def restart():
+        fb('oem', 'stop', check=False)                  # (live mode: iOS returns, the phone restarts)
+        if not gone(45):
+            fb('reboot', check=False)                   # (maintenance mode)
+            gone(30)
+        wait_for_phone()                                # (caught in the listening window)
+
+    print('restarting into the listening window to save the log slots (the last run\'s record)', flush=True)
+    restart()
+    logs(pathlib.Path(__file__).parent / 'port/build/phone-logs')
+    print('starting iOS with the standard boot-args', flush=True)
+    restart()
+    set_args(['std'])
+    settime()
+    print(fb('oem', 'continue', check=False).splitlines()[0])
 
 
 def screenshot(dest):

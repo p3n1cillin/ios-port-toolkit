@@ -5923,6 +5923,41 @@ r5q_clk_dump(const char *when)
 	}
 }
 
+/*
+ * (Test 249, mic>=7) The codec's supplies, read only: PM8150 S4 (1.8 V: cdc-vdd-buck, buck-sido, tx-h, rx-h, vddpx-1;
+ * a "stub" regulator in the DT, i.e. the AOP's, never switched by Android) and PM8150L BOB (3.3 V: cdc-vdd-3v3, RPMh
+ * "bobc1"). PM8150's switchers S1..S5 on slave 1 at 0x14/0x17/0x1a/0x1d/0x20 (S4 = 0x1d), BOB on slave 5 at 0xa0:
+ * type/subtype (0x04), status 1/2 (0x08: bit 7 "ready"), the voltage set point (0x40/0x41, mV), mode (0x45) and
+ * enable (0x46: bit 7). Has the codec's power really been there all along?
+ */
+static void
+r5q_supply_dump(void)
+{
+	extern bool redwood_spmi_peek(uint16_t id, uint8_t reg, uint8_t *bytes, uint32_t count);
+	static const struct {
+		uint16_t id;
+		const char *name;
+	} regs[] = {
+		{ 0x114, "PM8150 S1" }, { 0x117, "PM8150 S2" }, { 0x11a, "PM8150 S3" }, { 0x11d, "PM8150 S4 (the codec's 1.8 V)" },
+		{ 0x120, "PM8150 S5" }, { 0x5a0, "PM8150L BOB (the codec's 3.3 V)" },
+	};
+
+	for (unsigned i = 0; i < sizeof(regs) / sizeof(regs[0]); i++) {
+		uint8_t t[2] = { 0 }, st[2] = { 0 }, v[2] = { 0 }, me[2] = { 0 };
+
+		if (!redwood_spmi_peek(regs[i].id, 0x04, t, 2)) {
+			tell("adsp: slim: supply %s (%#x): no channel / no answer\n", regs[i].name, regs[i].id);
+			continue;
+		}
+		(void)redwood_spmi_peek(regs[i].id, 0x08, st, 2);
+		(void)redwood_spmi_peek(regs[i].id, 0x40, v, 2);
+		(void)redwood_spmi_peek(regs[i].id, 0x45, me, 2);
+		tell("adsp: slim: supply %s (%#x): type %#x subtype %#x, status %02x %02x (ready %u), set %u mV, mode %02x, "
+		    "enable %02x (%s)\n", regs[i].name, regs[i].id, t[0], t[1], st[0], st[1], st[0] >> 7, v[0] | (v[1] << 8), me[0],
+		    me[1], (me[1] & 0x80) ? "on" : "off by this register");
+	}
+}
+
 static void
 r5q_slim_v5(vm_offset_t slim, uint32_t mic)
 {
@@ -5948,6 +5983,7 @@ r5q_slim_v5(vm_offset_t slim, uint32_t mic)
 		return;
 	}
 	if (mic >= 7) {
+		r5q_supply_dump();
 		r5q_clk_dump("before the vote");
 	}
 	tell("adsp: slim: v5: the codec's clock %s\n", redwood_r5q_rpmh_enable("lnbclka2") ? "on" : "NOT ON");

@@ -3,7 +3,7 @@
 This directory is derived from [G986N-iOS](https://github.com/leh0726/G986N-iOS) (commit 946de0fed8e5), itself a
 port of [HackiOS](https://github.com/oosexgang/hackios-xnu-kernel) by OOSEX GANG, whose kernel side is under the
 Apple Public Source License 2.0 ([LICENSE](LICENSE)). It was changed for the Samsung Galaxy S10 Lite (r5q)
-native iOS port between November 1 and November 18, 2026; the git history of this repository has the details.
+native iOS port between November 1 and November 19, 2026; the git history of this repository has the details.
 
 These files replace the donor's files of the same path in its `xnu/files/` tree when the kernel is built
 (`kernel-build/build-xnu-sandbox.sh` copies them over it). What changed, broadly:
@@ -30,6 +30,13 @@ These files replace the donor's files of the same path in its `xnu/files/` tree 
 - `bsd/miscfs/apfs/apfs_vnops.c`: fixed changes to what a file reads, made as it is read, each only where the file's
   name, size and old bytes match (iOS's CoreMotion motion capabilities and compass factory in the dyld shared cache,
   with the matching code-signature page hashes); see docs/SYSTEM-PATCHING.md.
+- `bsd/dev/redwood_wifi.c` (Tests 244-262, November 18-19): Bluetooth. The WCN3990 over a polled GENI UART, its
+  firmware download, and its hand-over to iOS's bluetoothd: the kernel control `com.apple.uart.bluetooth`, an HCI
+  filter, `/dev/uart.bluetooth`. See docs/BLUETOOTH.md.
+- `iokit/Kernel/MiniIOMobileFramebuffer.cpp` (Test 262): `redwood_publish_named_service`, a plain named IOService (the
+  `bluetooth` service that MobileBluetooth looks for).
+- `osfmk/arm/io_map.c` (Test 252): Apple's open-source XNU file (xnu-8796.121.2) with the I/O submap at 64 MB instead of
+  8 MB, and its use logged; a full submap made `ml_io_map` wait for ever.
 
 `bsd/kern/kern_exec.c` is Apple's open-source XNU file (xnu-8796.121.2) as the donor's patch changes it (library
 insertion by program name, `kern.exec_inject`); here its setting holds 2048 bytes instead of 512.

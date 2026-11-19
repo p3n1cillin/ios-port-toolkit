@@ -22,10 +22,11 @@ binaries, no build outputs and no phone backups are in this repository (see [the
 | `pipeline/` | how a test is built now: the root volume, the test image, the run ([pipeline/README.md](pipeline/README.md)) |
 | `phone.py` | everything done with the phone from the PC: `cycle` (flash, restart, follow the log), `args`, `logs`, `smem`, `screenshot`, … |
 | `build_*.py`, `package_install_boot.py` | the build pipeline (kernel in a sandbox, loader, shim, BOOT image) |
+| `wifi/BLUETOOTH-PLAN.md`, `wifi/BLUETOOTH-IOS-RESEARCH.md` | Bluetooth, Tests 244-262, and how iOS 16.5 reaches its controller |
 | `wifi/WIFI-PLAN.md` | everything since Test 111, step by step with what every test showed: Wi-Fi, sound, GPU, apps, sensors, CoreMotion, the compass, the microphone |
 | `SESSION.md` | the test-by-test log of the earlier stages |
 
-## State (Test 243)
+## State (Test 262)
 
 **Works:**
 
@@ -45,6 +46,8 @@ binaries, no build outputs and no phone backups are in this repository (see [the
 
   How it's done, generically: [docs/SENSORS.md](../../docs/SENSORS.md),
   [docs/IOS-SENSORS.md](../../docs/IOS-SENSORS.md), [docs/SYSTEM-PATCHING.md](../../docs/SYSTEM-PATCHING.md).
+- **Bluetooth:** the WCN3990 under iOS's own bluetoothd. Settings > Bluetooth works, with LE scanning and classic
+  discovery. Pairing has not been tried yet. How it's done: [docs/BLUETOOTH.md](../../docs/BLUETOOTH.md).
 
 **Partly:**
 
@@ -54,7 +57,7 @@ binaries, no build outputs and no phone backups are in this repository (see [the
 
 - **Microphone:** the WCD9340 codec never enumerates on SLIMbus. What is ruled out is in WIFI-PLAN, "Tests 237-240".
 - **Metal:** there is no GPU driver for iOS, so the map in Maps and live wallpapers are missing.
-- **Radios and camera:** Bluetooth, camera, cellular.
+- **Radios and camera:** camera, cellular; Bluetooth audio.
 - **FairPlay:** App Store apps won't run; this needs Apple's FairPlay kernel extension.
 
 Setting up a machine to build and run it: [docs/SETUP.md](../../docs/SETUP.md). Licences: the loader and the kernel

@@ -1,10 +1,10 @@
 # Native iOS porting toolkit (Android phones: Qualcomm first, MediaTek and Exynos/Tensor started)
 
 > **This repository** also carries the S10 Lite port's own working tree in [ports/r5q](ports/r5q/README.md)
-> (loader, kernel drivers, build pipeline, phone tool, iOS-side libraries and test tools, notes; up to Test 243:
-> Wi-Fi, sound, sensors with rotation, auto-brightness and CoreMotion device motion). Set-up:
-> [docs/SETUP.md](docs/SETUP.md). Licences: MIT, with the loader and kernel drivers under the Apple Public Source
-> License 2.0: [NOTICE.md](NOTICE.md).
+> (loader, kernel drivers, build pipeline, phone tool, iOS-side libraries and test tools, notes; up to Test 262:
+> Wi-Fi, sound, sensors with rotation, auto-brightness and CoreMotion device motion, Bluetooth under iOS's own
+> bluetoothd). Set-up: [docs/SETUP.md](docs/SETUP.md). Licences: MIT, with the loader and kernel drivers under the
+> Apple Public Source License 2.0: [NOTICE.md](NOTICE.md).
 
 This toolkit captures how iOS 16.5 was made to boot natively on the **Samsung Galaxy S10 Lite** (SM-G770F,
 `r5q`, Snapdragon 855 / SM8150). As of Test 68 the phone runs to a usable home screen with:
@@ -324,6 +324,20 @@ When iOS decides something from a fixed per-model table:
 A wrong page hash silently strips every process's entitlements; on the S10 Lite that meant no touch screen.
 `tools/ios/` finds code by its strings and computes the hash. r5qd's `reload` swaps an injected library without a
 reboot. Details: [docs/SYSTEM-PATCHING.md](docs/SYSTEM-PATCHING.md).
+
+### 11. Bluetooth: a Qualcomm controller under Apple's bluetoothd
+
+The kernel owns the chip: it powers the WCN399x over a polled GENI UART and loads its firmware as Linux `btqca`
+does. It then hands iOS an H4 byte stream on the kernel-control socket `com.apple.uart.bluetooth`. Apple's own
+bluetoothd runs **unpatched**, with:
+
+- one environment variable that picks that socket;
+- a stand-in for BlueTool;
+- a registered IOService named `bluetooth`;
+- an HCI filter that answers the Broadcom vendor commands bluetoothd sends.
+
+On the S10 Lite this gives LE scanning, classic discovery and a working Settings > Bluetooth. Details, including
+each failure on the way: [docs/BLUETOOTH.md](docs/BLUETOOTH.md).
 
 ## What to gather for a new phone, in this order
 

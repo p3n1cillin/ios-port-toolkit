@@ -339,7 +339,7 @@
     `press X Y [MS]`, `swipe X0 Y0 X1 Y1 [MS]` in pixels of iOS's 750x1624 screen (top-left of `phone.py screenshot`).
     Kernel: struct r5q_touch_mailbox ("XNUTOUCH") in redwood_sec_ts.c, a thread plays each gesture as finger 9 through
     redwood_touch_post() (`pc_touch=0` turns it off); loader: finds the mailbox in the loaded kernel like kernel_live,
-    `oem touch KIND X0 Y0 X1 Y1 MS` (hex) while iOS runs. Seen with it: **Settings shows "Wi-Fi: Living Room"; the
+    `oem touch KIND X0 Y0 X1 Y1 MS` (hex) while iOS runs. Seen with it: **Settings shows "Wi-Fi: <SSID>"; the
     Wi-Fi screen shows it ticked (lock, full bars); its scans run through our scan op (31-39 access points heard
     each time; the list shows the strong ones only)**. Safari: opens, Favorites shown, tapping Google leaves a blank
     page and the UI stops answering (stop, address bar). Not Wi-Fi: the donor's y2q had the same (TLS stalled after the
@@ -992,3 +992,37 @@ run ends with the modem shut down through TZ, after asking it to stop over SMP2P
   app (cm_test north) still calibrated field 0 / accuracy -1, yaw 0. Rates per sensor alone are fine (accel/gyro
   23/s, mag 10/s; cm_rate.m). Next: test Compass outdoors (interference vs WMM inclination); if it still freezes,
   locationd's heading path (CLCompass6 -> CLCompassCalculator interference checks) needs its own logs.
+
+## Test 249 (2026-11-19): the microphone codec's supplies -- ON (ruled out)
+
+- `r5q_supply_dump` in redwood_adsp.c (mic>=7), read only through `redwood_spmi_peek`:
+  - PM8150 S4 (slave 1, peripheral 0x1d; the codec's 1.8 V for buck, SIDO, tx-h, rx-h and vddpx-1; a "stub"
+    regulator in the DT, i.e. the AOP's): type 0x3 subtype 0xa, status 0x96 (ready), set 1800 mV, enable 0x80 (on);
+  - PM8150L BOB (slave 5, peripheral 0xa0; the codec's 3.3 V, RPMh `bobc1`): type 0x29 subtype 0x5, status 0x86
+    (ready), 3296 mV, on.
+  - Also seen: PM8150 S1 off (752 mV set), S2 600 mV and S3 872 mV on, S5 2000 mV on.
+- ADDR_QUERY still refused 301 times in 3 s. **Ruled out now for the WCD9340's silence:** supplies, MCLK
+  (LN_BB_CLK2 on), reset (GPIO143), order and timing, address bytes, the framer (QMI 0x22 says done), the device
+  tree. Left: the codec chip itself (its SPI interface, to prove it is alive), or the DSP's SLIMbus manager
+  enumerating only on a request we don't make (Android's audio HAL / AFE sets a SLIMbus port up only after
+  enumeration, so not that), or a Samsung-specific step (an `ssm`/`sec_audio` driver in Samsung's kernel source).
+
+## Test 250 (2026-11-19, no reboot): Settings > Privacy & Security > Location Services -- FIXED
+
+- Cause (PrivacySettingsUI, `-[PUIPrivacyController refreshLocationServicesAvailable]`, read in the shared cache with
+  tools/ios/dsc_sel.py): it asks CoreTelephony (`[self _client] getSubscriptionInfoWithError:`) for the SIM
+  subscriptions and each carrier bundle's "Location Services Available".
+  - With no subscriptions it sets the cached value to YES.
+  - When the CoreTelephony request **fails** (no CommCenter here) it logs and returns, the cached value stays NO,
+    and the row is hidden.
+- Fix (wifi/inject_app.c, `privacy_hook`): in Preferences, a dyld add-image callback waits for PUIPrivacyController
+  (PrivacySettingsUI is loaded when the Privacy pane opens) and replaces the method with
+  `set_cachedLocationServicesAvailableValue: @YES` (what a phone without a SIM gets).
+- Hot-loaded with `inject` (the libr5q-app group pointed at /var/r5q/lib/libr5q-app.dylib) and Preferences killed.
+- **Verified:** the row shows "Location Services On", and the pane works: the toggle, Location Alerts, and per-app
+  rows (Compass "While Using", Maps and Weather "When Shared", System Services).
+- In the root image from the next root build (inject_app.c is built by build_root_app.sh).
+- Also seen: "Failed to obtain ALS Curve info" from backboardd comes only in bursts while our auto-brightness eases
+  (CoreBrightness on each BKSDisplayBrightnessSet). Harmless; left.
+- New phone.py helpers: `unlock`, `home`, `open BUNDLE_ID`. `open` tries openurl first and unlocks only if iOS
+  refuses, because an unlock tap while an app is in front taps the app.

@@ -2900,3 +2900,36 @@ MiniIOMobileFramebufferStart(IOService * provider)
 	}
 	fb->release();
 }
+
+/*
+ * (r5q Test 262) A plain IOService under IOResources, by name, with one data property -- for the C drivers, which have
+ * no IOKit of their own. Bluetooth: iOS's MobileBluetooth (BTSessionAttachWithQueue, the way BluetoothManager and so
+ * Settings > Bluetooth reach bluetoothd) returns error 9 at once unless IOServiceNameMatching("marconi-bt") or
+ * ("bluetooth") finds a registered service; a device-tree node alone is not one. bluetoothd reads its
+ * "local-mac-address" (6 bytes) from the same service.
+ */
+extern "C" bool
+redwood_publish_named_service(const char * name, const char * dataKey, const void * data, unsigned length)
+{
+	IOService * service = OSTypeAlloc(IOService);
+	IOService * resources = IOService::getResourceService();
+	bool published = false;
+
+	if (service != NULL && resources != NULL && service->init()) {
+		service->setName(name);
+		if (dataKey != NULL && data != NULL) {
+			OSData * value = OSData::withBytes(data, length);
+
+			if (value != NULL) {
+				service->setProperty(dataKey, value);
+				value->release();
+			}
+		}
+		if (service->attach(resources)) {
+			service->registerService();
+			published = true;
+		}
+	}
+	OSSafeReleaseNULL(service);
+	return published;
+}

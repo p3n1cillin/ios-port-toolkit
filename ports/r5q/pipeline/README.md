@@ -14,7 +14,19 @@ scripts are what has been used since. They were kept outside the tree until Test
 Notes:
 
 - Do **not** `export MSYS_NO_PATHCONV=1` for `mktest.sh`; do set it for `phone.py sh` and `r5qd_client.py`.
-- `phone.py cycle … ARGS` **replaces** the stored boot-args with ARGS. Pass the whole set (see WIFI-PLAN for the
-  current one), not just the new key.
+- `phone.py cycle … ARGS`: plain `key=val` ARGS **replace** the stored boot-args. Use `+key=val`, `-key` or `std`
+  for changes to the standard set in `phone-args.txt` (below).
 - Kernel builds take about 10 minutes. Run them in the background.
 - Every test's purpose and result goes into `wifi/WIFI-PLAN.md` as it is run.
+
+## Phone helpers added 2026-11-19 (to save time)
+
+| Command | Does |
+| --- | --- |
+| `phone.py cycle IMG SECS +key=val -key` | boot-args as **changes to the standard set** in `phone-args.txt` (`std` = the standard set as is). No more retyping the whole set; a plain `key=val` list still replaces it as before |
+| `phone.py cycle …` (any) | if the run **ends the system**, says so with the 15 lines before it |
+| `phone.py rescue` | back to a running iOS from anything: a stuck USB link ("no link") is cleared by restarting the phone from iOS over Wi-Fi (`r5q_reboot`); then the listening window, where the **log slots are saved** (the crash's record, before a new run overwrites it), then iOS with the standard boot-args |
+| `bash pipeline/build_phone_tools.sh` (WSL) then `phone.py tools` | every on-phone tool built into `port/build/phone-tools/` and put into `/var/r5q/bin` in one go (after a crash `/var` may not have kept them) |
+| `bash pipeline/test.sh B "label" [+args…]` | a whole test in one command: the kernel built (or `KERNEL=xnu-r5q-tNNN.macho` reused), the root (newest, or `ROOT=build`), the image from test B-1, the run (`FOLLOW=` seconds) |
+
+`phone-args.txt` is the standard boot-arg set. Change it when a feature's arg becomes part of every boot.

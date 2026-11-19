@@ -381,6 +381,46 @@ nil_dictionaries_survived(void)
 	}
 }
 
+/*
+ * (Test 250) Settings > Privacy & Security had no "Location Services" row. -[PUIPrivacyController
+ * refreshLocationServicesAvailable] (PrivacySettingsUI) asks CoreTelephony for the SIM subscriptions and their carrier
+ * bundles' "Location Services Available"; with no SIM it says available -- but when the CoreTelephony request ERRS, as
+ * here (no CommCenter: no cellular), it logs and returns without setting anything, and the cached value stays NO. Here
+ * the method only says "available" (set_cachedLocationServicesAvailableValue: @YES), as it would for a phone without a
+ * SIM. PrivacySettingsUI is loaded when the Privacy pane is first opened: hooked from a dyld add-image callback.
+ */
+#include <mach-o/dyld.h>
+
+extern const void *const kCFBooleanTrue;        /* (this file declares its own CF calls: no CoreFoundation.h) */
+
+static void
+location_services_available(id self, SEL _cmd)
+{
+	(void)_cmd;
+	((void (*)(id, SEL, id))objc_msgSend)(self, sel_registerName("set_cachedLocationServicesAvailableValue:"),
+	    (id)kCFBooleanTrue);
+}
+
+static void
+privacy_hook(const struct mach_header *mh, intptr_t slide)
+{
+	static bool done;
+	Class c;
+	Method m;
+
+	(void)mh;
+	(void)slide;
+	if (done || (c = objc_getClass("PUIPrivacyController")) == NULL) {
+		return;
+	}
+	done = true;
+	m = class_getInstanceMethod(c, sel_registerName("refreshLocationServicesAvailable"));
+	if (m != NULL) {
+		method_setImplementation(m, (IMP)location_services_available);
+		dprintf(console, "r5q-app: Settings: Location Services shown as available (no CoreTelephony here)\n");
+	}
+}
+
 __attribute__((constructor)) static void
 start(void)
 {
@@ -406,5 +446,8 @@ start(void)
 	coreimage_software();
 	if (strcmp(getprogname(), "PosterBoard") == 0) {
 		nil_dictionaries_survived();
+	}
+	if (strcmp(getprogname(), "Preferences") == 0) {
+		_dyld_register_func_for_add_image(privacy_hook);         /* (Test 250) */
 	}
 }
