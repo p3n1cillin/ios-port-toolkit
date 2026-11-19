@@ -305,3 +305,18 @@ candidate designs).
   3. hand the frames to `/dev/redwood-camera`: port the donor's `ios_session` onto this path, so Camera.app shows
      the S5K3L6's picture through the iOS side proven in Test 269;
   4. then the other sensors (IMX586 main, IMX616 front, S5K5E9).
+- **Test 289 (kernel t289 + loader with `camdma_pa`; `camrx=7 cam_pll600=1`): A WHOLE FRAME IN MEMORY.**
+  - The loader now reserves **4 MB below 4 GB for the camera** (`camdma_pa=`, port/xnuloader/loader.c): here at
+    0xd8200000.
+  - Our own exposure, by SMIA: 0x0202 = 768 lines, 0x0204 = 0x100 (about 8x). Both writes acknowledged.
+  - RDI0 kept at RAW10 (0x802bf007), with no crop. WM0 in frame mode at 0xd8200000, FRAME_INC 0. Frame done at the
+    first poll, violation 0, **no SMMU fault**.
+  - **1,000,386 bytes changed, the last at 0xf443f = 1296 x 772 - 1**: exactly one frame at the CSID's 16-byte line
+    stride (1296 for 1028 RAW10 pixels), nothing past it.
+  - **Still black:** mean high byte 15 (the black level), and the 64x24 character picture all blank. Most likely
+    the rear (ultra-wide) camera faced the desk; the owner was not there to point it at light.
+- **Next:**
+  1. a frame with the phone pointed at light (owner), or the front camera;
+  2. the hand-over to iOS: an r5q back end in redwood_camera.c's `/dev/redwood-camera` session (the donor's
+     `ios_session`). Its frame ring goes in the 4 MB camdma block (three 1 MB places plus spare); its power, receive
+     and capture steps are the ones proven here.

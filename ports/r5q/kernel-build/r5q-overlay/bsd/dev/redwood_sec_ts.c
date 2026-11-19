@@ -1897,6 +1897,7 @@ extern vm_offset_t ml_io_map_unmappable(vm_offset_t phys_addr, vm_size_t size, u
 static vm_offset_t rx_ife, rx_smmu;
 static volatile uint8_t *rx_buf;
 static uint64_t rx_buf_pa;
+static uint32_t rx_buf_size;
 static uint32_t rx_smr = ~0u, rx_s2cr_was;
 static bool rx_frame_done;
 
@@ -1907,19 +1908,21 @@ cam_rx_memory_up(void)
 {
 	uint32_t idr0, idr1, n, numcb, page, numpage, free_smr = ~0u, share = ~0u;
 
-	if (!PE_parse_boot_argn("lowdma_pa", &rx_buf_pa, sizeof(rx_buf_pa)) || rx_buf_pa == 0 ||
-	    rx_buf_pa + 0x10000 > 0x100000000ull) {
-		rxlog("camera rx: no lowdma_pa below 4 GB from the loader: no memory stage\n");
+	/* (Test 289) camrx=7: whole frames into the loader's 4 MB camera block (camdma_pa); camrx=6: the cropped 32 KB one */
+	rx_buf_size = camrx_level >= 7 ? 0x400000u : 0x10000u;
+	if (!PE_parse_boot_argn(camrx_level >= 7 ? "camdma_pa" : "lowdma_pa", &rx_buf_pa, sizeof(rx_buf_pa)) || rx_buf_pa == 0 ||
+	    rx_buf_pa + rx_buf_size > 0x100000000ull) {
+		rxlog("camera rx: no %s below 4 GB from the loader: no memory stage\n", camrx_level >= 7 ? "camdma_pa" : "lowdma_pa");
 		return false;
 	}
-	rx_buf = (volatile uint8_t *)ml_io_map_unmappable(rx_buf_pa, 0x10000, VM_WIMG_WCOMB);
+	rx_buf = (volatile uint8_t *)ml_io_map_unmappable(rx_buf_pa, rx_buf_size, VM_WIMG_WCOMB);
 	rx_ife = ml_io_map(0x0acc4000UL, 0x4000);
 	rx_smmu = ml_io_map_unmappable(0x15000000UL, 0x100000, VM_WIMG_IO);
 	if (rx_buf == NULL || rx_ife == 0 || rx_smmu == 0) {
 		rxlog("camera rx: no mapping for the memory stage\n");
 		return false;
 	}
-	for (uint32_t i = 0; i < 0x10000; i++) {
+	for (uint32_t i = 0; i < rx_buf_size; i++) {
 		rx_buf[i] = 0xa5;               /* (what the IFE writes stands out against it) */
 	}
 	/* the SMMU: SID 0x840 mask 0x620 (all the IFEs' streams) in a free SMR, the S2CR of a non-translating boot bank */
@@ -1961,11 +1964,13 @@ cam_rx_memory_up(void)
 	rxlog("camera rx: smmu: SMR%u %#x, S2CR %#x (as SMR%u's); buffer %#llx (64 KB, 0xa5)\n", free_smr,
 	    *(volatile uint32_t *)(rx_smmu + 0x800 + 4 * free_smr), *(volatile uint32_t *)(rx_smmu + 0xc00 + 4 * free_smr), share,
 	    rx_buf_pa);
-	/* the CSID's RDI0 again: PLAIN16_10 with a 1024 x 16 crop (its path is halted and set up anew) */
+	/* the CSID's RDI0 again: PLAIN16_10 with a 1024 x 16 crop (its path is halted and set up anew); camrx=7 keeps RAW10 */
 	CSID(0x208) = 2;
-	CSID(0x200) = 0x002b2467;
-	CSID(0x21c) = (1023u << 16) | 0;
-	CSID(0x220) = (15u << 16) | 0;
+	if (camrx_level < 7) {
+		CSID(0x200) = 0x002b2467;
+		CSID(0x21c) = (1023u << 16) | 0;
+		CSID(0x220) = (15u << 16) | 0;
+	}
 	CSID(0x200) |= 1u << 31;
 	/* IFE-lite 0: reset, bus init, write master 0 in frame mode */
 	IFE(0x05c) = 0x80000000u;
@@ -2028,7 +2033,40 @@ cam_rx_memory_down(void)
 		rxlog("camera rx: smmu: SMR%u taken away; global fault status %#x\n", rx_smr, *(volatile uint32_t *)(rx_smmu + 0x48));
 		rx_smr = ~0u;
 	}
-	if (rx_buf != NULL) {
+	if (rx_buf != NULL && rx_buf_size > 0x10000) {
+		/*
+		 * (Test 289) A whole RAW10 frame: how much was written, where the writing ends, and a 64 x 24 picture of it in
+		 * characters (each cell one pixel's 8 high bits: MIPI RAW10 packs 4 pixels in 5 bytes, the first 4 their high
+		 * bytes), at a stride of 1296 bytes a line.
+		 */
+		static const char shades[] = " .:-=+*#%@";
+		uint32_t changed = 0, last = 0, sum = 0, cells = 0;
+		char row[72];
+
+		for (uint32_t i = 0; i < rx_buf_size; i++) {
+			if (rx_buf[i] != 0xa5) {
+				changed++;
+				last = i;
+			}
+		}
+		for (uint32_t gy = 0; gy < 24; gy++) {
+			uint32_t y = gy * 32 + 16, x;
+
+			for (uint32_t gx = 0; gx < 64; gx++) {
+				uint8_t v;
+
+				x = gx * 16 + 8;
+				v = rx_buf[y * 1296 + (x / 4) * 5 + (x % 4)];
+				sum += v;
+				cells++;
+				row[gx] = shades[v * 10 / 256];
+			}
+			row[64] = 0;
+			rxlog("camera rx: |%s|\n", row);
+		}
+		rxlog("camera rx: the whole frame: %u of %u bytes written, the last at %#x (one frame: 1296 x 772 = %#x); mean "
+		    "high byte %u\n", changed, rx_buf_size, last, 1296 * 772, cells ? sum / cells : 0);
+	} else if (rx_buf != NULL) {
 		uint32_t changed = 0, lo = 0xffff, hi = 0;
 		char line[200];
 		int at;
@@ -2292,8 +2330,20 @@ camsensor_probe(void)
 				if (tab == NULL || tab_size < 48 || memcmp(tab, "RWCTAB02", 8) != 0) {
 					rxlog("camera sensor: no camera-s5k3l6.tab in the root's /fw: no stream test\n");
 				} else if (cam_table(tab, tab_size, "init") && cam_table(tab, tab_size, "res2")) {
+					/*
+					 * (Test 289) Test 288's frame was black (pixels 63-66: the black level): an exposure of our own, by
+					 * SMIA's registers, coarse integration time 0x0202 = 768 lines (the mode's frame is 817) and analogue
+					 * gain 0x0204 = 0x100 (Samsung's 0x20 = 1x: about 8x). cam_exp=/cam_gain= set them instead.
+					 */
+					uint32_t exp_lines = 768, gain = 0x100;
+					bool rx;
+
+					(void)PE_parse_boot_argn("cam_exp", &exp_lines, sizeof(exp_lines));
+					(void)PE_parse_boot_argn("cam_gain", &gain, sizeof(gain));
+					rxlog("camera sensor: exposure %u lines: %s; gain %#x: %s\n", exp_lines,
+					    bb_write16(0x0202, (uint16_t)exp_lines, 2) ?: "taken", gain, bb_write16(0x0204, (uint16_t)gain, 2) ?: "taken");
 					/* (Test 276) the receive path before the stream starts, as Android orders it */
-					bool rx = camrx_on && cam_rx_up();
+					rx = camrx_on && cam_rx_up();
 
 					if (cam_table(tab, tab_size, "on")) {
 						for (int r = 0; r < 4; r++) {

@@ -3814,6 +3814,35 @@ run_kernel(int have_checkpoint, uint64_t checkpoint)
 			if (n < BOOT_LINE_LENGTH - 1) ba->commandLine[n++] = ' ';
 		}
 	}
+	{
+		/*
+		 * r5q (Test 289): 4 MB below 4 GB for the camera's image engine (IFE-lite's write master takes 32-bit
+		 * addresses, through an SMMU match that does not translate: bsd/dev/redwood_sec_ts.c): two whole 1028x772
+		 * RAW10 frames (1,000,512 bytes each at stride 1296) with room after them. Once per loader, as lowdma.
+		 */
+		static uint64_t camdma;
+		static const char prefix[] = "camdma_pa=0x";
+		static const char hex[] = "0123456789abcdef";
+
+		if (camdma == 0) {
+			uint64_t a = 0xffffffffULL;
+
+			if (!EFI_ERROR(BS->allocate_pages(AllocateMaxAddress, EfiLoaderData, 0x400000 >> 12, &a))) {
+				camdma = a;
+				memset((void *)(uintptr_t)camdma, 0, 0x400000);
+				clean_dcache(camdma, camdma + 0x400000);
+			}
+		}
+		if (camdma != 0) {
+			for (const char *c = prefix; *c && n < BOOT_LINE_LENGTH - 1; c++) {
+				ba->commandLine[n++] = *c;
+			}
+			for (int shift = 28; shift >= 0 && n < BOOT_LINE_LENGTH - 1; shift -= 4) {
+				ba->commandLine[n++] = hex[(camdma >> shift) & 0xf];
+			}
+			if (n < BOOT_LINE_LENGTH - 1) ba->commandLine[n++] = ' ';
+		}
+	}
 	if (r5q_rmtfs_pa != 0) {
 		static const char prefix[] = "rmtfs_pa=0x";
 		static const char hex[] = "0123456789abcdef";

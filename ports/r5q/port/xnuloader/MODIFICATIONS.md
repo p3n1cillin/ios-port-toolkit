@@ -10,3 +10,4 @@ keeps serving fastboot on one core while iOS runs on another), the maintenance c
 allowlisted writes, boot-args, clock, peeks, screenshots, touch gestures), the PMIC RTC clock, the r5q modem's start through
 TrustZone (PAS) with rmtfs memory and the AOP, the S2MU106 charger set-up over QUP0 SE4 at every start, loading the
 Wi-Fi, audio and sensors DSPs (the sensors DSP held for the kernel to release), and the build-time test labels. The `build-*.sh` scripts here are new.
+- Test 289: a 4 MB block below 4 GB for the camera's image engine, passed to the kernel as `camdma_pa=`.
