@@ -1680,6 +1680,10 @@ rx_wait(volatile uint32_t *reg, uint32_t mask, uint32_t want, unsigned us_max)
 	return (*reg & mask) == want;
 }
 
+static bool cam_rx_memory_up(void);
+static void cam_rx_memory_poll(void);
+static void cam_rx_memory_down(void);
+
 static bool
 cam_rx_up(void)
 {
@@ -1863,7 +1867,197 @@ cam_rx_up(void)
 	CSID(0x028) = 0x0fffffff; CSID(0x038) = 0x7fff; CSID(0x080) = 1;
 	rx_reached = 5;
 	rxlog("camera rx: CSID RX cfg %#x %#x, RDI0 cfg %#x ctrl %#x\n", CSID(0x100), CSID(0x104), CSID(0x200), CSID(0x208));
+	if (camrx_level >= 6) {
+		/* (Test 288) the camera NoC (camnoc_axi: PLL0 even 300 / 2 = 150 MHz with cam_pll600) for the IFE's writes */
+		rxlog("camera rx: step: camera NoC\n");
+		CC(0xc170 + 4) = (CC(0xc170 + 4) & ~0x371fu) | (nopll ? 0x001u : pll600 ? 0x203u : 0x207u);
+		CC(0xc170) |= 1;
+		(void)rx_wait((volatile uint32_t *)(rx_cc + 0xc170), 1, 0, 500);
+		CC(0xc18c) |= 1;
+		(void)rx_wait((volatile uint32_t *)(rx_cc + 0xc18c), 1u << 31, 0, 2000);
+		rxlog("camera rx: camnoc RCG %#x cfg %#x branch %#x; step: memory\n", CC(0xc170), CC(0xc174), CC(0xc18c));
+		if (cam_rx_memory_up()) {
+			rx_reached = 6;
+		}
+	}
 	return true;
+}
+
+/*
+ * (r5q Test 288, camrx=6) One frame into memory (wifi/CAMERA-RX-SPEC.md (e), (f)): the CSID's RDI0 decoding RAW10 to
+ * 16 bits a pixel and cropping 1024 x 16 (32 KB), IFE-lite 0's write master 0 in frame mode writing it to the loader's
+ * low block (lowdma_pa, 64 KB below 4 GB; IMAGE_ADDR is 32 bits) with FRAME_INC 0 (every frame on the same 32 KB: no
+ * walk through memory), the SMMU matching the IFE streams (SMR 0x86200840) with the S2CR of a boot bank that does
+ * not translate (the IFE then writes physical addresses), the camera NoC and AXI on. The write master is stopped at
+ * the first frame done; the match is taken away only after it is off and a frame time has passed.
+ */
+#include <vm/memory_types.h>             /* (Test 288) VM_WIMG_WCOMB */
+extern vm_offset_t ml_io_map_unmappable(vm_offset_t phys_addr, vm_size_t size, unsigned int flags);
+
+static vm_offset_t rx_ife, rx_smmu;
+static volatile uint8_t *rx_buf;
+static uint64_t rx_buf_pa;
+static uint32_t rx_smr = ~0u, rx_s2cr_was;
+static bool rx_frame_done;
+
+#define IFE(o)  (*(volatile uint32_t *)(rx_ife + (o)))
+
+static bool
+cam_rx_memory_up(void)
+{
+	uint32_t idr0, idr1, n, numcb, page, numpage, free_smr = ~0u, share = ~0u;
+
+	if (!PE_parse_boot_argn("lowdma_pa", &rx_buf_pa, sizeof(rx_buf_pa)) || rx_buf_pa == 0 ||
+	    rx_buf_pa + 0x10000 > 0x100000000ull) {
+		rxlog("camera rx: no lowdma_pa below 4 GB from the loader: no memory stage\n");
+		return false;
+	}
+	rx_buf = (volatile uint8_t *)ml_io_map_unmappable(rx_buf_pa, 0x10000, VM_WIMG_WCOMB);
+	rx_ife = ml_io_map(0x0acc4000UL, 0x4000);
+	rx_smmu = ml_io_map_unmappable(0x15000000UL, 0x100000, VM_WIMG_IO);
+	if (rx_buf == NULL || rx_ife == 0 || rx_smmu == 0) {
+		rxlog("camera rx: no mapping for the memory stage\n");
+		return false;
+	}
+	for (uint32_t i = 0; i < 0x10000; i++) {
+		rx_buf[i] = 0xa5;               /* (what the IFE writes stands out against it) */
+	}
+	/* the SMMU: SID 0x840 mask 0x620 (all the IFEs' streams) in a free SMR, the S2CR of a non-translating boot bank */
+	idr0 = *(volatile uint32_t *)(rx_smmu + 0x20);
+	idr1 = *(volatile uint32_t *)(rx_smmu + 0x24);
+	n = idr0 & 0xff;
+	numcb = idr1 & 0xff;
+	page = (idr1 >> 31) ? 0x10000u : 0x1000u;
+	numpage = 1u << (((idr1 >> 28) & 7) + 1);
+	for (uint32_t i = 0; i < n && i < 128; i++) {
+		uint32_t smr = *(volatile uint32_t *)(rx_smmu + 0x800 + 4 * i), s2cr = *(volatile uint32_t *)(rx_smmu + 0xc00 + 4 * i);
+		uint32_t id = smr & 0x7fff, m = (smr >> 16) & 0x7fff, cb = s2cr & 0xff;
+
+		if (!(smr & 0x80000000u)) {
+			if (i < 70) {
+				free_smr = i;   /* (the highest free below 70: Wi-Fi takes the lowest, SLIMbus below 80, SLPI the highest) */
+			}
+			continue;
+		}
+		if ((0x840 & ~0x620 & ~m) == (id & ~0x620 & ~m) && ((id | m) & 0x7c0) >= 0x800) {
+			rxlog("camera rx: smmu: SMR%u %#x (S2CR %#x) may already match the IFE's streams: no memory stage\n", i, smr, s2cr);
+			return false;
+		}
+		if (share == ~0u && ((s2cr >> 16) & 3) == 0 && cb < numcb &&
+		    !(*(volatile uint32_t *)(rx_smmu + (vm_offset_t)numpage * page + (vm_offset_t)cb * page) & 1) &&
+		    *(volatile uint32_t *)(rx_smmu + page + 4 * cb) == 0x1f000u) {
+			share = i;
+		}
+	}
+	if (free_smr == ~0u || share == ~0u) {
+		rxlog("camera rx: smmu: no free SMR (%#x) or no non-translating bank to share (%#x)\n", free_smr, share);
+		return false;
+	}
+	rx_smr = free_smr;
+	rx_s2cr_was = *(volatile uint32_t *)(rx_smmu + 0xc00 + 4 * free_smr);
+	*(volatile uint32_t *)(rx_smmu + 0xc00 + 4 * free_smr) = *(volatile uint32_t *)(rx_smmu + 0xc00 + 4 * share);
+	*(volatile uint32_t *)(rx_smmu + 0x800 + 4 * free_smr) = 0x86200840u;
+	__asm__ volatile ("dsb sy" ::: "memory");
+	rxlog("camera rx: smmu: SMR%u %#x, S2CR %#x (as SMR%u's); buffer %#llx (64 KB, 0xa5)\n", free_smr,
+	    *(volatile uint32_t *)(rx_smmu + 0x800 + 4 * free_smr), *(volatile uint32_t *)(rx_smmu + 0xc00 + 4 * free_smr), share,
+	    rx_buf_pa);
+	/* the CSID's RDI0 again: PLAIN16_10 with a 1024 x 16 crop (its path is halted and set up anew) */
+	CSID(0x208) = 2;
+	CSID(0x200) = 0x002b2467;
+	CSID(0x21c) = (1023u << 16) | 0;
+	CSID(0x220) = (15u << 16) | 0;
+	CSID(0x200) |= 1u << 31;
+	/* IFE-lite 0: reset, bus init, write master 0 in frame mode */
+	IFE(0x05c) = 0x80000000u;
+	IFE(0x018) = 0x3f9f;
+	if (!rx_wait((volatile uint32_t *)(rx_ife + 0x06c), 1u << 31, 1u << 31, 100000)) {
+		rxlog("camera rx: IFE-lite reset NOT DONE (status %#x)\n", IFE(0x06c));
+		return false;
+	}
+	IFE(0x064) = 0xffffffffu; IFE(0x068) = 0xffffffffu; IFE(0x058) = 1;
+	IFE(0x2080) = 0; IFE(0x200c) = 0xfffff; IFE(0x211c) = 0; IFE(0x2084) = 0xffffff;
+	IFE(0x225c) = 0xf; IFE(0x221c) = 0xff01; IFE(0x2220) = 0; IFE(0x2224) = 0; IFE(0x2228) = 0xff01;
+	IFE(0x2250) = 0; IFE(0x2254) = 1; IFE(0x2248) = 0; IFE(0x224c) = 1;
+	IFE(0x2214) = (uint32_t)rx_buf_pa;
+	IFE(0x2258) = 0;                                /* FRAME_INC 0: every frame on the same buffer */
+	IFE(0x2050) = 0xffffffffu; IFE(0x2054) = 0xffffffffu; IFE(0x2058) = 0xffffffffu; IFE(0x2068) = 1;
+	IFE(0x2208) = 0x3;                              /* WM0: enable, frame based */
+	IFE(0x04ac) = 0x2;                              /* register update, RDI0 */
+	CSID(0x208) = 1;                                /* RDI0 on again, at the frame boundary */
+	rxlog("camera rx: IFE-lite version %#x, bus %#x; WM0 cfg %#x addr %#x; CSID RDI0 cfg %#x\n", IFE(0x000), IFE(0x2000),
+	    IFE(0x2208), IFE(0x2214), CSID(0x200));
+	return true;
+}
+
+/* while streaming: the first frame done stops the write master */
+static void
+cam_rx_memory_poll(void)
+{
+	if (rx_ife == 0 || rx_frame_done) {
+		return;
+	}
+	for (int i = 0; i < 2000 && !rx_frame_done; i++) {
+		if (IFE(0x2060) & 1) {
+			IFE(0x2208) = 0;
+			IFE(0x04ac) = 0x2;
+			rx_frame_done = true;
+			rxlog("camera rx: FRAME DONE: bus status0 %#x 1 %#x 2 %#x, WM0 status %#x %#x, top status %#x %#x, violation %#x\n",
+			    IFE(0x205c), IFE(0x2060), IFE(0x2064), IFE(0x2200), IFE(0x2204), IFE(0x06c), IFE(0x070), IFE(0x07c));
+		} else {
+			spin_us(10);
+		}
+	}
+	if (!rx_frame_done) {
+		rxlog("camera rx: no frame done yet: bus status %#x %#x %#x, top %#x %#x, WM0 %#x %#x, violation %#x, comp %#x\n",
+		    IFE(0x205c), IFE(0x2060), IFE(0x2064), IFE(0x06c), IFE(0x070), IFE(0x2200), IFE(0x2204), IFE(0x07c), IFE(0x206c));
+	}
+}
+
+static void
+cam_rx_memory_down(void)
+{
+	if (rx_ife != 0) {
+		IFE(0x2208) = 0;
+		IFE(0x04ac) = 0x2;
+	}
+	delay_for_interval(20, NSEC_PER_MSEC);          /* (more than a frame at 120 a second, before the match goes) */
+	if (rx_smmu != 0 && rx_smr != ~0u) {
+		*(volatile uint32_t *)(rx_smmu + 0x800 + 4 * rx_smr) = 0;
+		*(volatile uint32_t *)(rx_smmu + 0xc00 + 4 * rx_smr) = rx_s2cr_was;
+		__asm__ volatile ("dsb sy" ::: "memory");
+		rxlog("camera rx: smmu: SMR%u taken away; global fault status %#x\n", rx_smr, *(volatile uint32_t *)(rx_smmu + 0x48));
+		rx_smr = ~0u;
+	}
+	if (rx_buf != NULL) {
+		uint32_t changed = 0, lo = 0xffff, hi = 0;
+		char line[200];
+		int at;
+
+		for (uint32_t i = 0; i < 0x10000; i++) {
+			changed += rx_buf[i] != 0xa5;
+		}
+		for (uint32_t i = 0; i < 0x8000; i += 2) {
+			uint32_t v = rx_buf[i] | rx_buf[i + 1] << 8;
+
+			if (v < lo) {
+				lo = v;
+			}
+			if (v > hi) {
+				hi = v;
+			}
+		}
+		at = snprintf(line, sizeof(line), "camera rx: the buffer: %u of 65536 bytes written; pixels %u..%u; first:", changed, lo, hi);
+		for (uint32_t i = 0; i < 24 && at < (int)sizeof(line) - 4; i++) {
+			at += snprintf(line + at, sizeof(line) - at, " %02x", rx_buf[i]);
+		}
+		rxlog("%s\n", line);
+		at = snprintf(line, sizeof(line), "camera rx: line 8:");
+		for (uint32_t i = 0; i < 24 && at < (int)sizeof(line) - 4; i++) {
+			at += snprintf(line + at, sizeof(line) - at, " %02x", rx_buf[8 * 2048 + 512 + i]);
+		}
+		rxlog("%s; past the frame (32 KB on): %02x %02x %02x %02x\n", line, rx_buf[0x8000], rx_buf[0x8001], rx_buf[0x9000],
+		    rx_buf[0xffff]);
+	}
 }
 
 static void
@@ -1882,6 +2076,10 @@ cam_rx_down(void)
 {
 	static const uint32_t branches[] = { 0xc01c, 0xc040, 0xc038, 0x6064, 0x6068, 0xc18c, 0xc168 };
 
+	if (rx_reached >= 6 || rx_smr != ~0u) {      /* (also when the memory stage stopped after its match) */
+		cam_rx_memory_down();           /* (Test 288) the write master off and the SMMU match away first */
+		CC(0xc18c) &= ~1u;
+	}
 	if (rx_csid != 0 && rx_reached >= 5) {
 		CSID(0x034) = 0;
 		CSID(0x208) = (CSID(0x208) & ~3u) | 2;
@@ -2107,6 +2305,9 @@ camsensor_probe(void)
 							rxlog("camera sensor: streaming? frame counter %u, mode_select %#x\n", fc, mode);
 							if (rx) {
 								cam_rx_show("streaming");
+								if (rx_reached >= 6) {
+									cam_rx_memory_poll();
+								}
 							}
 						}
 						(void)cam_table(tab, tab_size, "off");

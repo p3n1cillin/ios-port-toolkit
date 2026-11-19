@@ -283,3 +283,25 @@ candidate designs).
 - **Next: frames into memory.** IFE-lite 0 RDI0 write master (spec (e)), the camera NoC, the GCC camera AXI, the
   SMMU SMR 0x86200840 with a copied bypass S2CR, and a buffer below 4 GB (the loader's lowdma block grown, or a
   crop window to fit 64 KB first).
+- **Test 288 (kernel t288; `camrx=6 cam_pll600=1`): THE FIRST REAL FRAME IN MEMORY.** Code: `cam_rx_memory_up`,
+  `_poll`, `_down` in redwood_sec_ts.c.
+  - Camera NoC: RCG 0xc170 from PLL0 even 300 / 2, branch 0xc18c on (0x221). GCC camera AXI on.
+  - SMMU: **SMR69 = 0x86200840**, with the S2CR of SMR0 (a non-translating boot bank).
+  - Buffer: the loader's lowdma block 0xdbca9000 (64 KB), filled with 0xa5.
+  - The CSID's RDI0 is set again to PLAIN16_10 with a 1024x16 crop (cfg 0x802b2467). IFE-lite reset (version
+    0x10000000, bus 0x20000). WM0 in frame mode, FRAME_INC 0, register update 0x2.
+  - **FRAME DONE** at the first poll: bus status1 bit 0, top status 0x8000020 (SOF + register update),
+    **violation 0, no SMMU fault** (global 0). WM0 was stopped there, and the match taken away 20 ms later.
+  - **The buffer: exactly 32768 of 65536 bytes written**: 1024 x 16 x 2, with the 0xa5 past it untouched.
+  - **Pixels 63..66**, the sensor's black level (64 on 10 bits): the picture is dark. Either the phone lay with no
+    light on that camera, or the init and mode tables' default exposure is short.
+  - The CSID kept counting whole frames (32768 bytes each); the phone stayed up.
+- **Proven: sensor -> MIPI -> CSI-PHY 2 -> CSID -> IFE-lite -> SMMU -> RAM, all from our kernel.**
+- **Next:**
+  1. light: the exposure/gain registers (the module file's integration and gain addresses), and a test pointed
+     at light;
+  2. whole frames: a larger buffer below 4 GB (the loader's low block grown to about 3 MB) and RDI0 back to RAW10
+     packed (992020 bytes per frame);
+  3. hand the frames to `/dev/redwood-camera`: port the donor's `ios_session` onto this path, so Camera.app shows
+     the S5K3L6's picture through the iOS side proven in Test 269;
+  4. then the other sensors (IMX586 main, IMX616 front, S5K5E9).
