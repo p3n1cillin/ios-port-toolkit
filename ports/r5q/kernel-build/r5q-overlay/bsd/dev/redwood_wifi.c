@@ -9872,11 +9872,13 @@ out:
 #define GENI_DMA_GENERAL_CFG    0xe30
 
 static vm_offset_t bt_se;
+static vm_offset_t bt_rcg_page;                 /* (Test 263) the page of the serial engine's baud clock RCG */
+static uint32_t bt_se_hz = 7372800u;            /* that clock's rate, as set */
 
 static void
 bt_uart_speed(uint32_t baud)
 {
-	uint32_t div = 7372800u / (baud * 32u);
+	uint32_t div = bt_se_hz / (baud * 32u);
 
 	wr(bt_se + GENI_M_CLK_CFG, (div << 4) | 1);
 	wr(bt_se + GENI_S_CLK_CFG, (div << 4) | 1);
@@ -9969,6 +9971,7 @@ bt_stage2(vm_offset_t gcc_vote, vm_offset_t wrap2)
 	uint32_t rcg = BT_GCC_S3_RCG & 0xfff, n;
 
 	/* the clocks (S3, wrapper 2's AHB) on, and the baud clock at 7.3728 MHz */
+	bt_rcg_page = wrap2;
 	wr(gcc_vote + (BT_GCC_VOTE & 0xfff), rd(gcc_vote + (BT_GCC_VOTE & 0xfff)) | (1u << 7) | (1u << 2) | (1u << 1));
 	__asm__ volatile ("dsb sy" ::: "memory");
 	delay_for_interval(5, NSEC_PER_MSEC);
@@ -10413,6 +10416,67 @@ static const struct cdevsw bt_cdevsw = {
 	.d_mmap = eno_mmap, .d_strategy = eno_strat, .d_type = 0
 };
 
+/*
+ * (r5q Test 263) The line faster than 115200 (boot-arg bt_baud=3000000; without it the line stays at 115200). At
+ * 32x oversampling the 7.3728 MHz clock tops out at 230400, so the engine's clock first goes to 96 MHz: GPLL0-even
+ * 300 MHz x 8/25 (one of Linux's QUP DFS rates), divider 1 at 3 Mbit/s. The controller's side follows hci_qca.c
+ * qca_set_speed for the WCN399x: RTS held "not ready" (so nothing comes in mid-change), EDL_SET_BAUDRATE (0xfc48, one
+ * byte: QCA's baud index, 14 = 3000000) sent and drained, 10 ms, the host's speed changed, RTS back to the hardware;
+ * the controller then sends a command complete at the new speed. Checked with Read_Local_Version; on any failure
+ * both sides go back to 115200.
+ */
+static bool
+bt_set_fast(uint32_t baud)
+{
+	static const uint8_t local_version[] = { 0x01, 0x01, 0x10, 0x00 };
+	uint8_t cmd[5] = { 0x01, 0x48, 0xfc, 0x01, 14 }, ans[64];
+	uint32_t rcg = BT_GCC_S3_RCG & 0xfff, n;
+
+	if (baud != 3000000 || bt_rcg_page == 0) {
+		printf("bt: stage 4: baud %u not handled (3000000 only): the line stays at 115200\n", baud);
+		return false;
+	}
+	wr(bt_se + UART_MANUAL_RFR, (1u << 31) | (1u << 1));           /* RTS: not ready */
+	__asm__ volatile ("dsb sy" ::: "memory");
+	if (!bt_uart_write(cmd, sizeof(cmd))) {
+		printf("bt: stage 4: EDL_SET_BAUDRATE NOT SENT\n");
+		bt_uart_flow(true);
+		return false;
+	}
+	delay_for_interval(10, NSEC_PER_MSEC);
+	/* the engine's clock to 96 MHz (GPLL0 even 300 MHz x 8/25), then divider 1 */
+	wr(bt_rcg_page + rcg + 8, 8);                                   /* M */
+	wr(bt_rcg_page + rcg + 12, ~(25u - 8u) & 0xffff);               /* N: ~(n - m) */
+	wr(bt_rcg_page + rcg + 16, ~(25u - 8u) & 0xffff);               /* D */
+	wr(bt_rcg_page + rcg, rd(bt_rcg_page + rcg) | 1);               /* update */
+	for (int us = 0; us < 10000 && (rd(bt_rcg_page + rcg) & 1); us += 10) {
+		delay_for_interval(10, NSEC_PER_USEC);
+	}
+	bt_se_hz = 96000000u;
+	bt_uart_speed(baud);
+	bt_uart_flow(true);                                             /* RTS: by the hardware again */
+	n = bt_uart_read(ans, sizeof(ans), 200);
+	bt_show("stage 4: at 3 Mbit/s, the controller's answer", ans, n);
+	(void)bt_uart_write(local_version, sizeof(local_version));
+	n = bt_uart_read(ans, sizeof(ans), 200);
+	bt_show("stage 4: Read_Local_Version at 3 Mbit/s", ans, n);
+	if (n >= 7 && ans[0] == 0x04 && ans[1] == 0x0e && ans[4] == 0x01 && ans[5] == 0x10) {
+		printf("bt: stage 4: THE LINE RUNS AT 3 Mbit/s (engine clock %u Hz, RCG cmd %#x cfg %#x)\n", bt_se_hz,
+		    rd(bt_rcg_page + rcg), rd(bt_rcg_page + rcg + 4));
+		return true;
+	}
+	/* back: the clock to 7.3728 MHz and the host to 115200 (the controller may still be at 3 Mbit/s: said) */
+	wr(bt_rcg_page + rcg + 8, 384);
+	wr(bt_rcg_page + rcg + 12, ~(15625u - 384u) & 0xffff);
+	wr(bt_rcg_page + rcg + 16, ~(15625u - 384u) & 0xffff);
+	wr(bt_rcg_page + rcg, rd(bt_rcg_page + rcg) | 1);
+	delay_for_interval(1, NSEC_PER_MSEC);
+	bt_se_hz = 7372800u;
+	bt_uart_speed(115200);
+	printf("bt: stage 4: 3 Mbit/s FAILED: the host back at 115200 (the controller's speed now unknown)\n");
+	return false;
+}
+
 static void
 bt_stage4(void)
 {
@@ -10423,6 +10487,13 @@ bt_stage4(void)
 	int major;
 
 	PE_parse_boot_argn("bt_vsc", &bt_vsc, sizeof(bt_vsc));
+	{
+		uint32_t baud = 0;
+
+		if (PE_parse_boot_argn("bt_baud", &baud, sizeof(baud)) && baud > 115200) {
+			(void)bt_set_fast(baud);
+		}
+	}
 	/*
 	 * (Test 262) The address: the loader's mac-address-bluetooth0 (02:52:44:57:00:02, what MobileGestalt reports).
 	 * Into the controller by QCA's EDL_WRITE_BD_ADDR (0xfc14, the address most significant byte first, as Linux

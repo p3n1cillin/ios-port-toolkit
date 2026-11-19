@@ -5958,6 +5958,178 @@ r5q_supply_dump(void)
 	}
 }
 
+/*
+ * (r5q Test 265, mic>=8) Is the WCD9340 alive at all? Its SPI interface (DT tavil_codec/wcd_spi, "qcom,wcd-spi-v2",
+ * master bus 0 = spi@88c000 = QUP wrapper 0 SE3, pins GPIO144-147 function qup3 = 2, south tile) answers without
+ * SLIMbus. Linux wcd-spi.c: CLKREQ {da ba 80 00}, 500 us, NOP, RDSR (05) -> 4 status bytes, non-zero once the
+ * codec's SPI clock runs; then IRR (81) register 0x00 = WCD_SPI_SLAVE_SANITY, reset value 0xdeadbeef. GENI SPI in
+ * FIFO mode, polled (spi-geni-qcom.c): 8-bit words, mode 0, chip select 0; the engine's clock from TCXO 19.2 MHz
+ * (gcc-sm8150.c: RCG 0x174d8, branch vote 0x5200c bit 13, wrapper 0 AHB bits 6/7), divider 16 (1.2 MHz).
+ * The engine's protocol (GENI_FW_REVISION bits 15:8: 1 = SPI) is loaded by the boot firmware; said first.
+ */
+#define WSPI_GCC                0x00100000UL
+#define WSPI_SE                 0x0088c000UL
+static vm_offset_t wspi_se;
+
+static uint32_t
+wspi_rd(uint32_t off)
+{
+	return *(volatile uint32_t *)(wspi_se + off);
+}
+
+static void
+wspi_wr(uint32_t off, uint32_t v)
+{
+	*(volatile uint32_t *)(wspi_se + off) = v;
+	__asm__ volatile ("dsb sy" ::: "memory");
+}
+
+/* one full-duplex transfer of n bytes (n <= 16), chip select asserted around it; true when the engine said done */
+static bool
+wspi_xfer(const uint8_t *tx, uint8_t *rx, uint32_t n)
+{
+	uint32_t got = 0;
+
+	wspi_wr(0x618, 0xffffffffu);                    /* M_IRQ_CLEAR */
+	wspi_wr(0x648, 0xffffffffu);                    /* S_IRQ_CLEAR */
+	wspi_wr(0x26c, n);                              /* SE_SPI_TX_TRANS_LEN (words) */
+	wspi_wr(0x270, n);                              /* SE_SPI_RX_TRANS_LEN */
+	wspi_wr(0x600, 3u << 27);                       /* M_CMD0: SPI_FULL_DUPLEX */
+	for (uint32_t at = 0; at < n; at += 4) {
+		uint32_t w = 0;
+
+		for (uint32_t i = 0; i < 4 && at + i < n; i++) {
+			w |= (uint32_t)tx[at + i] << (8 * i);
+		}
+		wspi_wr(0x700, w);                      /* TX FIFO */
+	}
+	for (int us = 0; us < 20000; us += 10) {
+		uint32_t st = wspi_rd(0x804), words = st & 0x1ffffff;
+
+		for (uint32_t w = 0; w < words && got < n; w++) {
+			uint32_t v = wspi_rd(0x780);
+
+			for (uint32_t i = 0; i < 4 && got < n; i++) {
+				rx[got++] = (uint8_t)(v >> (8 * i));
+			}
+		}
+		if ((wspi_rd(0x610) & 1) && got >= n) { /* M_CMD_DONE, all read */
+			return true;
+		}
+		delay_for_interval(10, NSEC_PER_USEC);
+	}
+	return false;
+}
+
+static void
+wspi_show(const char *what, const uint8_t *tx, const uint8_t *rx, uint32_t n, bool done)
+{
+	char line[200];
+	int at = snprintf(line, sizeof(line), "adsp: wcd-spi: %s:%s tx", what, done ? "" : " (NOT DONE)");
+
+	for (uint32_t i = 0; i < n && at < 150; i++) {
+		at += snprintf(line + at, sizeof(line) - at, " %02x", tx[i]);
+	}
+	at += snprintf(line + at, sizeof(line) - at, " / rx");
+	for (uint32_t i = 0; i < n && at < 195; i++) {
+		at += snprintf(line + at, sizeof(line) - at, " %02x", rx[i]);
+	}
+	tell("%s\n", line);
+}
+
+static void
+r5q_wcd_spi_probe(void)
+{
+	static const uint32_t pins[] = { 144, 145, 146, 147 };
+	static const uint8_t nop[1] = { 0x00 }, clkreq[4] = { 0xda, 0xba, 0x80, 0x00 };
+	static const uint8_t rdsr[5] = { 0x05 }, sanity[6] = { 0x81, 0x00 }, devid[6] = { 0x81, 0x04 };
+	vm_offset_t vote = ml_io_map(WSPI_GCC + 0x52000, 0x1000), rcgp = ml_io_map(WSPI_GCC + 0x17000, 0x1000);
+	uint8_t rx[16];
+	bool done;
+
+	wspi_se = ml_io_map(WSPI_SE, 0x4000);
+	if (vote == 0 || rcgp == 0 || wspi_se == 0) {
+		tell("adsp: wcd-spi: no mapping\n");
+		return;
+	}
+	/* clocks: wrapper 0 AHB master/slave and SE3 voted on; SE3's RCG from TCXO, divider 1 */
+	*(volatile uint32_t *)(vote + 0xc) |= (1u << 13) | (1u << 6) | (1u << 7);
+	__asm__ volatile ("dsb sy" ::: "memory");
+	delay_for_interval(1, NSEC_PER_MSEC);
+	*(volatile uint32_t *)(rcgp + 0x4d8 + 4) = 1;  /* CFG: source 0 (TCXO), divider 1, no M/N */
+	*(volatile uint32_t *)(rcgp + 0x4d8) |= 1;     /* CMD: update */
+	for (int us = 0; us < 10000 && (*(volatile uint32_t *)(rcgp + 0x4d8) & 1); us += 10) {
+		delay_for_interval(10, NSEC_PER_USEC);
+	}
+	tell("adsp: wcd-spi: GCC vote %#x, SE3 CBCR %#x (bit 31 = off), RCG cmd %#x cfg %#x\n",
+	    *(volatile uint32_t *)(vote + 0xc), *(volatile uint32_t *)(rcgp + 0x4d4), *(volatile uint32_t *)(rcgp + 0x4d8),
+	    *(volatile uint32_t *)(rcgp + 0x4d8 + 4));
+	/* pins: qup3 (function 2), 6 mA, no pull */
+	for (unsigned i = 0; i < 4; i++) {
+		volatile uint32_t *pin = (volatile uint32_t *)ml_io_map(0x03d00000UL + 0x1000 * pins[i], 0x1000);
+
+		if (pin != NULL) {
+			pin[0] = (2u << 2) | (2u << 6);
+		}
+	}
+	tell("adsp: wcd-spi: SE3 status %#x, firmware revision %#x (protocol %u: 1 = SPI), IF_DISABLE %#x\n", wspi_rd(0x40),
+	    wspi_rd(0x68), (wspi_rd(0x68) >> 8) & 0xff, wspi_rd(0x64));
+	if (((wspi_rd(0x68) >> 8) & 0xff) != 1) {
+		tell("adsp: wcd-spi: SE3 does not run SPI firmware: no probe\n");
+		return;
+	}
+	/* the engine: FIFO mode, 8-bit words MSB first, mode 0, CS0, clock 19.2 MHz / 16 */
+	wspi_wr(0x28, wspi_rd(0x28) | 0x7f);            /* CGC_CTRL */
+	wspi_wr(0xe30, wspi_rd(0xe30) | 0xf);           /* DMA_GENERAL_CFG */
+	wspi_wr(0x24, 0x7f);                            /* OUTPUT_CTRL */
+	wspi_wr(0x20, 1);                               /* FORCE_DEFAULT */
+	wspi_wr(0x258, wspi_rd(0x258) & ~1u);           /* DMA_MODE_EN off: FIFO */
+	wspi_wr(0xe18, 0);                              /* GSI_EVENT_EN */
+	wspi_wr(0x7c, 0);                               /* CLK_SEL */
+	wspi_wr(0x48, (16u << 4) | 1);                  /* M_CLK_CFG */
+	wspi_wr(0x4c, (16u << 4) | 1);                  /* S_CLK_CFG */
+	wspi_wr(0x260, 0x7f8fe);                        /* TX packing: 8 bits x 4, MSB first */
+	wspi_wr(0x264, 0xffefe);
+	wspi_wr(0x284, 0x7f8fe);                        /* RX packing */
+	wspi_wr(0x288, 0xffefe);
+	wspi_wr(0x224, 0);                              /* CPHA */
+	wspi_wr(0x230, 0);                              /* CPOL */
+	wspi_wr(0x22c, 0);                              /* LOOPBACK off */
+	wspi_wr(0x24c, 0);                              /* DEMUX_OUTPUT_INV: CS active low */
+	wspi_wr(0x250, 0);                              /* DEMUX_SEL: CS0 */
+	wspi_wr(0x25c, 0);                              /* TRANS_CFG: CS held through the transfer */
+	wspi_wr(0x268, 8 - 4);                          /* WORD_LEN: 8 bits */
+	wspi_wr(0x810, 1);                              /* RX_WATERMARK */
+	{
+		/* (Test 266) Test 265 read only zeros from the codec: the engine's own loopback proves the read path first */
+		static const uint8_t pattern[4] = { 0xa5, 0x5a, 0x3c, 0xc3 };
+
+		wspi_wr(0x22c, 1);                      /* LOOPBACK on */
+		done = wspi_xfer(pattern, rx, 4);
+		wspi_show("LOOPBACK (rx = tx when the read path works)", pattern, rx, 4, done);
+		wspi_wr(0x22c, 0);
+		wspi_wr(0x224, 1);                      /* and the codec once in SPI mode 3 too (CPHA 1, CPOL 1) */
+		wspi_wr(0x230, 1);
+		done = wspi_xfer(sanity, rx, 6);
+		wspi_show("mode 3: IRR 0x00 SANITY", sanity, rx, 6, done);
+		wspi_wr(0x224, 0);
+		wspi_wr(0x230, 0);
+	}
+	done = wspi_xfer(nop, rx, 1);
+	wspi_show("NOP", nop, rx, 1, done);
+	done = wspi_xfer(clkreq, rx, 4);
+	wspi_show("CLKREQ", clkreq, rx, 4, done);
+	delay_for_interval(500, NSEC_PER_USEC);
+	done = wspi_xfer(nop, rx, 1);
+	done = wspi_xfer(rdsr, rx, 5);
+	wspi_show("RDSR (status; non-zero = the codec's SPI clock runs)", rdsr, rx, 5, done);
+	done = wspi_xfer(sanity, rx, 6);
+	wspi_show("IRR 0x00 SANITY (0xdeadbeef = alive)", sanity, rx, 6, done);
+	done = wspi_xfer(devid, rx, 6);
+	wspi_show("IRR 0x04 DEVICE_ID (reset 0x00500000)", devid, rx, 6, done);
+	tell("adsp: wcd-spi: done; SE3 status %#x M_IRQ %#x\n", wspi_rd(0x40), wspi_rd(0x610));
+}
+
 static void
 r5q_slim_v5(vm_offset_t slim, uint32_t mic)
 {
@@ -6062,6 +6234,9 @@ r5q_slim_v5(vm_offset_t slim, uint32_t mic)
 					gpio[1] = 2;
 					delay_for_interval(20, NSEC_PER_MSEC);
 					tell("adsp: slim: v7: GPIO143 cfg %#x io %#x (out of reset)\n", gpio[0], gpio[1]);
+					if (mic >= 8) {
+						r5q_wcd_spi_probe();    /* (Test 265) the codec alive? over SPI, not SLIMbus */
+					}
 					memcpy(q, query, sizeof(q));
 					for (tries = 1; tries <= 300; tries++) {
 						q[3] = (uint8_t)(0x60 + tries);

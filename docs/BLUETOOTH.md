@@ -93,6 +93,10 @@ Two lessons from the kernel side:
 
 - Pairing and connections: classic discovery runs, but nothing nearby was in pairing mode yet. ACL data, SCO and
   audio (A2DP over the chip's SLIMbus/PCM) are untested.
-- The local name shows "(null)" in Settings (MobileGestalt says "iPhone"); probably lockdownd, which the port leaves
-  out.
-- 115200 baud only. The chip and engine can go to 3 Mbit/s (`bt_uart_speed`, then QCA's baud vendor command).
+- (Fixed: the local name. bluetoothd reads it through SystemConfiguration (`SCDynamicStoreCopyComputerName`), from
+  `preferences.plist` System > System > ComputerName, which lockdownd writes on an iPhone. Without it Settings
+  says "(null)". `wifi/sc_name.c` sets it; on a port whose /var is not persistent, save it afterwards.)
+
+(Done since: the line runs at **3 Mbit/s**, with `bt_baud=3000000`, Test 263. The engine clock goes to 96 MHz,
+then the chip gets QCA EDL_SET_BAUDRATE 0xfc48 index 14 with RTS held, as Linux `qca_set_speed` does. Above
+230400 the 7.3728 MHz clock cannot divide down at 32x oversampling.)

@@ -415,3 +415,49 @@ expects, answering or skipping Apple's chip-specific commands. That needs to be 
     3. the local name;
     4. 3 Mbit/s;
     5. audio over the chip (later).
+- **Test 263 (kernel t263, root test258; + `bt_baud=3000000`): the line at 3 Mbit/s.** Code: `bt_set_fast`.
+  - At 32x oversampling, the 7.3728 MHz engine clock tops out at 230400 baud. So the S3 RCG goes to **96 MHz**
+    (GPLL0-even 300 MHz × M/N 8/25, one of Linux's QUP DFS rates), with divider 1.
+  - The chip follows `hci_qca.c` `qca_set_speed` for the WCN399x:
+    1. RTS held "not ready" (`UART_MANUAL_RFR` = bit 31 | bit 1);
+    2. EDL_SET_BAUDRATE `01 48 fc 01 0e` (index 14 = 3000000);
+    3. wait 10 ms;
+    4. change the host's speed;
+    5. give RTS back to the hardware.
+  - **Result: first try.**
+    - At the new speed the chip sent `04 ff 02 92 01` (vendor event) and `04 0e 04 01 00 00 00`.
+    - Read_Local_Version answered correctly at 3 Mbit/s: "THE LINE RUNS AT 3 Mbit/s (engine clock 96000000 Hz)".
+    - Then the address and stage 4 as before, and bluetoothd's stack started ("Stack did start").
+    - LE advertisements kept arriving (bluetoothd processed about 25 a minute).
+  - If anything fails, both sides go back to 115200 (the host at once; the chip's speed is then unknown, and logged).
+  - **Made standard:** `phone-args.txt` adds `bt_baud=3000000`. The phone runs image 263.
+  - Side note: `bt_test le` (unsigned, no bundle) gets 0 advertisements. bluetoothd registers it as a
+    "ThirdPartyApp" scan and delivers nothing, the same before and after the speed change. The system's own
+    clients (Preferences, locationd) get theirs.
+- **Test 264 (kernel t263, root test264 with `ALLOW="locationd lockdown"`): the "(null)" name. Left as is.**
+  - bluetoothd takes the device name from lockdownd through liblockdown (`device_name`), and lockdownd is
+    DENYed.
+  - Even with `lockdown` allowed, mkjobs.py makes no job for it. lockdownd has no MachServices. It is started by
+    launchd sockets (`/var/run/lockdown.sock`, **and TCP 62078 on IPv4/IPv6**) and by IOKit/notify LaunchEvents,
+    which mkjobs strips. Its job also carries **`_PanicOnCrash`**.
+  - Running it would mean a crash panics the system and the lockdown port opens on the Wi-Fi network: too much
+    for a cosmetic name. The name needs another way (later).
+  - Found on the way: **test.sh did not pass the root build's settings into WSL.** Git Bash's environment does not
+    reach `wsl -e`, so the first Test 264 build silently ignored `ALLOW`. test.sh now forwards ALLOW, RELOCATE,
+    JOBENV, RELABEL, BT, OSLOG, APPS, SBDIAG, GL, RC, RC_JOBS, EXTRA and EXTRA_SHARE, and prints them ("with …").
+- **The "(null)" name: FIXED (2026-11-19, no new image).**
+  - bluetoothd does not take the name from lockdownd. Its liblockdown imports are only check-in/send. It takes
+    the name from **`SCDynamicStoreCopyComputerName`**, which configd fills from SystemConfiguration's
+    `preferences.plist` (System > System > ComputerName). On an iPhone lockdownd writes that key, so here it was
+    never set.
+  - New tool **`wifi/sc_name.c`** (`/var/r5q/bin/sc_name [NAME]`) shows the name and sets it: SCPreferences
+    ComputerName and LocalHostName, then commit, apply and `sync()`. It was set to **"iPhone"**, what
+    MobileGestalt reports.
+  - **Lesson:** /private/var is a RAM filesystem on this port. It outlives a boot only through
+    `var_store save`, which runs on an orderly return, not on `phone.py restart`'s hard reset. Two restarts lost
+    the setting; after `/redwood/bin/var_store save` it stayed.
+  - Result: bluetoothd starts with "Init Core Stack - {localname: iPhone, …}", and Settings > Bluetooth says
+    **This iPhone is discoverable as "iPhone"**.
+  - The dynamic store's ComputerName still reads empty, yet bluetoothd has the name. It probably reads it through
+    the same SCPreferences path at start.
+  - For a fresh install, the key would have to be in the /var template; for now it lives in the saved store.

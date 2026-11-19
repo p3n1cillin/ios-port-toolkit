@@ -1026,3 +1026,49 @@ run ends with the modem shut down through TZ, after asking it to stop over SMP2P
   (CoreBrightness on each BKSDisplayBrightnessSet). Harmless; left.
 - New phone.py helpers: `unlock`, `home`, `open BUNDLE_ID`. `open` tries openurl first and unlocks only if iOS
   refuses, because an unlock tap while an app is in front taps the app.
+
+## Microphone (2026-11-19, desk check, no test): pins ruled out; the SPI lead located
+
+- **SLIMbus pins:** the audio SLIMbus (`slim@171c0000`, NGD, cell 1) has no pinctrl at all. SM8150's SLIMbus lines
+  are dedicated pads; the DT has no LPI/audio pin controller, only the SLPI one. **Ruled out.**
+- The codec's other pins are plain GPIOs:
+  - reset GPIO143, function gpio, drive 2, bias off (already driven: io 0x3);
+  - interrupt GPIO123, input with pull-down.
+- **MCLK:** `audio_ext_clk_lnbb` (`qcom,audio-ref-clk`, source 1 = the RPMh LN_BB_CLK2, already voted and seen on).
+  The LPASS clock-out variant `audio_ext_clk` (source 2, through a pin) is `status = "disabled"`, so it is not used.
+- **The SPI lead** (`wcd_spi`, `qcom,wcd-spi-v2`, inside `tavil_codec`):
+  - master bus 0 = `spi@88c000` (QUP0 SE3, pins `qupv3_se3_spi_active`), 25 MHz max, memory base 0x100000;
+  - Linux `wcd-spi.c` reads the slave's sanity register over it. A polled GENI SPI probe (the UART stage's GENI
+    code with SPI's packing and commands) could prove the chip is alive without SLIMbus;
+  - **caveat:** on Android the SPI is used only after the codec is enumerated (for its DSP), and it may need
+    codec-side clocking set up over SLIMbus. A silent SPI would not prove the chip dead.
+
+## Tests 265-266 (2026-11-19): the WCD9340 over its SPI interface (`mic=8`, `r5q_wcd_spi_probe` in redwood_adsp.c)
+
+- **Method.** A polled GENI SPI driver on QUP wrapper 0 SE3 (0x88c000), run right after the codec leaves reset in
+  the v7 sequence:
+  - clocks: GCC vote 0x5200c bits 13/6/7; the SE3 RCG at 0x174d8 from TCXO (cfg 1); the values are gcc-sm8150.c's;
+  - pins: GPIO144-147 on the south tile, function qup3 = 2, 6 mA (pinctrl-sm8150.c);
+  - transfers: 8-bit words, MSB first (packing 0x7f8fe / 0xffefe), mode 0, CS0, 1.2 MHz, full duplex;
+  - commands, from wcd-spi.c: CLKREQ `da ba 80 00`, then NOP, then RDSR `05`; IRR `81 00` (SANITY, reset
+    0xdeadbeef) and `81 04` (DEVICE_ID).
+- **Test 265 result:**
+  - SE3 runs SPI firmware: FW revision 0x101, protocol 1. The clocks are on (CBCR 0x4220), and every transfer
+    completed (M_CMD_DONE).
+  - **But the codec answered nothing but zeros:** RDSR 00 00 00 00, SANITY 00 00 00 00, DEVICE_ID 00 00 00 00.
+  - SLIMbus ADDR_QUERY was refused 301 times, as before.
+- **Test 266:** the engine's own loopback (`SE_SPI_LOOPBACK`) shows whether the read path works, plus one SANITY
+  read in SPI mode 3.
+- **Test 266 result:**
+  - **Loopback `a5 5a 3c c3` came back exactly, so the driver's read path is right.** The codec still answered
+    zeros, in mode 3 too.
+  - **The WCD9340 is silent on both of its buses**, SLIMbus (ADDR_QUERY refused) and SPI, with:
+    - supplies on: S4 (`pm8150_s4`, an AOP stub regulator) at 1.8 V and BOB at 3.3 V, read in Test 249;
+    - MCLK on: LN_BB_CLK2, the only clock in the DT (`audio_ext_clk_lnbb`);
+    - reset released: GPIO143;
+    - no other power switch in the codec node (both supply phandles checked).
+  - Caveat, as before: on Android the SPI side (the codec's DSP interface) is used only after enumeration, so its
+    silence alone does not prove the chip dead. Together with SLIMbus it suggests the codec never starts. What is
+    left is not visible from the DT: a Samsung board step (an extra enable in Samsung's kernel source, which we do
+    not have), or a codec power sequence the AOP/ADSP does for Android that we do not ask for.
+  - `mic=8` is not in the standard args; the probe stays in the kernel for later.

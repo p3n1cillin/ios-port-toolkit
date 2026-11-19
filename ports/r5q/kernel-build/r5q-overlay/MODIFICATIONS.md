@@ -35,6 +35,8 @@ These files replace the donor's files of the same path in its `xnu/files/` tree 
   filter, `/dev/uart.bluetooth`. See docs/BLUETOOTH.md.
 - `iokit/Kernel/MiniIOMobileFramebuffer.cpp` (Test 262): `redwood_publish_named_service`, a plain named IOService (the
   `bluetooth` service that MobileBluetooth looks for).
+- `bsd/dev/redwood_wifi.c` (Test 263): the Bluetooth line at 3 Mbit/s. `bsd/dev/redwood_adsp.c` (Tests 265-266):
+  a polled GENI SPI probe of the WCD9340 (`mic=8`).
 - `osfmk/arm/io_map.c` (Test 252): Apple's open-source XNU file (xnu-8796.121.2) with the I/O submap at 64 MB instead of
   8 MB, and its use logged; a full submap made `ml_io_map` wait for ever.
 

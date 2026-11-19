@@ -23,7 +23,13 @@ fi
 ROOT=${ROOT:-$(ls -t port/build/test*-root.apfs.new 2>/dev/null | head -1 | xargs -n1 basename)}
 if [ "$ROOT" = build ]; then
 	echo "== root test$B"
-	wsl -e bash -c "bash $RL/pipeline/build_root_app.sh $B" 2>&1 | grep -v 'Nmap' | tail -2
+	# (2026-11-19, Test 264) the root build's settings, set here, carried into WSL (Git Bash's environment is not)
+	FWD=""
+	for v in ALLOW RELOCATE JOBENV RELABEL BT OSLOG APPS SBDIAG SBDIAG_FOR GL RC RC_JOBS EXTRA EXTRA_SHARE; do
+		[ -n "${!v+x}" ] && FWD="$FWD $v='${!v}'"
+	done
+	[ -n "$FWD" ] && echo "   with$FWD"
+	wsl -e bash -c "$FWD bash $RL/pipeline/build_root_app.sh $B" 2>&1 | grep -v 'Nmap' | tail -2
 	ROOT=test$B-root.apfs.new
 fi
 echo "== image: test $B from $A, kernel $KERNEL, root $ROOT"

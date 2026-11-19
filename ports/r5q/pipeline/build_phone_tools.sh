@@ -31,6 +31,7 @@ build vt_test     vt_test.m     -fobjc-arc $FW -framework AVFoundation -framewor
 build avplay_test avplay_test.m -fobjc-arc $FW -framework AVFoundation -framework AudioToolbox
 build bt_test     bt_test.m     -fobjc-arc $FW -framework CoreBluetooth
 build cfpref      cfpref.c      -framework CoreFoundation
+build sc_name     sc_name.c     -framework CoreFoundation -framework SystemConfiguration
 build fps_test    fps_test.c    -framework QuartzCore
 build orient_test orient_test.c
 build r5qfs       r5qfs.c
