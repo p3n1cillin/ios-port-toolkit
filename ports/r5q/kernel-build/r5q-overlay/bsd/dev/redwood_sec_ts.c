@@ -3076,7 +3076,39 @@ sony_stream(struct bitbang *cam, uint32_t front_level, const struct sony_cam *c)
 				}
 				SLOG("SETTLE %u: FRAMES IN %u ms: %u; middle line mean %u of 255; CSID pkts %u ecc %#x "
 				    "crc %u\n", cam_phy_settle, ms_all, frames, sum / 1024u, CSID(0x160), CSID(0x164), CSID(0x168));
-				cam_rx_show("front streaming");
+				cam_rx_show("streaming");
+				if (front_level == 2) {
+					/*
+					 * (Test 345) The picture's 10-bit levels per Bayer site (rows 100-671, every fourth): in a dark
+					 * scene they are the sensor's black level, which the iOS side subtracts (64 assumed). Test 343's
+					 * IMX586 read 0-4 of 255 in its high bytes, below 64.
+					 */
+					uint32_t mn[4] = { 1023, 1023, 1023, 1023 }, mx[4] = { 0 }, n[4] = { 0 };
+					uint64_t sum4[4] = { 0 };
+
+					for (uint32_t y = 100; y < 672; y += 4) {
+						for (uint32_t r = 0; r < 2; r++) {
+							const volatile uint8_t *row = rx_buf + 1296u * (y + r);
+
+							for (uint32_t g = 0; g < 257; g++) {
+								uint8_t lo = row[5 * g + 4];
+
+								for (uint32_t k = 0; k < 4; k++) {
+									uint32_t v = ((uint32_t)row[5 * g + k] << 2) | ((lo >> (2 * k)) & 3);
+									uint32_t site = r * 2 + (k & 1);
+
+									mn[site] = v < mn[site] ? v : mn[site];
+									mx[site] = v > mx[site] ? v : mx[site];
+									sum4[site] += v;
+									n[site]++;
+								}
+							}
+						}
+					}
+					SLOG("LEVELS (10-bit, min/mean/max) R %u/%u/%u Gr %u/%u/%u Gb %u/%u/%u B %u/%u/%u\n",
+					    mn[0], (uint32_t)(sum4[0] / n[0]), mx[0], mn[1], (uint32_t)(sum4[1] / n[1]), mx[1],
+					    mn[2], (uint32_t)(sum4[2] / n[2]), mx[2], mn[3], (uint32_t)(sum4[3] / n[3]), mx[3]);
+				}
 				if (front_level >= 4 && front_level <= 6) {
 					/*
 					 * (Test 337) Each row's 5-byte groups against the middle rows' first group (row parity:

@@ -44,3 +44,29 @@ been tested yet.
 - Locate the FairPlay kext in the iPhone10,3 20F66 kernelcache (kext bundle IDs containing "FairPlay"), list its
   IOUserClient classes and whether it calls into the AES engine or SEP.
 - Write the answer to question 2 here; that decides whether the rest is worth doing.
+
+## First look at `fairplayd.H2` (2026-11-19, the owner's OK to fetch it; local only, never in the repository)
+
+- **No download was needed:** the IPSW's system image from the original extraction (`ios165/rootfs.dmg`, 20F66) is
+  still local; `7z e` took `usr/sbin/fairplayd.H2` out of it (19,316,144 bytes, Mach-O arm64 PIE) into
+  `$IOS_WORK/fairplay/` (local).
+- **Linked:** IOKit, CoreFoundation, Security, Foundation, AuthKit (Apple ID), ManagedConfiguration, libMobileGestalt,
+  libbsm, libSystem, libobjc. Uses `uniqueDeviceIdentifier` (MobileGestalt) and `gethostuuid`.
+- **The kernel side, named:** its entitlements include `com.apple.security.iokit-user-client-class` =
+  **`com_apple_driver_FairPlayIOKitUserClient`** and `com.apple.private.FairPlayIOKitUserClient.access`; it calls
+  `IOServiceMatching` / `IOServiceGetMatchingServices` / `IOServiceOpen`. That user client is Apple's FairPlay kext's
+  (in the kernelcache, absent from our XNU). **That is why it exits at once (Test 198):** the service it opens does
+  not exist here.
+- **Other services:** Mach services `com.apple.fairplayd`, `com.apple.fairplayd.versioned`, `com.apple.unfreed`
+  (launchd plist), and it talks to **`com.apple.adid`** (machine-identity provisioning: notifications
+  `midchangedV1/V1.5/V3`). It keeps an "fpkeybag" (`com.apple.fairplayd.resync-fpkeybag`) in the `fpsd` storage
+  class (`com.apple.private.security.storage.fpsd`), and embeds the "Apple FairPlay Certification Authority"
+  certificates.
+- **Obfuscated:** only ~18,300 strings in 19 MB; the service name string for its IOServiceMatching is not in clear.
+- **What this says so far:** user space is Apple's daemon plus Apple-provisioned identity (adid, AuthKit). The device
+  binding and the decryption itself are in the kext (the text-crypter hook and the user client). Question 2 (are the
+  keys bound to silicon: the UID-keyed AES engine or the SEP?) is answered by the kext, so **the next step needs the
+  20F66 kernelcache** (not local; another file of the same IPSW).
+- **Rules (unchanged):** this is reading Apple's binaries to judge interoperability. Any working route has to be
+  Apple's own FairPlay code with the owner's own purchases. Writing our own FairPlay decryption, or faking an Apple
+  device identity, would be circumvention and is out.

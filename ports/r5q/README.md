@@ -27,7 +27,7 @@ binaries, no build outputs and no phone backups are in this repository (see [the
 | `wifi/WIFI-PLAN.md` | everything since Test 111, step by step with what every test showed: Wi-Fi, sound, GPU, apps, sensors, CoreMotion, the compass, the microphone |
 | `SESSION.md` | the test-by-test log of the earlier stages |
 
-## State (Test 344)
+## State (Test 346)
 
 **Works:**
 
@@ -63,8 +63,8 @@ binaries, no build outputs and no phone backups are in this repository (see [the
     own files);
   - switching cameras works, photos are saved as JPEG (HEIC's software encoder runs out of memory), and the camera
     powers off when the app closes;
-  - not yet: the macro S5K5E9, full-field (uncropped) frames, and a picture of a lit scene (the IMX586's black
-    level to be checked there).
+  - the IMX586 sends black as 0 (Test 345), the others 64: iOS is told each one's;
+  - not yet: the macro S5K5E9, full-field (uncropped) frames, and a picture of a lit scene.
 
   How it was made stable: wifi/CAMERA-PLAN.md, docs/CAMERA.md.
 - **Compass:** the Compass app shows a heading, then freezes. Indoor interference is suspected; still being checked.

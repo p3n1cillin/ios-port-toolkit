@@ -907,3 +907,9 @@ candidate designs).
   - Middle-line means: front 20 (facing up, a dim room), ultra-wide 15 (≈ its black level: facing the desk),
     **main 0-4**: dark too, but below the 64 (16 of 255) black level the iOS side assumes. The IMX586's pedestal may
     differ: to be checked in a lit scene (the pattern was exact, so the data path is not the cause).
+- **Test 345 (kernel t345; `cammain=2`, the main camera facing the desk): THE IMX586'S BLACK LEVEL IS 0.** A 10-bit
+  level count per Bayer site over rows 100-671 of a dark frame: "R 0/0/79 Gr 0/0/68 Gb 0/0/77 B 0/0/69"
+  (min/mean/max: everything 0 but a few hot pixels). The sensor sends its picture with the pedestal already taken
+  off (noise clipped at 0), where the S5K3L6 and the IMX616 sit at 64; its tables write no pedestal register. So
+  the iOS side is told black 0 for the IMX586 (`f.black`, redwood_camera.c), 64 for the others; otherwise its
+  shadows would be crushed.

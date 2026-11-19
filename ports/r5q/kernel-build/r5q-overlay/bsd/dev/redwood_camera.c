@@ -4024,6 +4024,14 @@ camdev_read(__unused dev_t dev, struct uio *uio, __unused int ioflag)
 		f.bayer = r5q_sensor != 0 ? 0 : 1;     /* (r5q Test 340/343) the Sonys' RGGB (crops at even offsets), the S5K3L6's GRBG */
 	}
 	f.black = 64;
+	if (r5q_real && r5q_sensor == 2) {
+		/*
+		 * (r5q Test 345) The IMX586 sends its picture with the black level already taken off: a dark frame reads
+		 * 0/0/0 (min/mean/max, 10-bit) on every Bayer site but a few hot pixels, where the S5K3L6 and the IMX616 sit
+		 * at 64. Subtracting 64 again would crush its shadows.
+		 */
+		f.black = 0;
+	}
 	f.sequence = place[b].sequence;
 	f.time = place[b].time;
 	f.exposure_lines = place[b].exposure_lines;
