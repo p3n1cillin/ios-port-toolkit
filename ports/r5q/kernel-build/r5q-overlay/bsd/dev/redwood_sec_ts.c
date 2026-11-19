@@ -1560,6 +1560,72 @@ static bool camsensor_on, camsensor_done;
 extern bool redwood_r5q_rpmh_enable(const char *id);
 extern bool redwood_spmi_peek(uint16_t id, uint8_t reg, uint8_t *bytes, uint32_t count);
 
+/* 16-bit register address, 1 or 2 data bytes (most significant first) */
+static const char *
+bb_write16(uint16_t reg, uint16_t value, unsigned data_bytes)
+{
+	const char *problem = NULL;
+
+	bus_start();
+	if (!bus_put(bb->address << 1)) {
+		problem = "no acknowledge of its address";
+	} else if (!bus_put((uint8_t)(reg >> 8)) || !bus_put((uint8_t)reg)) {
+		problem = "no acknowledge of the register number";
+	} else if ((data_bytes == 2 && !bus_put((uint8_t)(value >> 8))) || !bus_put((uint8_t)value)) {
+		problem = "no acknowledge of the value";
+	}
+	bus_stop();
+	return problem;
+}
+
+/*
+ * (r5q Test 275) One of the sensor's tables (RWCTAB02, pipeline/camsensor_v14.py, in the root's /fw) written over the
+ * bit-banged bus; false at the first write not acknowledged.
+ */
+extern const uint8_t *redwood_image_file(const char *dir, const char *name, uint64_t *size, int *disk_out);
+
+static bool
+cam_table(const uint8_t *tab, uint64_t size, const char *want)
+{
+	const uint8_t *at = tab + 8 + 32, *end = tab + size;
+	uint32_t modes = *(const uint32_t *)(tab + 8 + 28), tables;
+
+	at += 48 * modes;
+	for (int p = 0; p < 2 && at + 12 <= end; p++) {
+		at += 12 + *(const uint32_t *)(at + 8) * 12;
+	}
+	if (at + 4 > end) {
+		return false;
+	}
+	tables = *(const uint32_t *)at;
+	at += 4;
+	for (uint32_t t = 0; t < tables && at + 12 <= end; t++) {
+		uint32_t n = *(const uint32_t *)(at + 8);
+		const uint8_t *e = at + 12;
+
+		if (strncmp((const char *)at, want, 8) == 0) {
+			for (uint32_t i = 0; i < n && e + 12 <= end; i++, e += 12) {
+				uint16_t a = *(const uint16_t *)e, v = *(const uint16_t *)(e + 2);
+				uint32_t delay = *(const uint32_t *)(e + 8);
+				const char *problem = bb_write16(a, v, e[5] == 2 ? 2 : 1);
+
+				if (problem != NULL) {
+					printf("camera sensor: table %s write %u (%#x = %#x): %s\n", want, i, a, v, problem);
+					return false;
+				}
+				if (delay != 0) {
+					spin_us(delay > 50000 ? 50000 : delay);
+				}
+			}
+			printf("camera sensor: table %s: %u writes taken\n", want, n);
+			return true;
+		}
+		at = e + 12 * n;
+	}
+	printf("camera sensor: no table %s\n", want);
+	return false;
+}
+
 /* 16-bit register address, `count` bytes */
 static const char *
 bb_read16(uint16_t reg, uint8_t *bytes, unsigned count)
@@ -1728,8 +1794,29 @@ camsensor_probe(void)
 		for (unsigned t = 0; t < sizeof(tries) && problem != NULL; t++) {
 			cam.address = tries[t];
 			if ((problem = bb_read16(0x0000, id, 2)) == NULL || (problem = bb_read16(0x0016, id, 2)) == NULL) {
+				uint64_t tab_size = 0;
+				const uint8_t *tab = redwood_image_file("fw", "camera-s5k3l6.tab", &tab_size, NULL);
+
 				printf("camera sensor: THE SENSOR ANSWERS at 7-bit %#04x: chip ID %02x%02x (CCI 1 master 0)\n", tries[t],
 				    id[0], id[1]);
+				/*
+				 * (Test 275) Its own tables: init, mode 2 (1028x772 RAW10, 120 frames a second), stream on; its
+				 * SMIA frame counter (0x0005) read a few times; stream off. Nothing receives the frames yet: this
+				 * shows the sensor runs on its tables.
+				 */
+				if (tab == NULL || tab_size < 48 || memcmp(tab, "RWCTAB02", 8) != 0) {
+					printf("camera sensor: no camera-s5k3l6.tab in the root's /fw: no stream test\n");
+				} else if (cam_table(tab, tab_size, "init") && cam_table(tab, tab_size, "res2") && cam_table(tab, tab_size, "on")) {
+					for (int r = 0; r < 4; r++) {
+						uint8_t fc = 0, mode = 0;
+
+						spin_us(25000);
+						(void)bb_read16(0x0005, &fc, 1);
+						(void)bb_read16(0x0100, &mode, 1);
+						printf("camera sensor: streaming? frame counter %u, mode_select %#x\n", fc, mode);
+					}
+					(void)cam_table(tab, tab_size, "off");
+				}
 			} else {
 				printf("camera sensor: 7-bit %#04x: %s\n", tries[t], problem);
 			}

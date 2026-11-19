@@ -163,3 +163,41 @@ candidate designs).
     slaveAddr/registerData/delayUs ...), so the same tree, wider fields.
 - **Next:** teach camsensor.py the V1.4 layout. Map the four u64 fields against the V3 ones (kind, parent, ref,
   size) and the regSetting element size, then make `camera-s5k3l6.tab` locally for the SM8150 data path.
+- **Done: `pipeline/camsensor_v14.py`** reads the V1.4.0 module files (layout in its docstring: every field u64,
+  symbols 72 bytes, register settings 80 bytes, resolutions 264 bytes with the fps a double at +80) and writes the
+  kernel's RWCTAB02 tables. For the S5K3L6 (local `fw-camera-r5q/camera-s5k3l6.tab`, 2732 bytes, never in the
+  repository):
+
+  | Item | Value |
+  | --- | --- |
+  | Slave | 0x5A (7-bit 0x2D) |
+  | ID | 0x30C6 at 0x0000 (2/2 bytes) |
+  | Lanes | lane assignment 0x3210, 4-lane D-PHY |
+  | Colour order | GRBG |
+  | Mode 0 | 4000x3000 RAW10 @ 30, pixel clock 476 MHz, line 4896, frame 3253, settle 14 |
+  | Mode 1 | 4000x2256 @ 30 |
+  | Mode 2 | 1028x772 @ 120 |
+  | Tables | init 22 writes; res0/1/2 53/53/52; on (0x0100=0x0100), off, hold on/off, test pattern off/on |
+  | Power up | kind 10 (reset) low; VANA, VDIG, VIO; MCLK 19.2 MHz; reset high + 18 ms (CamX kinds) |
+
+  That matches what Tests 271-274 did by hand.
+- **Next:**
+  1. the sensor's tables written over the bit-banged bus (init, res2, on), with the frame counter read back to see
+     it stream;
+  2. then the SM8150 receive path (CSI-PHY 2 v1.1, CSID-lite, IFE-lite, SMMU), so RAW10 frames reach
+     `/dev/redwood-camera`.
+- **Test 275 (kernel t275, root test275 with the local S5K3L6 table in /fw; `camsensor=1`): THE SENSOR STREAMS.**
+  - After the ID read, `cam_table` (redwood_sec_ts.c) wrote its own tables over the bit-banged bus: **init 22,
+    res2 52 (1028x772 RAW10 @ 120), on 2, every write acknowledged**.
+  - SMIA registers read back: mode_select 0x01 and the **frame counter (0x0005) 1, 3, 6, 8** over the four reads
+    (25 ms apart, plus the bus time).
+  - Then "off", and everything back as found: GDSC 0x7022f001, LDO2/LDO6 0x20/0x28, reset low, MCLK off.
+  - **Proven from our kernel: the sensor powered, configured from the phone's own tables, and producing frames on
+    its MIPI lanes.** Nothing receives them yet.
+- **Next, the receive path on SM8150 (Titan 175):**
+  - CSI-PHY 2 (v1.1 D-PHY, 4 lanes, settle 14);
+  - CSID-lite RX from that PHY, RDI 0 with RAW10 (data type 0x2b);
+  - IFE-lite write master into memory, through the camera SMMU;
+  - then frames into `/dev/redwood-camera`, with the donor's software ISP on the iOS side (GRBG).
+  - Register references: Qualcomm's camera driver for SM8150 (cam_csiphy_1_1_hwreg.h, cam_csid_lite_17x/175,
+    cam_vfe_lite), and the donor's cam=3/4 code for the order of steps.
