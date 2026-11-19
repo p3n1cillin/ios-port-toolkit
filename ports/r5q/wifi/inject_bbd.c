@@ -643,13 +643,21 @@ sensors_thread(__unused void *arg)
 	gyro = sensor_service(client, "Redwood gyroscope", 0xff00, 0x09);
 	snprintf(line, sizeof(line), "r5q-bbd: sensors: ambient light service %p, compass service %p\n", (void *)light, (void *)compass);
 	say(line);
-	for (;;) {
-		usleep(40000);
+	/*
+	 * (Test 348) Every 5 ms, not 40: the kernel now gets ~100 accelerometer and gyroscope samples a second and 50 from
+	 * the compass (Test 347, see_rate), but a 40 ms poll that sends only the newest sample capped what iOS saw at 25 a
+	 * second (cm_rate: 23.2/s in an app), too few for CoreMotion's fusion and the compass. Auto-brightness keeps its
+	 * 40 ms step (every eighth round).
+	 */
+	for (unsigned round = 0;; round++) {
+		usleep(5000);
 		size = sizeof(m);
 		if (sysctlbyname("kern.redwood.motion", &m, &size, NULL, 0) != 0) {
 			continue;
 		}
-		auto_brightness(&m);                    /* (Test 241) every 40 ms: eased, see there */
+		if (round % 8 == 0) {
+			auto_brightness(&m);            /* (Test 241) every 40 ms: eased, see there */
+		}
 		if (light != NULL && m.count[3] != last_light) {
 			IOHIDEventRef event = IOHIDEventCreateAmbientLightSensorEvent(NULL, mach_absolute_time(), (m.lux + 500) / 1000, 0);
 
@@ -704,17 +712,17 @@ sensors_thread(__unused void *arg)
 				CFRelease(event);
 			}
 			{
-				/* (Test 224) the orientation, once it has held for 5 samples (0.2 s) */
+				/* (Test 224) the orientation, once it has held for 0.2 s (Test 348: 20 samples at ~100 a second) */
 				long now = orientation_of(x, y, z);
 
 				steady = now == seen ? steady + 1 : 0;
 				seen = now;
-				if (steady >= 5 && now != 0 && now != shown) {
+				if (steady >= 20 && now != 0 && now != shown) {
 					shown = now;
 					orientation_send(now);
 				}
 			}
-			if (sent++ < 3 || sent % 1500 == 0) {
+			if (sent++ < 3 || sent % 6000 == 0) {
 				snprintf(line, sizeof(line), "r5q-bbd: sensors: accelerometer event %u: %.3f %.3f %.3f g\n", sent, x, y, z);
 				say(line);
 			}

@@ -1101,3 +1101,25 @@ run ends with the modem shut down through TZ, after asking it to stop over SMP2P
   the QMI instance/mode, the NGD messages byte for byte). The codec still never reports present. What is left needs
   the audio DSP's own view (its log) or the codec's pins observed while Android brings it up; not doable from the
   sources. Parked again.
+
+## Tests 347-348 (2026-11-19): the motion sensors at ~100 a second
+
+- **Test 347 (kernel t347):** the SLPI streams' rates are boot-args now (`see_rate`, default 100, accelerometer and
+  gyroscope; `see_mag_rate`, default 50, compass; was 25 and 10 since Test 223). The sample_rate float is made from
+  the integer in the kernel. The kernel receives them: "minute 1: accel 6068 ... mag 2995" (101/s, 50/s). But an
+  app still got **23.2/s** (`cm_rate a 0.01 5`).
+- **The cap was backboardd's injector:** `inject_bbd.c` polled `kern.redwood.motion` every **40 ms** and forwarded
+  only the newest sample, at most 25 a second whatever the SLPI sent (the "fraction" Test 243 saw). Test 348
+  (root test348): it polls every **5 ms**. Auto-brightness keeps its 40 ms step (every eighth round), and the
+  rotation decision keeps its 0.2 s (20 steady samples, was 5).
+- **Test 348 result** (`cm_rate`, 5 s each, in an app):
+  - accelerometer and gyroscope **71.6/s** (were 23.2);
+  - compass **32.4/s** (was ~10);
+  - device motion stable (gravity 0.017 -0.043 -0.999, roll 1.0 pitch 2.5).
+
+  The rest of the way to 100 is the newest-only design: the SLPI delivers in small bursts, so two samples
+  sometimes land in one poll. A small kernel ring with every sample is the follow-up if it matters.
+- **Compass, still:** in the magnetic-north frame CoreMotion reports "calibrated field 0.0 ... accuracy -1, heading
+  0.0" with the phone lying still on a desk. CoreMotion builds its magnetometer calibration from the device being
+  turned through orientations, so it needs the owner's figure-of-eight, outdoors best. The raw field here is again
+  ~5 µT horizontal of |B| ~50 µT (dip ~84°; ~66° expected), as in Test 243: the indoor reading.

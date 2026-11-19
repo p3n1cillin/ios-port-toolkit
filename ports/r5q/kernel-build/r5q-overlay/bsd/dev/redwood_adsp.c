@@ -3367,7 +3367,29 @@ see_thread(__unused void *parameter, __unused wait_result_t result)
 	(void)rate;
 	{
 		/* (Test 223) the streams iOS uses: the accelerometer at 25 a second, the compass at 10, light and proximity on change */
-		static const uint8_t rate25[] = { 0x0d, 0x00, 0x00, 0xc8, 0x41 }, rate10[] = { 0x0d, 0x00, 0x00, 0x20, 0x41 };
+		/*
+		 * (Test 347) The rates as boot-args, see_rate (accelerometer and gyroscope) and see_mag_rate (compass), defaults
+		 * now 100 and 50: iOS's sensor fusion and its compass are made for ~100 a second, and Test 243's compass showed a
+		 * heading once and froze with CoreMotion's calibration never starting. sns_std_sensor_config { sample_rate } is a
+		 * float (field 1, fixed32): its IEEE bits from the integer rate below (exact for the integers used).
+		 */
+		uint32_t motion_hz = 100, mag_hz = 50;
+		uint8_t rate25[5] = { 0x0d }, rate10[5] = { 0x0d };
+
+		(void)PE_parse_boot_argn("see_rate", &motion_hz, sizeof(motion_hz));
+		(void)PE_parse_boot_argn("see_mag_rate", &mag_hz, sizeof(mag_hz));
+		motion_hz = motion_hz < 1 ? 1 : motion_hz > 400 ? 400 : motion_hz;
+		mag_hz = mag_hz < 1 ? 1 : mag_hz > 100 ? 100 : mag_hz;
+		for (int k = 0; k < 2; k++) {
+			uint32_t v = k == 0 ? motion_hz : mag_hz, e = 0, bits;
+
+			while ((v >> e) > 1) {
+				e++;
+			}
+			bits = ((127u + e) << 23) | ((v << (23 - e)) & 0x7fffffu);      /* v < 2^24: exact */
+			memcpy(k == 0 ? rate25 + 1 : rate10 + 1, &bits, 4);
+		}
+		tell("slpi: see: rates asked for: accelerometer and gyroscope %u a second, compass %u\n", motion_hz, mag_hz);
 
 		for (unsigned round = 0; round < 3 && !(see.have[SEE_MAG] && see.have[SEE_LIGHT] && see.have[SEE_PROX]); round++) {
 			see_lookup("gyro");
@@ -3376,14 +3398,14 @@ see_thread(__unused void *parameter, __unused wait_result_t result)
 			see_lookup("proximity");
 			sleep_ms(2000);
 		}
-		tell("slpi: see: accelerometer at 25/s: %s\n", see_send(see.suid[SEE_ACCEL], 513, rate25, sizeof(rate25)) == 0 ? "asked" :
+		tell("slpi: see: accelerometer at the rate above: %s\n", see_send(see.suid[SEE_ACCEL], 513, rate25, sizeof(rate25)) == 0 ? "asked" :
 		    "NOT SENT");
 		if (see.have[SEE_GYRO]) {               /* (Test 230) for CoreMotion's gyro and device motion */
-			tell("slpi: see: gyroscope at 25/s: %s\n", see_send(see.suid[SEE_GYRO], 513, rate25, sizeof(rate25)) == 0 ? "asked" :
+			tell("slpi: see: gyroscope at the rate above: %s\n", see_send(see.suid[SEE_GYRO], 513, rate25, sizeof(rate25)) == 0 ? "asked" :
 			    "NOT SENT");
 		}
 		if (see.have[SEE_MAG]) {
-			tell("slpi: see: compass at 10/s: %s\n", see_send(see.suid[SEE_MAG], 513, rate10, sizeof(rate10)) == 0 ? "asked" :
+			tell("slpi: see: compass at the rate above: %s\n", see_send(see.suid[SEE_MAG], 513, rate10, sizeof(rate10)) == 0 ? "asked" :
 			    "NOT SENT");
 		}
 		if (see.have[SEE_LIGHT]) {
