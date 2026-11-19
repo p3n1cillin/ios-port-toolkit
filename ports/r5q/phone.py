@@ -663,37 +663,47 @@ def r5qd(*words):
 
 
 def wlog(out_path, seconds):
-    """(2026-11-19, camera Tests 306-310) the kernel log over Wi-Fi, independent of the loader's USB: wifi/klog.c (the
-    kernel's message buffer) through r5qd every second, merged into one growing file written after every poll, with
-    the PC's time on every gap. Puts klog on the phone first. Ends after `seconds`, or when r5qd stops answering for
-    60 s (the phone gone): the file then holds the kernel's last words up to ~1 s before."""
+    """(2026-11-19, camera Tests 306-325) the kernel log over Wi-Fi, independent of the loader's USB, STREAMED: wifi/klog.c
+    in follow mode (`klog -f`: every 50 ms only what is new, ~60 KB a run, r5qd relays it as it comes) started again
+    at once each time it ends; every chunk is written to FILE the moment it arrives, so a hang loses at most ~50 ms.
+    Puts klog on the phone first. Ends after `seconds`, or 60 s after r5qd stops answering (the phone gone)."""
+    import socket
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / 'wifi'))
     import r5qd_client
     out = pathlib.Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     ip = r5qd_client.IP_FILE.read_text().strip()
     klog = pathlib.Path(__file__).resolve().parent / 'port/build/phone-tools/klog'
-    deadline, text, silent_since = time.time() + seconds, '', None
-    while time.time() < deadline:
-        try:
-            if 'klog' not in text[:0] and not getattr(wlog, 'put', False):
-                data = klog.read_bytes()
-                r5qd_client.request(ip, f'put /var/r5q/bin/klog {len(data)}', data, timeout=30)
-                wlog.put = True
-            snap = r5qd_client.request(ip, 'run /var/r5q/bin/klog 65536', timeout=15)
-            silent_since = None
-            text = merge_log(text, snap)
-        except Exception as e:      # (a dropped connection: the phone may be going down)
-            now = time.strftime('%H:%M:%S')
-            silent_since = silent_since or time.time()
-            text += f'\n== [wlog: r5qd silent at {now}: {type(e).__name__}] ==\n'
-            if time.time() - silent_since > 60:
-                out.write_text(text, encoding='utf-8', errors='replace')
-                print(f'wlog: r5qd silent for 60 s since {time.strftime("%H:%M:%S", time.localtime(silent_since))}: '
-                      f'the phone is likely gone; {out}')
-                return
-        out.write_text(text, encoding='utf-8', errors='replace')
-        time.sleep(1)
+    deadline, silent_since, put = time.time() + seconds, None, False
+    with open(out, 'ab') as f:
+        while time.time() < deadline:
+            try:
+                if not put:
+                    data = klog.read_bytes()
+                    r5qd_client.request(ip, f'put /var/r5q/bin/klog {len(data)}', data, timeout=30)
+                    put = True
+                with socket.create_connection((ip, r5qd_client.PORT), timeout=10) as s:
+                    s.settimeout(5)
+                    s.sendall(f'{r5qd_client.TOKEN} run /var/r5q/bin/klog -f 30\n'.encode())
+                    got_any = False
+                    while True:
+                        chunk = s.recv(65536)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        f.flush()
+                        got_any = True
+                silent_since = None if got_any else silent_since
+            except Exception as e:      # (a dropped connection or silence: the phone may be going down)
+                now = time.strftime('%H:%M:%S')
+                silent_since = silent_since or time.time()
+                f.write(f'\n== [wlog: r5qd silent at {now}: {type(e).__name__}] ==\n'.encode())
+                f.flush()
+                if time.time() - silent_since > 60:
+                    print(f'wlog: r5qd silent for 60 s since {time.strftime("%H:%M:%S", time.localtime(silent_since))}: '
+                          f'the phone is likely gone; {out}')
+                    return
+                time.sleep(1)
     print(f'wlog: {out}')
 
 

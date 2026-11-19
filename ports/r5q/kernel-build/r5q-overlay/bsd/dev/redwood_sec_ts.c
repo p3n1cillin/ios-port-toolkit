@@ -312,7 +312,18 @@ struct bitbang {
 };
 static struct bitbang pmic_bus = { .sda = PIN_PMIC_SDA, .scl = PIN_PMIC_SCL, .address = S2DOS05_ADDRESS };
 static struct bitbang touch_bus = { .sda = 12, .scl = 13, .address = 0x48 };   /* the pins: set by the platform */
-static struct bitbang *bb = &pmic_bus;  /* the bus the functions below drive */
+/*
+ * The bus the functions below drive. (Test 324) One pointer per side, not one global: the touch thread (touch on the
+ * SOUTH tile, the gauge, the cameras' regulator reads) and every other thread (the camera's threads: the sensor on
+ * NORTH GPIO31/32, its S2MPB03 on EAST GPIO47/48) drive different pins at the same time. With one global `bb`, a
+ * touch poll (sec_ts_read: bb = &touch_bus, many times a second) in the middle of a camera transaction redirected the
+ * camera's remaining bit-bang -- and its explicit-pin writes (`BB_CFG(31)` = bb->tlmm + 0x1000 * 31) -- into the
+ * SOUTH tile at an offset with no GPIO31 behind it. That race exists since the camera probe left the touch thread
+ * (Test 284), and every camera session start and end did those writes: the hangs of Tests 290-321 came exactly there.
+ */
+static struct bitbang *bb_touch_side = &pmic_bus, *bb_other_side = &pmic_bus;
+static thread_t bb_touch_thread;
+#define bb      (*(current_thread() == bb_touch_thread ? &bb_touch_side : &bb_other_side))
 
 static void
 line(unsigned pin, uint32_t cfg, bool high)
@@ -1933,6 +1944,10 @@ cam_rx_up(void)
 		CC(0xc170 + 4) = (CC(0xc170 + 4) & ~0x371fu) | (nopll ? 0x001u : pll600 ? 0x203u : 0x207u);
 		CC(0xc170) |= 1;
 		(void)rx_wait((volatile uint32_t *)(rx_cc + 0xc170), 1, 0, 500);
+		/* (Test 327) cam_cc_camnoc_dcd_xo_clk (0xc194: the camera NoC's dynamic clock divider's crystal) on first */
+		CC(0xc194) |= 1;
+		(void)rx_wait((volatile uint32_t *)(rx_cc + 0xc194), 1u << 31, 0, 2000);
+		rxlog("camera rx: camnoc RCG cmd %#x cfg %#x; dcd_xo %#x; now the branch\n", CC(0xc170), CC(0xc174), CC(0xc194));
 		CC(0xc18c) |= 1;
 		(void)rx_wait((volatile uint32_t *)(rx_cc + 0xc18c), 1u << 31, 0, 2000);
 		rxlog("camera rx: camnoc RCG %#x cfg %#x branch %#x; step: memory\n", CC(0xc170), CC(0xc174), CC(0xc18c));
@@ -2207,8 +2222,9 @@ cam_rx_down(void)
 	if (rx_reached >= 6 || rx_smr != ~0u) {      /* (also when the memory stage stopped after its match) */
 		rxlog("camera rx: down 1: memory stage (WM0, SMMU match)\n");
 		cam_rx_memory_down();           /* (Test 288) the write master off and the SMMU match away first */
-		rxlog("camera rx: down 2: camnoc branch 0xc18c %#x off\n", CC(0xc18c));
+		rxlog("camera rx: down 2: camnoc branch 0xc18c %#x off, then dcd_xo 0xc194 %#x\n", CC(0xc18c), CC(0xc194));
 		CC(0xc18c) &= ~1u;
+		CC(0xc194) &= ~1u;                      /* (Test 327) */
 	}
 	if (rx_csid != 0 && rx_reached >= 5) {
 		rxlog("camera rx: down 3: CSID (RX %#x, RDI0 %#x)\n", CSID(0x100), CSID(0x200));
@@ -2226,6 +2242,23 @@ cam_rx_down(void)
 		for (unsigned i = 0; i < sizeof(branches) / sizeof(branches[0]); i++) {
 			rxlog("camera rx: down 5: camcc branch %#x (%#x) off\n", branches[i], CC(branches[i]));
 			CC(branches[i]) &= ~1u;
+		}
+		/*
+		 * (Test 327) The RCGs fed by PLL0 parked on the crystal (cfg 0x001: source XO, divider 1) before PLL0 goes off,
+		 * as Linux's shared RCG ops do. Turning PLL0 off under them left their next switch (the next session's bring-up)
+		 * starting from a source killed beneath it: Test 326's third bring-up hung exactly at the camera NoC's RCG
+		 * (0xc170) and branch, after two good power cycles.
+		 */
+		{
+			static const uint32_t pll_rcgs[] = { 0xc170, 0xc004, 0xc020, 0x604c, 0xa064 };
+
+			for (unsigned i = 0; i < sizeof(pll_rcgs) / sizeof(pll_rcgs[0]); i++) {
+				CC(pll_rcgs[i] + 4) = (CC(pll_rcgs[i] + 4) & ~0x371fu) | 0x001u;
+				CC(pll_rcgs[i]) |= 1;
+				(void)rx_wait((volatile uint32_t *)(rx_cc + pll_rcgs[i]), 1, 0, 500);
+				rxlog("camera rx: down 5b: RCG %#x parked on the crystal: cmd %#x cfg %#x\n", pll_rcgs[i],
+				    CC(pll_rcgs[i]), CC(pll_rcgs[i] + 4));
+			}
 		}
 		if (rx_pll_ours) {
 			rxlog("camera rx: down 6: PLL0 (mode %#x) off\n", CC(0x0));
@@ -2786,7 +2819,18 @@ redwood_r5q_cam_run(bool (*cb)(const uint8_t *frame, uint32_t bytes, void *ctx),
 	lck_mtx_lock(&r5q_pmic_lock);
 	rx_session_cb = cb;
 	rx_session_ctx = ctx;
-	rxlog_fast = true;
+	/*
+	 * (Test 325) The bring-up paced (300 ms after each "camera rx: step"), in sessions too. Every bring-up that hung
+	 * (Tests 312, 318, 324) ran fast (rxlog_fast, from Test 290); none of the paced ones ever did (287-289, 300-308).
+	 * With the persistent pipeline it happens once per boot: ~6 s, inside iOS's 15 s wait for the first frame.
+	 * cam_fast=1 brings back the fast bring-up.
+	 */
+	{
+		uint32_t fast = 0;
+
+		(void)PE_parse_boot_argn("cam_fast", &fast, sizeof(fast));
+		rxlog_fast = fast != 0;
+	}
 	camsensor_on = true;
 	camsensor_done = false;
 	camrx_on = true;
@@ -2942,6 +2986,7 @@ sec_ts_thread(void *parameter, __unused wait_result_t result)
 	uint32_t steps = (uint32_t)(uintptr_t)parameter;
 	unsigned done = 1;
 
+	bb_touch_thread = current_thread();     /* (Test 324) this thread's bit-banging has its own bus pointer */
 	step_survey();
 	if (steps >= 2 && (r5q ? step_r5q_supplies(false) : step_pmic())) {
 		done = 2;

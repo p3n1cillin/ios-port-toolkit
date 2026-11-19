@@ -630,3 +630,64 @@ candidate designs).
   write master, the SMMU match) occasionally hang the whole SoC bus; many transitions in a row (iOS's open/switch/
   close, the multi-session soaks) made it near-certain. The exact transition is not pinned down. The persistent
   pipeline avoids them. **Open:** a safe idle power-down (the sensor keeps streaming while nothing reads: power).
+- **Pushed: 9af48da** (Test 323: the camera in Camera.app on the persistent pipeline).
+- **A real race found in the code (2026-11-19, looking for why transitions hang): the bit-bang bus pointer.**
+  redwood_sec_ts.c drives several I2C buses by hand through ONE global pointer `bb` (`BB_CFG(n)` = bb->tlmm +
+  0x1000 * n). On the S10 Lite **touch is bit-banged too** ("the engine's FIFO interface is disabled (GSI DMA only):
+  the bus is driven by hand"), and the touch thread's `sec_ts_read`/`sec_ts_command` set `bb = &touch_bus` on every
+  poll, many times a second, with no lock. Since Test 284 moved the camera probe out of the touch thread, a touch
+  poll in the middle of a camera transaction redirected the camera's remaining bit-bang to the touch bus, and the
+  probe's **explicit-pin** writes (`rd/wr(BB_CFG(31))`, `(32)`, `(47)`, `(48)`: saving and restoring its pins at
+  every session start and end) went to `SOUTH tile + 0x1000 * 31`: the wrong TLMM tile, at an offset with no
+  GPIO31 behind it. That fits the whole record: hangs at session starts/ends (where those writes are), never in
+  steady streaming (no bit-bang then), none before Test 284 (the probe ran in the touch thread: no race), fewer in
+  hold runs (one start and end), none with the persistent pipeline (no probe after the first session). It may also
+  explain frames whose content differed run to run (sensor tables written partly to the touch controller).
+- **Test 324 (kernel t324): `bb` is one pointer per side**: the touch thread (touch, gauge, the regulator reads,
+  the charger dump) has its own, every other thread (the camera's) another; `bb` is a macro choosing by
+  `current_thread()`. The decisive check: **the persistent pipeline off** (`cam_persist=0`: a teardown and power-up
+  per session), the 5 short + 150 s soak that hung reliably, Wi-Fi traffic.
+- **Test 324 (kernel t324; the per-thread bus pointer; `cam_persist=0`): hung in the first bring-up**, right after
+  "exposure 768 lines: taken" (next: frame length, then the rails, GCC AXI, PLL0, the RCGs). So the touch race was
+  real (the fix stays) but not the whole story.
+  - **The pattern in the record:** every bring-up that hung ran **fast** (`rxlog_fast`, sessions since Test 290:
+  312, 318, 324, likely 316/319); **no paced bring-up ever hung** (300 ms after each "camera rx: step": the holds
+  287-289, 304, 307, 308; 1.5 s: the paced 300-305, which hung only later, at teardowns). Something in the
+  back-to-back sequence (clocks, PLL0, RCG switches, PHY/CSID/IFE resets, the camera NoC) needs settling time.
+- **Test 325 (kernel t325):** sessions bring the camera up paced too (`cam_fast=1` for the old fast way); ~6 s once
+  per boot with the persistent pipeline, within iOS's 15 s wait for the first frame. The hard test: `cam_persist=0`
+  (a paced bring-up and a teardown for every one of 5 short sessions, then 150 s), Wi-Fi traffic.
+- **Test 325 (kernel t325; paced bring-up; `cam_persist=0`): two full power cycles, then session 3's bring-up
+  hung.** The Wi-Fi log (1 s polls) ended at "step: RCGs" (90.486 s).
+- **The Wi-Fi log made streaming (2026-11-19):** `klog -f SECS` sends only what is new every 50 ms (~60 KB a run,
+  r5qd relays output as it comes) and `phone.py wlog` restarts it at once, writing each chunk to the file as it
+  arrives: a hang loses ≤ ~50 ms.
+- **Test 326 (the t325 kernel again, streamed log): the same place, exactly.** Session 3: CSI-PHY 2 configured,
+  CSID resets, "CSID RX cfg 0x232103 0x41, RDI0 ... ctrl 0x1", **"[94.978812] step: camera NoC (SMMU lock taken)"**,
+  then nothing: the camnoc RCG (0xc170) switch and the camnoc_axi branch (0xc18c). Test 279's first hang note said
+  the same ("hung right after camnoc_axi came on").
+  - **Cause found in our teardown:** PLL0 was turned off while five RCGs still selected it (cphy_rx 0xa064, timer
+    0x604c, CSID 0xc020, IFE-lite 0xc004, camnoc 0xc170). Linux's camera RCGs (shared ops) park on the crystal before
+    their PLL goes; ours were left on a source killed beneath them, and the next bring-up's switch of the camnoc RCG
+    started from it. Also `cam_cc_camnoc_dcd_xo_clk` (0xc194, the camera NoC's dynamic clock divider's crystal) was
+    never enabled; the spec had dismissed it.
+- **Test 327 (kernel t327):** teardown parks the five RCGs on the crystal (cfg 0x001 + update, waited for) before
+  PLL0 goes off; bring-up enables camnoc_dcd_xo before camnoc_axi (and teardown turns it off after). The
+  `cam_persist=0` 5 short + 150 s soak, streamed log.
+- **Test 327 (kernel t327: the RCGs parked on the crystal before PLL0 goes off; camnoc_dcd_xo on): ROOT CAUSE
+  FIXED.** With the persistent pipeline OFF (`cam_persist=0`), the soak that hung reliably: **five short sessions,
+  each a full paced bring-up and teardown, then 150 s (4,500 frames, 0 misses), then a final teardown: no hang**;
+  30 "parked on the crystal: cmd 0x80000000 cfg 0x1" lines (6 teardowns x 5 RCGs); "the phone is still up"; iOS
+  running afterwards.
+  - **The cause:** our teardown turned PLL0 off while five camcc RCGs still selected it (cphy_rx 0xa064, timer
+    0x604c, CSID 0xc020, IFE-lite 0xc004, camnoc 0xc170). The next bring-up's switch of the camera NoC's RCG started
+    from a source killed beneath it and could stall the SoC's bus (the camnoc is the camera's port into the
+    multimedia NoC). Hence: hangs only at session transitions (311-326), never while streaming; none with the
+    persistent pipeline (no teardown); the first hang of the whole hunt (Test 279) "right after camnoc_axi came on".
+  - Kept from the hunt, each right on its own: the persistent pipeline (iOS's switches are now instant), the paced
+    bring-up, the bit-bang bus pointer per thread (a real race), the SMMU lock around the camera's transitions, the
+    mnoc TBU votes, the frame-ring read/free fix, the verbose stamped logging, the streamed Wi-Fi log.
+  - **Toolkit lesson (docs/CAMERA.md):** park every RCG on the crystal before turning its PLL off (Linux's
+    `clk_rcg2_shared_ops`), and enable `cam_cc_camnoc_dcd_xo_clk` with `camnoc_axi`.
+- **Open:** a safe idle power-down now that teardowns are safe (the pipeline stays up while nothing reads); the
+  exposure (the picture is dark: iOS's requests not applied yet); the paced bring-up could become fast again.

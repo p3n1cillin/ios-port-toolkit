@@ -46,6 +46,20 @@ frames" from "the hardware gives frames".
 
 ## Lessons (each one cost at least one hang or one test)
 
+- **Park every RCG on the crystal before turning its PLL off** (what Linux's `clk_rcg2_shared_ops` does). The S10
+  Lite's teardown turned camcc PLL0 off while five RCGs still selected it; the next bring-up's switch of the camera
+  NoC's RCG (0xc170) then started from a dead source and stalled the whole SoC bus, at random, only at session
+  transitions (Tests 290-326, 40 tests to find). Also enable `cam_cc_camnoc_dcd_xo_clk` (camcc 0xc194) with
+  `camnoc_axi`. After the fix: six full power cycles in a row and minutes of streaming, no hang (Test 327).
+- **Keep the pipeline up between sessions.** iOS opens, switches and closes the camera constantly; bringing the
+  sensor and receive path up once and only starting/stopping the hand-over makes switches instant and avoids the
+  power transitions entirely.
+- **One bit-bang bus pointer per thread.** If touch is bit-banged too (GSI-only serial engines), a global "current
+  bus" pointer lets a touch poll redirect a camera transaction mid-way, explicit-pin writes included.
+- **Log so that a hang cannot eat the last lines:** a timestamped line before every bring-up/teardown step, and the
+  kernel log streamed off the phone over Wi-Fi every ~50 ms (`klog -f` + `phone.py wlog`), not a 2 MB USB snapshot
+  every few seconds.
+
 - **slow_ahb must stay on TCXO.** Rooting the camera's slow AHB RCG on PLL0 hung the whole system about 3 s later,
   whatever came next (Tests 276-286).
 - **An RPMh level vote replaces this voter's earlier vote, the boot's included.** "Releasing" MMCX/MX to 0 at
