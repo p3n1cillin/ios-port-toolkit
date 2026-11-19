@@ -1556,7 +1556,34 @@ campmic_peek(void)
  * The sensor's I2C is bit-banged on its CCI pins as GPIOs (pull-up as the DT), not through the CCI. The chip ID:
  * 16-bit register 0x0000, 2 bytes (Samsung's sensors). Then: reset low, MCLK off, both LDOs back as found (off).
  */
-static bool camsensor_on, camsensor_done;
+/*
+ * (r5q Test 277) The camera lines also into the loader's log ring, which outlives a hang and the watchdog's reset
+ * (Test 276 hung with nothing of the camera in the console's log), as redwood_camera.c's say() does.
+ */
+extern void loader_log_putc(char c);
+
+static void rxlog(const char *format, ...) __printflike(1, 2);
+
+static void
+rxlog(const char *format, ...)
+{
+	char line[320];
+	va_list list;
+
+	va_start(list, format);
+	vsnprintf(line, sizeof(line), format, list);
+	va_end(list);
+	for (const char *c = line; *c != 0; c++) {
+		loader_log_putc(*c);
+	}
+	printf("%s", line);
+	if (strncmp(line, "camera rx: step", 15) == 0) {
+		delay_for_interval(300, NSEC_PER_MSEC);         /* (Test 278: the line out first; 300 ms again in Test 284, the probe in its own thread) */
+	}
+}
+
+static bool camsensor_on, camsensor_done, camrx_on;
+static uint32_t camrx_level;    /* (Test 278) how far cam_rx_up() goes: 1 rails/GCC/PLL0, 2 RCGs/branches, 3 CPAS, 4 CSI-PHY, 5 CSID */
 extern bool redwood_r5q_rpmh_enable(const char *id);
 extern bool redwood_spmi_peek(uint16_t id, uint8_t reg, uint8_t *bytes, uint32_t count);
 
@@ -1610,20 +1637,280 @@ cam_table(const uint8_t *tab, uint64_t size, const char *want)
 				const char *problem = bb_write16(a, v, e[5] == 2 ? 2 : 1);
 
 				if (problem != NULL) {
-					printf("camera sensor: table %s write %u (%#x = %#x): %s\n", want, i, a, v, problem);
+					rxlog("camera sensor: table %s write %u (%#x = %#x): %s\n", want, i, a, v, problem);
 					return false;
 				}
 				if (delay != 0) {
 					spin_us(delay > 50000 ? 50000 : delay);
 				}
 			}
-			printf("camera sensor: table %s: %u writes taken\n", want, n);
+			rxlog("camera sensor: table %s: %u writes taken\n", want, n);
 			return true;
 		}
 		at = e + 12 * n;
 	}
-	printf("camera sensor: no table %s\n", want);
+	rxlog("camera sensor: no table %s\n", want);
 	return false;
+}
+
+/*
+ * (r5q Test 276) The camera's receive path, as far as the CSID (wifi/CAMERA-RX-SPEC.md (a)-(d)): rails, GCC's camera
+ * AXI clocks, camcc PLL0 (Trion, 1200 MHz), the RCGs and branches, CSI-PHY 2 (v1.1, 4-lane D-PHY, settle 14), and
+ * CSID-lite 0's RX (PHY 2, lanes 0x3210) and RDI0 (RAW10, dt 0x2b). Nothing is written to memory: the CSID's own
+ * counters and status say whether frames arrive. cam_rx_down() undoes it.
+ */
+extern int redwood_r5q_rpmh_level(const char *id, unsigned vlvl);
+static vm_offset_t rx_cc, rx_gcc, rx_phy, rx_csid, rx_cpas;
+static bool rx_pll_ours;
+static uint32_t rx_reached;      /* (Test 278) the last stage cam_rx_up() finished: cam_rx_down() undoes only those */
+
+#define CC(o)   (*(volatile uint32_t *)(rx_cc + (o)))
+#define PHY(o)  (*(volatile uint32_t *)(rx_phy + (o)))
+#define CSID(o) (*(volatile uint32_t *)(rx_csid + (o)))
+
+static bool
+rx_wait(volatile uint32_t *reg, uint32_t mask, uint32_t want, unsigned us_max)
+{
+	for (unsigned us = 0; us < us_max; us += 10) {
+		if ((*reg & mask) == want) {
+			return true;
+		}
+		spin_us(10);
+	}
+	return (*reg & mask) == want;
+}
+
+static bool
+cam_rx_up(void)
+{
+	static const uint32_t rcgs[][2] = {
+		/* (Test 282) Tests 280-281: enabling ife_lite_0_csid_clk (0xc038) at 400 MHz (PLL0 odd) hung the system; the CSID
+		 * and IFE-lite from TCXO (19.2 MHz, cfg 1) instead: enough for registers and counters */
+		{ 0x7058, 0x20e }, { 0xa064, 0x301 }, { 0x604c, 0x203 }, { 0xc020, 0x001 }, { 0xc004, 0x001 },
+	};
+	/* (Test 280) Test 279 hung right after camnoc_axi (RCG 0xc170, branch 0xc18c) came on, at the next camcc access:
+	 * left out until the IFE writes memory (the CSID alone does not need the camera NoC) */
+	static const uint32_t branches[] = { 0xc168, 0x6068, 0x6064, 0xc038, 0xc040, 0xc01c };
+	static const uint32_t lanes[] = { 0x000, 0x700, 0x200, 0x400, 0x600 };     /* DL0, CLK, DL1, DL2, DL3 */
+	static const uint8_t irq_masks[] = { 0xff, 0xff, 0xfb, 0xff, 0x7f, 0xff, 0xff, 0xef, 0xff, 0xff, 0xff };
+	uint32_t settle = 14, mode, opmode, nopll = 0, pll600 = 0;
+
+	/* (Test 285) Tests 279-284 hung ~3 s after PLL0 locked, whatever the step or thread: cam_nopll=1 keeps PLL0 off */
+	(void)PE_parse_boot_argn("cam_nopll", &nopll, sizeof(nopll));
+	(void)PE_parse_boot_argn("cam_pll600", &pll600, sizeof(pll600));
+
+	(void)PE_parse_boot_argn("cam_settle", &settle, sizeof(settle));
+	rx_cc = ml_io_map(0x0ad00000UL, 0x10000);
+	rx_gcc = ml_io_map(0x0010b000UL, 0x1000);
+	rx_phy = ml_io_map(0x0ac67000UL, 0x1000);
+	rx_csid = ml_io_map(0x0acc8000UL, 0x1000);
+	rx_cpas = ml_io_map(0x0ac40000UL, 0x1000);
+	if (rx_cc == 0 || rx_gcc == 0 || rx_phy == 0 || rx_csid == 0 || rx_cpas == 0) {
+		rxlog("camera rx: no mapping\n");
+		return false;
+	}
+	/* rails: MMCX >= SVS (IFE-lite at 400 MHz), MX >= SVS_L1 (PLL0 at 1200 MHz), ldoc3 (the CSI-PHY's 1.2 V) */
+	rxlog("camera rx: rails: mmcx %d, mx %d, ldoc3 %s\n", redwood_r5q_rpmh_level("mmcx.lvl", 128),
+	    redwood_r5q_rpmh_level("mx.lvl", 192), redwood_r5q_rpmh_enable("ldoc3") ? "on" : "NOT ON");
+	/* GCC: the camera's AXI (hf, sf) */
+	rxlog("camera rx: step: GCC AXI\n");
+	/* (Test 281) Tests 279-280 hung about 3 s after these came on, at different steps: the camera AXI path without the
+	 * camera NoC. Not needed for the CSID (register access only): only from stage 6 (the IFE writing memory). */
+	if (camrx_level >= 6) {
+		*(volatile uint32_t *)(rx_gcc + 0x30) |= 1;
+		*(volatile uint32_t *)(rx_gcc + 0x34) |= 1;
+	}
+	spin_us(100);
+	rxlog("camera rx: GCC camera hf_axi %#x sf_axi %#x xo %#x\n", *(volatile uint32_t *)(rx_gcc + 0x30),
+	    *(volatile uint32_t *)(rx_gcc + 0x34), *(volatile uint32_t *)(rx_gcc + 0x44));
+	/* PLL0 (Trion): not ours if running or in voting mode */
+	rxlog("camera rx: step: PLL0 read\n");
+	mode = CC(0x0);
+	opmode = CC(0x38);
+	if (nopll) {
+		rxlog("camera rx: cam_nopll=1: PLL0 left off; every RCG from TCXO (19.2 MHz)\n");
+	} else if (((mode & 1) && (opmode & 1)) || (mode & (1u << 20))) {
+		rxlog("camera rx: PLL0 already running or voted (mode %#x opmode %#x): left as it is\n", mode, opmode);
+	} else {
+		/*
+		 * (Test 286) Test 285: no hang with PLL0 off; Tests 279-284 hung ~3 s after it locked at 1200 MHz. cam_pll600=1:
+		 * 600 MHz (L 0x1f, alpha 0x4000: 19.2 x 31.25), which needs MX at SVS only; even 300, odd 200 MHz.
+		 */
+		CC(0x04) = pll600 ? 0x1f : 0x3e;
+		CC(0x08) = 0x44;
+		CC(0x40) = pll600 ? 0x4000 : 0x8000;
+		CC(0x18) = 0x20485699;
+		CC(0x1c) = 0x2267;
+		CC(0x20) = 0x24;
+		CC(0x0c) = 0x3100;
+		CC(0x10) = 0x805;
+		CC(0x14) = 0xd0;
+		CC(0x2c) = 0x20;
+		CC(0x0) |= 1u << 23;
+		CC(0x0) &= ~1u;
+		CC(0x38) = 0;
+		CC(0x0) |= 1u << 2;
+		CC(0x38) = 1;
+		if (!rx_wait((volatile uint32_t *)(rx_cc + 0x0), 1u << 31, 1u << 31, 2000)) {
+			rxlog("camera rx: PLL0 does not lock (mode %#x status %#x): stopped\n", CC(0x0), CC(0x30));
+			return false;
+		}
+		CC(0x0c) |= 7;
+		CC(0x0) |= 1;
+		rx_pll_ours = true;
+		rxlog("camera rx: PLL0 locked: mode %#x opmode %#x user_ctl %#x\n", CC(0x0), CC(0x38), CC(0x0c));
+	}
+	rx_reached = 1;
+	if (camrx_level < 2) {
+		rxlog("camera rx: camrx=%u: stopped after PLL0\n", camrx_level);
+		return false;
+	}
+	rxlog("camera rx: step: RCGs\n");
+	for (unsigned i = 0; i < sizeof(rcgs) / sizeof(rcgs[0]); i++) {
+		rxlog("camera rx: step: RCG %#x\n", rcgs[i][0]);
+		uint32_t cfg = nopll ? 0x001u : rcgs[i][1];
+
+		if (pll600 && !nopll) {
+			/* (Test 286) PLL0 at 600: slow_ahb 300/4 = 75 MHz; cphy_rx, CSID, IFE-lite odd 200 / 1; timer even 300 / 1 */
+			/* (Test 287) Test 286 hung as before with the RCGs on PLL0 (285, all on TCXO, did not): slow_ahb (the camera's
+			 * register bus) kept on TCXO */
+			cfg = rcgs[i][0] == 0x7058 ? 0x001u : rcgs[i][0] == 0x604c ? 0x201u : rcgs[i][0] == 0xa064 ? 0x301u :
+			    (rcgs[i][0] == 0xc020 || rcgs[i][0] == 0xc004) ? 0x301u : rcgs[i][1];
+		}
+		CC(rcgs[i][0] + 4) = (CC(rcgs[i][0] + 4) & ~0x371fu) | cfg;
+		CC(rcgs[i][0]) |= 1;
+		(void)rx_wait((volatile uint32_t *)(rx_cc + rcgs[i][0]), 1, 0, 500);
+	}
+	for (unsigned i = 0; i < sizeof(branches) / sizeof(branches[0]); i++) {
+		rxlog("camera rx: step: branch %#x\n", branches[i]);
+		CC(branches[i]) |= 1;
+		(void)rx_wait((volatile uint32_t *)(rx_cc + branches[i]), 1u << 31, 0, 2000);
+	}
+	rxlog("camera rx: RCG cmd: cphy_rx %#x timer %#x ife_lite %#x csid %#x; branches csiphy2 %#x timer %#x csid %#x cphy %#x ife %#x "
+	    "cpas_ahb %#x camnoc %#x\n", CC(0xa064), CC(0x604c), CC(0xc004), CC(0xc020), CC(0x6068), CC(0x6064), CC(0xc038), CC(0xc040),
+	    CC(0xc01c), CC(0xc168), CC(0xc18c));
+	if ((CC(0xc168) | CC(0x6068) | CC(0xc038) | CC(0xc040)) & (1u << 31)) {
+		rxlog("camera rx: a clock of the path is off: no camera block is touched\n");
+		return false;
+	}
+	rx_reached = 2;
+	if (camrx_level < 3) {
+		rxlog("camera rx: camrx=%u: stopped after the clocks\n", camrx_level);
+		return false;
+	}
+	rxlog("camera rx: step: CPAS read\n");
+	rxlog("camera rx: CPAS: camera version %#x, CPAS version %#x\n", *(volatile uint32_t *)(rx_cpas + 0),
+	    *(volatile uint32_t *)(rx_cpas + 4));
+	/* CSI-PHY 2: reset, common, the lanes, the interrupt masks */
+	rx_reached = 3;
+	if (camrx_level < 4) {
+		rxlog("camera rx: camrx=%u: stopped after CPAS\n", camrx_level);
+		return false;
+	}
+	rxlog("camera rx: step: CSI-PHY 2\n");
+	PHY(0x814) = 0; spin_us(5000);
+	PHY(0x818) = 0; PHY(0x81c) = 0;
+	PHY(0x800) = 1; spin_us(1000); PHY(0x800) = 0;
+	PHY(0x814) = 0xd5; PHY(0x818) = 1; PHY(0x81c) = 2;
+	PHY(0x800) = 1; spin_us(1000); PHY(0x800) = 0;
+	for (unsigned l = 0; l < 5; l++) {
+		uint32_t b = lanes[l];
+		bool clk = b == 0x700;
+
+		PHY(b + 0x30) = 0; PHY(b + 0x04) = 0x0c; PHY(b + 0x20) = 0; PHY(b + 0x2c) = 1; PHY(b + 0x34) = 0x0f;
+		PHY(b + 0x1c) = 0x0a; PHY(b + 0x14) = 0x60; PHY(b + 0x28) = clk ? 0x04 : 0; PHY(b + 0x3c) = 0xb8;
+		PHY(b + 0x00) = clk ? 0x80 : 0x90; PHY(b + 0x08) = settle & 0xff;
+		if (clk) {
+			PHY(b + 0x0c) = 0x16;
+		}
+		PHY(b + 0x10) = 0x52; PHY(b + 0x38) = clk ? 0x1f : 0xfe;
+		PHY(0x800) = 2;
+	}
+	for (unsigned i = 0; i < 11; i++) {
+		PHY(0x82c + 4 * i) = irq_masks[i];
+		PHY(0x858 + 4 * i) = 0xff;
+	}
+	PHY(0x828) = 1; PHY(0x828) = 0;
+	rxlog("camera rx: CSI-PHY 2 configured (lane enable %#x, settle %u)\n", PHY(0x814), settle);
+	/* CSID-lite 0: reset, RX from PHY 2, RDI0 RAW10 */
+	rx_reached = 4;
+	if (camrx_level < 5) {
+		rxlog("camera rx: camrx=%u: stopped after the CSI-PHY\n", camrx_level);
+		return false;
+	}
+	rxlog("camera rx: step: CSID\n");
+	CSID(0x024) = 0; CSID(0x034) = 0; CSID(0x044) = 0; CSID(0x054) = 0; CSID(0x064) = 0;
+	CSID(0x078) = 1; CSID(0x028) = 0x0fffffff; CSID(0x038) = 0x7fff; CSID(0x048) = 0x7fff; CSID(0x058) = 0x7fff;
+	CSID(0x068) = 0x7fff; CSID(0x080) = 1;
+	CSID(0x104) = 0x80; CSID(0x200) = 2; CSID(0x300) = 2; CSID(0x400) = 2; CSID(0x500) = 2;
+	CSID(0x010) = 0x1e;
+	rxlog("camera rx: CSID hw reset %s\n", rx_wait((volatile uint32_t *)(rx_csid + 0x070), 1, 1, 100000) ? "done" : "NOT DONE");
+	CSID(0x078) = 1; CSID(0x080) = 1;
+	CSID(0x010) = 0x1;
+	rxlog("camera rx: CSID sw reset %s; version %#x\n", rx_wait((volatile uint32_t *)(rx_csid + 0x070), 1, 1, 100000) ?
+	    "done" : "NOT DONE", CSID(0x000));
+	CSID(0x078) = 1; CSID(0x080) = 1;
+	CSID(0x100) = 0x00232103;
+	CSID(0x104) = 0x41;
+	CSID(0x200) = 0x002bf007;
+	CSID(0x204) = 2;
+	CSID(0x210) = 1; CSID(0x20c) = 0; CSID(0x218) = 1; CSID(0x214) = 0;
+	CSID(0x224) = 0; CSID(0x228) = 1; CSID(0x22c) = 0; CSID(0x230) = 1;
+	CSID(0x208) = 0;
+	CSID(0x200) |= 1u << 31;
+	CSID(0x108) = 0;
+	CSID(0x208) = 1;
+	CSID(0x028) = 0x0fffffff; CSID(0x038) = 0x7fff; CSID(0x080) = 1;
+	rx_reached = 5;
+	rxlog("camera rx: CSID RX cfg %#x %#x, RDI0 cfg %#x ctrl %#x\n", CSID(0x100), CSID(0x104), CSID(0x200), CSID(0x208));
+	return true;
+}
+
+static void
+cam_rx_show(const char *when)
+{
+	if (rx_csid == 0 || rx_reached < 5) {
+		return;
+	}
+	rxlog("camera rx: %s: RX irq %#x, packets %u, ECC %#x, CRC errors %u; RDI0 irq %#x status %#x, bytes %u/%u; "
+	    "PHY status %#x %#x %#x\n", when, CSID(0x020), CSID(0x160), CSID(0x164), CSID(0x168), CSID(0x030), CSID(0x250),
+	    CSID(0x2e0), CSID(0x2e4), PHY(0x8b0), PHY(0x8b4), PHY(0x8b8));
+}
+
+static void
+cam_rx_down(void)
+{
+	static const uint32_t branches[] = { 0xc01c, 0xc040, 0xc038, 0x6064, 0x6068, 0xc18c, 0xc168 };
+
+	if (rx_csid != 0 && rx_reached >= 5) {
+		CSID(0x034) = 0;
+		CSID(0x208) = (CSID(0x208) & ~3u) | 2;
+		CSID(0x200) &= ~(1u << 31);
+		CSID(0x100) = 0;
+	}
+	if (rx_phy != 0 && rx_reached >= 4) {
+		PHY(0x814) = 0; PHY(0x818) = 0; PHY(0x81c) = 0;
+		PHY(0x800) = 1; spin_us(1000); PHY(0x800) = 0;
+	}
+	if (rx_cc != 0) {
+		for (unsigned i = 0; i < sizeof(branches) / sizeof(branches[0]); i++) {
+			CC(branches[i]) &= ~1u;
+		}
+		if (rx_pll_ours) {
+			CC(0x0) &= ~1u;
+			CC(0x0c) &= ~7u;
+			CC(0x38) = 0;
+			CC(0x0) &= ~(1u << 2);
+			rx_pll_ours = false;
+		}
+	}
+	if (rx_gcc != 0) {
+		*(volatile uint32_t *)(rx_gcc + 0x30) &= ~1u;
+		*(volatile uint32_t *)(rx_gcc + 0x34) &= ~1u;
+	}
+	(void)redwood_r5q_rpmh_level("mx.lvl", 0);
+	(void)redwood_r5q_rpmh_level("mmcx.lvl", 0);
+	rxlog("camera rx: down\n");
 }
 
 /* 16-bit register address, `count` bytes */
@@ -1677,16 +1964,16 @@ camsensor_probe(void)
 		 * idle and runs on access (Linux gcc-sm8150: hwcg_bit 1). camcc's power, MMCX, is the display's too (on).
 		 * So what is required is "enabled", not "running".
 		 */
-		printf("camera sensor: GCC_CAMERA_AHB_CBCR %#x (bit 0 enabled, bit 1 hardware-gated, bit 31 idle/off)\n", ahb);
+		rxlog("camera sensor: GCC_CAMERA_AHB_CBCR %#x (bit 0 enabled, bit 1 hardware-gated, bit 31 idle/off)\n", ahb);
 		if ((ahb & 1) == 0) {
-			printf("camera sensor: the camera clock controller's bus clock is not enabled: nothing done\n");
+			rxlog("camera sensor: the camera clock controller's bus clock is not enabled: nothing done\n");
 			return;
 		}
 	}
 	/* vio: L14 (PM8150 slave 1, LDO14 at 0x4d00: status 0x08, enable 0x46), then the vote */
 	(void)redwood_spmi_peek(0x14d, 0x08, &l14[0], 1);
 	(void)redwood_spmi_peek(0x14d, 0x46, &l14[1], 1);
-	printf("camera sensor: L14 status %#04x enable %#04x before; vote: %s\n", l14[0], l14[1],
+	rxlog("camera sensor: L14 status %#04x enable %#04x before; vote: %s\n", l14[0], l14[1],
 	    redwood_r5q_rpmh_enable("ldoa14") ? "done" : "NOT DONE");
 	/* vana, vdig: S2MPB03 #2 */
 	pm.tlmm = east;
@@ -1697,10 +1984,10 @@ camsensor_probe(void)
 	wr(BB_CFG(48), 0);
 	spin_us(50);
 	if (!bb_recover("S2MPB03 #2") || (problem = bb_read(0x04, &ldo2, 1)) != NULL || (problem = bb_read(0x08, &ldo6, 1)) != NULL) {
-		printf("camera sensor: S2MPB03 #2: %s: nothing switched on\n", problem ? problem : "the bus stays low");
+		rxlog("camera sensor: S2MPB03 #2: %s: nothing switched on\n", problem ? problem : "the bus stays low");
 		goto pins_back;
 	}
-	printf("camera sensor: S2MPB03 #2 LDO2 %#04x LDO6 %#04x as found; LDO6 on at 2.8 V, then LDO2 on at 1.05 V\n", ldo2, ldo6);
+	rxlog("camera sensor: S2MPB03 #2 LDO2 %#04x LDO6 %#04x as found; LDO6 on at 2.8 V, then LDO2 on at 1.05 V\n", ldo2, ldo6);
 	if ((problem = bb_write(0x08, 0x80 | 0x28)) != NULL) {
 		goto power_back;
 	}
@@ -1714,7 +2001,7 @@ camsensor_probe(void)
 
 		(void)bb_read(0x04, &now2, 1);
 		(void)bb_read(0x08, &now6, 1);
-		printf("camera sensor: S2MPB03 #2 LDO2 %#04x LDO6 %#04x now\n", now2, now6);
+		rxlog("camera sensor: S2MPB03 #2 LDO2 %#04x LDO6 %#04x now\n", now2, now6);
 	}
 	/*
 	 * (Test 273) Test 272: the MCLK RCG stayed "root off" (cmd 0x80000000) with its branch enabled, and L14 read off
@@ -1724,7 +2011,7 @@ camsensor_probe(void)
 	 */
 	(void)redwood_spmi_peek(0x14d, 0x08, &l14[0], 1);
 	(void)redwood_spmi_peek(0x14d, 0x46, &l14[1], 1);
-	printf("camera sensor: L14 status %#04x enable %#04x after the vote\n", l14[0], l14[1]);
+	rxlog("camera sensor: L14 status %#04x enable %#04x after the vote\n", l14[0], l14[1]);
 	camcc_c = ml_io_map(0x0ad00000UL + 0xc000, 0x1000);
 	if (camcc_c != 0) {
 		was_gdsc_clk = *(volatile uint32_t *)(camcc_c + 0x1e4);
@@ -1734,7 +2021,7 @@ camsensor_probe(void)
 		for (us = 0; us < 10000 && !(*(volatile uint32_t *)(camcc_c + 0x1bc) & (1u << 31)); us += 10) {
 			spin_us(10);
 		}
-		printf("camera sensor: CAM_CC_GDSC_CLK %#x -> %#x; titan_top_gdsc %#x -> %#x (bit 31 = powered)\n", was_gdsc_clk,
+		rxlog("camera sensor: CAM_CC_GDSC_CLK %#x -> %#x; titan_top_gdsc %#x -> %#x (bit 31 = powered)\n", was_gdsc_clk,
 		    *(volatile uint32_t *)(camcc_c + 0x1e4), was_gdscr, *(volatile uint32_t *)(camcc_c + 0x1bc));
 	}
 	/* MCLK1: 19.2 MHz from TCXO; GPIO14 cam_mclk */
@@ -1749,7 +2036,7 @@ camsensor_probe(void)
 	}
 	was14 = rd(north + 0x1000UL * 14);
 	wr(north + 0x1000UL * 14, (1u << 2) | (1u << 6));               /* cam_mclk, 4 mA, no pull */
-	printf("camera sensor: MCLK1: RCG cmd %#x cfg %#x, branch %#x (bit 31 = off); GPIO14 %#x\n",
+	rxlog("camera sensor: MCLK1: RCG cmd %#x cfg %#x, branch %#x (bit 31 = off); GPIO14 %#x\n",
 	    *(volatile uint32_t *)(camcc + 0x024), *(volatile uint32_t *)(camcc + 0x028), *(volatile uint32_t *)(camcc + 0x03c),
 	    rd(north + 0x1000UL * 14));
 	/* reset: GPIO22 out high */
@@ -1789,7 +2076,7 @@ camsensor_probe(void)
 				at += snprintf(seen + at, sizeof(seen) - at, " %#04x", a);
 			}
 		}
-		printf("camera sensor: the bus GPIO31/32 answers at:%s\n", at ? seen : " nothing");
+		rxlog("camera sensor: the bus GPIO31/32 answers at:%s\n", at ? seen : " nothing");
 		problem = "no answer";
 		for (unsigned t = 0; t < sizeof(tries) && problem != NULL; t++) {
 			cam.address = tries[t];
@@ -1797,7 +2084,7 @@ camsensor_probe(void)
 				uint64_t tab_size = 0;
 				const uint8_t *tab = redwood_image_file("fw", "camera-s5k3l6.tab", &tab_size, NULL);
 
-				printf("camera sensor: THE SENSOR ANSWERS at 7-bit %#04x: chip ID %02x%02x (CCI 1 master 0)\n", tries[t],
+				rxlog("camera sensor: THE SENSOR ANSWERS at 7-bit %#04x: chip ID %02x%02x (CCI 1 master 0)\n", tries[t],
 				    id[0], id[1]);
 				/*
 				 * (Test 275) Its own tables: init, mode 2 (1028x772 RAW10, 120 frames a second), stream on; its
@@ -1805,24 +2092,37 @@ camsensor_probe(void)
 				 * shows the sensor runs on its tables.
 				 */
 				if (tab == NULL || tab_size < 48 || memcmp(tab, "RWCTAB02", 8) != 0) {
-					printf("camera sensor: no camera-s5k3l6.tab in the root's /fw: no stream test\n");
-				} else if (cam_table(tab, tab_size, "init") && cam_table(tab, tab_size, "res2") && cam_table(tab, tab_size, "on")) {
-					for (int r = 0; r < 4; r++) {
-						uint8_t fc = 0, mode = 0;
+					rxlog("camera sensor: no camera-s5k3l6.tab in the root's /fw: no stream test\n");
+				} else if (cam_table(tab, tab_size, "init") && cam_table(tab, tab_size, "res2")) {
+					/* (Test 276) the receive path before the stream starts, as Android orders it */
+					bool rx = camrx_on && cam_rx_up();
 
-						spin_us(25000);
-						(void)bb_read16(0x0005, &fc, 1);
-						(void)bb_read16(0x0100, &mode, 1);
-						printf("camera sensor: streaming? frame counter %u, mode_select %#x\n", fc, mode);
+					if (cam_table(tab, tab_size, "on")) {
+						for (int r = 0; r < 4; r++) {
+							uint8_t fc = 0, mode = 0;
+
+							spin_us(25000);
+							(void)bb_read16(0x0005, &fc, 1);
+							(void)bb_read16(0x0100, &mode, 1);
+							rxlog("camera sensor: streaming? frame counter %u, mode_select %#x\n", fc, mode);
+							if (rx) {
+								cam_rx_show("streaming");
+							}
+						}
+						(void)cam_table(tab, tab_size, "off");
 					}
-					(void)cam_table(tab, tab_size, "off");
+					if (rx || camrx_on) {
+						spin_us(20000);
+						cam_rx_show("stopped");
+						cam_rx_down();
+					}
 				}
 			} else {
-				printf("camera sensor: 7-bit %#04x: %s\n", tries[t], problem);
+				rxlog("camera sensor: 7-bit %#04x: %s\n", tries[t], problem);
 			}
 		}
 	} else {
-		printf("camera sensor: GPIO31/32: %s\n", problem);
+		rxlog("camera sensor: GPIO31/32: %s\n", problem);
 	}
 	wr(BB_CFG(31), was31);
 	wr(BB_CFG(32), was32);
@@ -1836,13 +2136,13 @@ camsensor_probe(void)
 	if (camcc_c != 0) {                                             /* (Test 273) the power domain back as found */
 		*(volatile uint32_t *)(camcc_c + 0x1bc) = was_gdscr;
 		*(volatile uint32_t *)(camcc_c + 0x1e4) = was_gdsc_clk;
-		printf("camera sensor: titan_top_gdsc back: %#x\n", *(volatile uint32_t *)(camcc_c + 0x1bc));
+		rxlog("camera sensor: titan_top_gdsc back: %#x\n", *(volatile uint32_t *)(camcc_c + 0x1bc));
 	}
 	bb = &pm;
 	problem = NULL;
 power_back:
 	if (problem != NULL) {
-		printf("camera sensor: S2MPB03 #2 write: %s\n", problem);
+		rxlog("camera sensor: S2MPB03 #2 write: %s\n", problem);
 	}
 	(void)bb_write(0x04, ldo2);
 	spin_us(1000);
@@ -1852,12 +2152,22 @@ power_back:
 
 		(void)bb_read(0x04, &now2, 1);
 		(void)bb_read(0x08, &now6, 1);
-		printf("camera sensor: S2MPB03 #2 back: LDO2 %#04x LDO6 %#04x\n", now2, now6);
+		rxlog("camera sensor: S2MPB03 #2 back: LDO2 %#04x LDO6 %#04x\n", now2, now6);
 	}
 pins_back:
 	wr(BB_CFG(47), was47);
 	wr(BB_CFG(48), was48);
 	bb = was;
+}
+
+/* (Test 284) the camera probe's own thread: the battery's lock held while it runs, the touch thread left alone */
+static void
+camsensor_thread(__unused void *parameter, __unused wait_result_t result)
+{
+	lck_mtx_lock(&r5q_pmic_lock);
+	camsensor_probe();
+	lck_mtx_unlock(&r5q_pmic_lock);
+	thread_terminate(current_thread());
 }
 
 static void
@@ -1980,9 +2290,16 @@ step_watch(void)
 			lck_mtx_unlock(&r5q_pmic_lock);
 		}
 		if (r5q && ticks == 40 * 1000000 / POLL_US && (rd(GPIO_IO(PIN_INT)) & 1) && !any_finger_down()) {
-			lck_mtx_lock(&r5q_pmic_lock);
-			camsensor_probe();      /* (Test 271: camsensor=1, one camera sensor powered, its ID read, all back) */
-			lck_mtx_unlock(&r5q_pmic_lock);
+			/*
+			 * (Test 284) In a thread of its own: Tests 279-283 hung whenever the probe took more than ~3 s inside
+			 * this (the touch) thread -- whatever the step -- and the earlier, sub-second probes never did.
+			 */
+			thread_t cam_thread;
+
+			if (camsensor_on && !camsensor_done &&
+			    kernel_thread_start(camsensor_thread, NULL, &cam_thread) == KERN_SUCCESS) {
+				thread_deallocate(cam_thread);
+			}
 		}
 		delay(POLL_US);
 	}
@@ -2130,6 +2447,9 @@ redwood_sec_ts_init(void)
 		campmic_on = PE_parse_boot_argn("campmic", &dump, sizeof(dump)) && dump != 0;
 		dump = 0;
 		camsensor_on = PE_parse_boot_argn("camsensor", &dump, sizeof(dump)) && dump != 0;
+		dump = 0;
+		camrx_on = PE_parse_boot_argn("camrx", &dump, sizeof(dump)) && dump != 0;
+		camrx_level = camrx_on ? dump : 0;
 	}
 	if (steps == 0) {
 		return;

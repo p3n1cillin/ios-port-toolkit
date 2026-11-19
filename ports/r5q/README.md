@@ -27,7 +27,7 @@ binaries, no build outputs and no phone backups are in this repository (see [the
 | `wifi/WIFI-PLAN.md` | everything since Test 111, step by step with what every test showed: Wi-Fi, sound, GPU, apps, sensors, CoreMotion, the compass, the microphone |
 | `SESSION.md` | the test-by-test log of the earlier stages |
 
-## State (Test 275)
+## State (Test 287)
 
 **Works:**
 
@@ -60,7 +60,8 @@ binaries, no build outputs and no phone backups are in this repository (see [the
 - **Metal:** there is no GPU driver for iOS, so the map in Maps and live wallpapers are missing.
 - **Camera:** iOS's capture path works end to end with a synthetic picture (`cam=5 cam_fake=1`: Camera.app shows
   the kernel's colour chart; wifi/CAMERA-PLAN.md). On the hardware side, one sensor (the S5K3L6) is powered and
-  answers on its bus and streams on its own tables (Tests 274-275); its frames are not received yet.
+  streams on its own tables, and the chip receives its frames without errors (Tests 274-287); they are not yet
+  written to memory.
 - **Radios:** cellular; Bluetooth audio.
 - **FairPlay:** App Store apps won't run; this needs Apple's FairPlay kernel extension.
 

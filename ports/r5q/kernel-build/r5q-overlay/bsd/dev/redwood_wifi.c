@@ -6251,6 +6251,77 @@ redwood_r5q_rpmh_enable(const char *id)
 	return rsc_write(tcs, &addr, &one, 1);
 }
 
+/*
+ * (r5q Test 276, the camera) A rail of cmd-db voted to a level: `vlvl` (RPMh's level number, e.g. 128 SVS, 192
+ * SVS_L1) turned into its position in the rail's level list (the entry's aux data, u16 each), and that position written
+ * to the rail's address. vlvl 0 gives the vote back (position 0). Returns the position written, or -1.
+ */
+int
+redwood_r5q_rpmh_level(const char *id, unsigned vlvl)
+{
+	static const volatile uint8_t *db;
+	static vm_offset_t tcs;
+	char want[8];
+
+	if (db == NULL) {
+		db = (const volatile uint8_t *)ml_io_map_unmappable(R5Q_CMD_DB_PHYS, R5Q_CMD_DB_SIZE, VM_WIMG_WCOMB);
+	}
+	if (tcs == 0) {
+		tcs = ml_io_map(R5Q_RSC_TCS_PHYS, R5Q_RSC_TCS_SIZE);
+	}
+	if (db == NULL || tcs == 0 || db[4] != 0xdb || db[5] != 0x30 || db[6] != 0x03 || db[7] != 0x0c) {
+		return -1;
+	}
+	bzero(want, sizeof(want));
+	for (int i = 0; i < 8 && id[i]; i++) {
+		want[i] = id[i];
+	}
+	for (int s = 0; s < 8; s++) {
+		const volatile uint8_t *h = db + 8 + 16 * s;
+		uint32_t hoff = (uint32_t)(h[2] | h[3] << 8), doff = (uint32_t)(h[4] | h[5] << 8), cnt = (uint32_t)(h[6] | h[7] << 8);
+
+		for (uint32_t i = 0; i < cnt && 144 + hoff + 24 * (i + 1) <= R5Q_CMD_DB_SIZE; i++) {
+			const volatile uint8_t *e = db + 144 + hoff + 24 * i;
+			bool same = true;
+			uint32_t addr, len, off, position = 0, n;
+
+			for (int k = 0; k < 8 && same; k++) {
+				same = e[k] == (uint8_t)want[k];
+			}
+			if (!same) {
+				continue;
+			}
+			addr = (uint32_t)(e[16] | e[17] << 8 | e[18] << 16 | (uint32_t)e[19] << 24);
+			len = (uint32_t)(e[20] | e[21] << 8);
+			off = (uint32_t)(e[22] | e[23] << 8);
+			n = len / 2;
+			if (vlvl != 0) {
+				position = n;
+				for (uint32_t l = 0; l < n && 144 + doff + off + 2 * l + 1 < R5Q_CMD_DB_SIZE; l++) {
+					const volatile uint8_t *v = db + 144 + doff + off + 2 * l;
+					uint32_t level = (uint32_t)(v[0] | v[1] << 8);
+
+					if (l > 0 && level == 0) {
+						break;
+					}
+					if (level >= vlvl) {
+						position = l;
+						break;
+					}
+				}
+				if (position >= n) {
+					printf("rpmh: %s has no level >= %u\n", id, vlvl);
+					return -1;
+				}
+			}
+			printf("rpmh: %s at %#x: level %u = position %u\n", id, addr, vlvl, position);
+			return rsc_write(tcs, &addr, &position, 1) ? (int)position : -1;
+		}
+	}
+	printf("rpmh: %s is not in cmd-db\n", id);
+	return -1;
+}
+
 static bool
 rsc_write_one(vm_offset_t tcs_base, const uint32_t *addr, const uint32_t *data, unsigned n)
 {

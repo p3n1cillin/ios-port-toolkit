@@ -201,3 +201,85 @@ candidate designs).
   - then frames into `/dev/redwood-camera`, with the donor's software ISP on the iOS side (GRBG).
   - Register references: Qualcomm's camera driver for SM8150 (cam_csiphy_1_1_hwreg.h, cam_csid_lite_17x/175,
     cam_vfe_lite), and the donor's cam=3/4 code for the order of steps.
+
+## The receive path: spec (2026-11-19, desk research) -> `CAMERA-RX-SPEC.md`
+
+- **The donor's CSID-lite / IFE-lite code is Titan 165 and uses the same register maps as SM8150's** (cam_ife_csid_lite17x,
+  cam_vfe_lite17x, bus ver2). Its CSID and IFE steps port with the same offsets and values.
+- **Differences:**
+  - camcc PLL0 is a Trion (camcc-sm8150 config values) feeding the RCGs: cphy_rx 400, csi2phytimer 300, IFE-lite
+    and CSID 400, camnoc_axi, slow_ahb;
+  - GCC hf/sf AXI branches;
+  - **the titan power domain is 0xc1bc**: the donor's 0xc194 is a clock register here and must not be written;
+  - CSI-PHY v1.1 at 0xac65000 + 0x1000·n, with its own 4-lane D-PHY tables (settle 14 at lane +0x08);
+  - RPMh: MMCX and MX levels and `ldoc3` (1.2 V CSI-PHY supply), through the Wi-Fi driver's TCS helper (one owner
+    of TCS 1).
+- **SMMU:** one SMR (0x86200840: stream 0x840, mask 0x620) with an S2CR copied from a boot context bank whose
+  translation is off. This is the method that worked for Wi-Fi, SLIMbus and FastRPC. The IFE then writes
+  **physical addresses below 4 GB**.
+- **The blocker: memory below 4 GB.** Only the loader's shared 64 KB is there. A 1028x772 RAW10 frame (stride 1296)
+  is about 1 MB. Two options:
+  - the loader reserves about 3 MB below 4 GB for the camera (a loader change, with every SMR/S2CR readback
+    checked);
+  - a first proof crops a 32 KB window in the CSID.
+- **Biggest risk:** with translation off, a frame longer than the buffer overruns it. Install the SMR before the
+  write master and remove it only after the write master is off plus one frame time.
+
+## The receive path, first attempts (Tests 276-283; `camrx=N` with `camsensor=1`; `cam_rx_up` in redwood_sec_ts.c)
+
+- New: `redwood_r5q_rpmh_level(id, vlvl)` in redwood_wifi.c. It votes a cmd-db rail by level: the vlvl is turned
+  into its position in the rail's aux level list and written through the same TCS 1 helper.
+- New: `rxlog()`. Camera lines go to the loader's log ring as well, and `camrx=N` stops after stage N: 1 rails, GCC
+  and PLL0; 2 RCGs and branches; 3 the CPAS read; 4 the CSI-PHY; 5 the CSID. The teardown undoes only the stages
+  that ran.
+- **Test 276 (full path):** the system ended (back in the loader) with no camera line in any log. The console's
+  lines are lost when the system hangs, and the loader's ring does not hold this kernel's lines after a hang.
+  Test 277's first build failed on a `\n` broken by a heredoc.
+- **Test 278 (`camrx=1`): works, and the phone stays up.**
+  - rails: MMCX at level 128 (position 3), MX at 192 (position 3), ldoc3 on;
+  - GCC camera hf/sf AXI on;
+  - **PLL0 locked** (mode 0xd0800005, opmode 1, user_ctl 0x3107);
+  - all undone afterwards.
+- **Tests 279-282 (`camrx=3`):** every one hung on the **same line of the log, about 3.3 s after PLL0 locked**,
+  whatever that step was:
+
+  | Test | Variant | Hung at |
+  | --- | --- | --- |
+  | 279 | full stage 3 | branch 0x6068, right after camnoc_axi 0xc18c |
+  | 280 | without camnoc | branch 0xc038 (ife_lite_0_csid) |
+  | 281 | without the GCC camera AXI | branch 0xc038 |
+  | 282 | CSID and IFE-lite from TCXO instead of PLL0 odd | branch 0xc038 |
+
+  The live log shows each step after a 300 ms pause, so the hang is tied to time since the rails/PLL0 came up,
+  not to one register.
+- **Test 283 (20 ms pauses):** the live log lost the last lines before the hang, so it shows nothing.
+- **Phone:** back on image 275 with the standard args (no `cam*`), up.
+- **Leads, not yet tested:**
+  1. PLL0's 1200 MHz needs MX at SVS_L1 **and** the camera's own clock voting on MMCX: something (AOP/RPMh) may
+     drop or collapse a rail or the titan GDSC about 3 s later. Read back MMCX/MX/GDSC state every 0.5 s
+     *without* PLL0, then with PLL0 at a lower rate (e.g. 600 MHz, L_VAL 0x1F, which needs only MX SVS);
+  2. hold r5q_pmic_lock for 3 s without any camera writes, to rule out the probe thread itself (it is the touch
+     thread);
+  3. log through a channel that outlives the hang: a small ring in the loader's low-DMA block, read back by the
+     loader after the reset.
+- **Test 284 (the probe in a thread of its own):** the same hang. It is not the touch thread.
+- **Test 285 (`cam_nopll=1`, every RCG from TCXO): no hang.**
+  - All branches on (csiphy2, timer, CSID, cphy, IFE-lite, cpas_ahb).
+  - **CPAS answers: camera version 0x10705 (Titan 1.7.5), CPAS version 0x10000001.**
+- **Test 286 (PLL0 at 600 MHz, `cam_pll600=1`):** hung as before. So it is not PLL0's rate: it is an RCG fed from
+  PLL0.
+- **Test 287 (PLL0 600; slow_ahb on TCXO; cphy_rx, CSID and IFE-lite from PLL0 odd 200, timer from even 300;
+  `camrx=5`): THE CSID RECEIVES THE SENSOR'S FRAMES, WITHOUT ERRORS.**
+  - CSI-PHY 2 configured (lane enable 0xd5, settle 14). CSID reset (version 0x10000000), RX cfg 0x232103 / 0x41,
+    RDI0 cfg 0x802bf007, ctrl 1.
+  - While the sensor streams 1028x772 RAW10 @ 120:
+    - **RX irq 0xff**: start and end of transmission on all four lanes;
+    - **packets 1009 -> 3002 -> 4952 -> 6945**, ECC 0, CRC errors 0;
+    - **RDI0 irq 0x1ff8** (SOF, EOF, SOL, EOL, ...);
+    - **byte counters 992020 / 992020 per frame = 1028 x 10 / 8 x 772 exactly.**
+  - Then stream off, `cam_rx_down`, everything back; **the phone stays up.**
+  - **The hang's cause:** `slow_ahb` (the camera's register bus, RCG 0x7058) fed from PLL0. On TCXO it is fine.
+    Why (a vote, a divider of 7.5 or 4 on even, something else) is not known; TCXO serves.
+- **Next: frames into memory.** IFE-lite 0 RDI0 write master (spec (e)), the camera NoC, the GCC camera AXI, the
+  SMMU SMR 0x86200840 with a copied bypass S2CR, and a buffer below 4 GB (the loader's lowdma block grown, or a
+  crop window to fit 64 KB first).
