@@ -2319,6 +2319,28 @@ bb_read16(uint16_t reg, uint8_t *bytes, unsigned count)
 static bool cam_pipe_up;
 
 /*
+ * (Test 329) The pipeline stays up only across iOS's camera switches; on a close, or when iOS stops reading (the app
+ * left), it is taken down and powered off -- safe since Test 327. redwood_camera.c says which before it ends a session
+ * (redwood_r5q_cam_keep). What the probe's power-down needs is kept here when it leaves the pipeline up.
+ */
+static bool cam_keep_next = true;
+static struct {
+	const uint8_t *tab;
+	uint64_t tab_size;
+	struct bitbang pm;
+	vm_offset_t north, east, camcc, camcc_c;
+	uint32_t was31, was32, was22, was22io, was14, was47, was48, was_gdscr, was_gdsc_clk;
+	uint8_t ldo2, ldo6;
+} pipe_keep;
+
+void redwood_r5q_cam_keep(bool keep);
+void
+redwood_r5q_cam_keep(bool keep)
+{
+	cam_keep_next = keep;
+}
+
+/*
  * (Test 328) iOS's exposure on the S5K3L6: redwood_camera.c passes on what iOS's auto-exposure asks for
  * (REDWOOD_CAMERA_EXPOSURE) as lines, the sensor's analog gain (SMIA 0x0204, 32 = 1x) and frame lines; the session
  * applies it between two frames over the sensor's own bus, under the grouped-parameter hold (0x0104). The bus: a kept
@@ -2661,11 +2683,30 @@ camsensor_probe(void)
 						frames = cam_session_frames(&misses);
 						lck_mtx_lock(&r5q_pmic_lock);
 						(void)PE_parse_boot_argn("cam_persist", &persist, sizeof(persist));
-						if (persist != 0) {
+						if (persist != 0 && cam_keep_next) {
 							/*
 							 * (Test 322) The pipeline stays up: no stream off, no teardown, no power-down. The pins stay
 							 * the bit-banged bus's and `bb` the sensor's; the next session goes straight to its frames.
+							 * (Test 329) Only across a camera switch; what the power-down needs is kept for later.
 							 */
+							pipe_keep.tab = tab;
+							pipe_keep.tab_size = tab_size;
+							pipe_keep.pm = pm;
+							pipe_keep.north = north;
+							pipe_keep.east = east;
+							pipe_keep.camcc = camcc;
+							pipe_keep.camcc_c = camcc_c;
+							pipe_keep.was31 = was31;
+							pipe_keep.was32 = was32;
+							pipe_keep.was22 = was22;
+							pipe_keep.was22io = was22io;
+							pipe_keep.was14 = was14;
+							pipe_keep.was47 = was47;
+							pipe_keep.was48 = was48;
+							pipe_keep.was_gdscr = was_gdscr;
+							pipe_keep.was_gdsc_clk = was_gdsc_clk;
+							pipe_keep.ldo2 = ldo2;
+							pipe_keep.ldo6 = ldo6;
 							cam_pipe_up = true;
 							rxlog("camera sensor: SESSION ends: %u frames handed over, %u misses at the end; THE PIPELINE "
 							    "STAYS UP (sensor streaming, IFE-lite writing)\n", frames, misses);
@@ -2778,6 +2819,64 @@ pins_back:
 	bb = was;
 }
 
+/*
+ * (Test 329) The kept pipeline taken down, as the probe's own end does it: the sensor's stream off, the receive path
+ * down (its RCGs parked before PLL0 goes: Test 327), the pins, reset and MCLK back, the GDSC collapsed, the S2MPB03's
+ * LDOs back as found. The caller holds r5q_pmic_lock.
+ */
+static void
+cam_pipe_down(void)
+{
+	struct bitbang *was = bb;
+	vm_offset_t north = pipe_keep.north, east = pipe_keep.east, camcc = pipe_keep.camcc, camcc_c = pipe_keep.camcc_c;
+
+	if (!cam_pipe_up) {
+		return;
+	}
+	rxlog("camera sensor: THE PIPELINE GOES DOWN (iOS closed the camera or stopped reading)\n");
+	bb = &cam_bus_keep;
+	(void)cam_table(pipe_keep.tab, pipe_keep.tab_size, "off");
+	spin_us(20000);
+	cam_rx_show("stopped");
+	cam_rx_down();
+	cam_bus_ok = false;
+	rxlog("camera sensor: down 8: pins GPIO31/32 back (%#x %#x)\n", pipe_keep.was31, pipe_keep.was32);
+	wr(BB_CFG(31), pipe_keep.was31);
+	wr(BB_CFG(32), pipe_keep.was32);
+	rxlog("camera sensor: down 9: reset GPIO22 low, back to %#x/%#x; GPIO14 back to %#x\n", pipe_keep.was22,
+	    pipe_keep.was22io, pipe_keep.was14);
+	wr(east + 0x1000UL * 22 + 4, 0);
+	spin_us(1000);
+	wr(east + 0x1000UL * 22, pipe_keep.was22);
+	wr(east + 0x1000UL * 22 + 4, pipe_keep.was22io);
+	wr(north + 0x1000UL * 14, pipe_keep.was14);
+	rxlog("camera sensor: down 10: MCLK1 branch (%#x) off\n", *(volatile uint32_t *)(camcc + 0x03c));
+	*(volatile uint32_t *)(camcc + 0x03c) &= ~1u;
+	if (camcc_c != 0) {
+		lck_mtx_lock(&redwood_smmu_lock);
+		*(volatile uint32_t *)(camcc_c + 0x1bc) = pipe_keep.was_gdscr;
+		*(volatile uint32_t *)(camcc_c + 0x1e4) = pipe_keep.was_gdsc_clk;
+		spin_us(100);
+		lck_mtx_unlock(&redwood_smmu_lock);
+		rxlog("camera sensor: down 11: titan_top_gdsc back: %#x\n", *(volatile uint32_t *)(camcc_c + 0x1bc));
+	}
+	bb = &pipe_keep.pm;
+	(void)bb_write(0x04, pipe_keep.ldo2);
+	spin_us(1000);
+	(void)bb_write(0x08, pipe_keep.ldo6);
+	{
+		uint8_t now2 = 0, now6 = 0;
+
+		(void)bb_read(0x04, &now2, 1);
+		(void)bb_read(0x08, &now6, 1);
+		rxlog("camera sensor: S2MPB03 #2 back: LDO2 %#04x LDO6 %#04x; the camera is off\n", now2, now6);
+	}
+	wr(BB_CFG(47), pipe_keep.was47);
+	wr(BB_CFG(48), pipe_keep.was48);
+	bb = was;
+	cam_pipe_up = false;
+}
+
 /* (Test 294) cam_soak: the kernel's own reader, one line a second (every 30 frames) with the middle line's mean */
 bool redwood_r5q_cam_run(bool (*cb)(const uint8_t *frame, uint32_t bytes, void *ctx), void *ctx);
 static uint32_t soak_frames, soak_frames_max;
@@ -2858,17 +2957,25 @@ redwood_r5q_cam_run(bool (*cb)(const uint8_t *frame, uint32_t bytes, void *ctx),
 	}
 	if (cam_pipe_up) {
 		/* (Test 322) the pipeline is up from an earlier session: straight to the frames, nothing powered or set up */
-		uint32_t frames, misses = 0;
+		uint32_t frames, misses = 0, persist = 1;
 
+		cam_keep_next = true;
 		rx_session_cb = cb;
 		rx_session_ctx = ctx;
 		frames = cam_session_frames(&misses);
 		rx_session_cb = NULL;
 		rx_session_ctx = NULL;
-		rxlog("camera sensor: SESSION ends: %u frames handed over, %u misses at the end; the pipeline stays up\n", frames,
-		    misses);
+		(void)PE_parse_boot_argn("cam_persist", &persist, sizeof(persist));
+		rxlog("camera sensor: SESSION ends: %u frames handed over, %u misses at the end; the pipeline %s\n", frames,
+		    misses, persist != 0 && cam_keep_next ? "stays up (a camera switch)" : "goes down");
+		if (persist == 0 || !cam_keep_next) {
+			lck_mtx_lock(&r5q_pmic_lock);
+			cam_pipe_down();
+			lck_mtx_unlock(&r5q_pmic_lock);
+		}
 		return true;
 	}
+	cam_keep_next = true;
 	lck_mtx_lock(&r5q_pmic_lock);
 	rx_session_cb = cb;
 	rx_session_ctx = ctx;

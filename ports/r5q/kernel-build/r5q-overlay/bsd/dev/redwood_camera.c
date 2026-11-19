@@ -3815,6 +3815,13 @@ r5q_frame(const uint8_t *frame, uint32_t bytes, __unused void *ctx)
 
 	lck_mtx_lock(&ios_lock);
 	if (!ios_open || ios_switch_to != 0 || ios_ms() - ios_last_read > IDLE_MS) {
+		/*
+		 * (r5q Test 329) The camera stays powered only across a switch (iOS still has it open and asks for another
+		 * sensor: the next session starts at once); a close or nobody reading powers it off.
+		 */
+		extern void redwood_r5q_cam_keep(bool keep);
+
+		redwood_r5q_cam_keep(ios_open && ios_switch_to != 0);
 		lck_mtx_unlock(&ios_lock);
 		return false;
 	}

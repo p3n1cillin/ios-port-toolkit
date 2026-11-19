@@ -729,3 +729,17 @@ candidate designs).
   - Also seen: assetsd exited on SIGSEGV once at 15:01 (before the JPEG run, after the HEIC crash); not seen since.
 - **Open (camera):** bake the JPEG preference into the image (or make the software HEVC encoder fit); a picture of a
   lit scene (owner); idle power-down; colour tuning; the other sensors.
+- **Test 329 (kernel t329): THE CAMERA POWERS OFF WHEN iOS CLOSES IT, AND STAYS UP ONLY ACROSS A SWITCH.**
+  - redwood_camera.c's `r5q_frame` tells the kernel why a session ends (`redwood_r5q_cam_keep(ios_open &&
+    ios_switch_to != 0)`): a switch keeps the pipeline; a close or nobody reading takes it down. The probe keeps what
+    its power-down needs (`pipe_keep`: pins, reset, GPIO14, MCLK, GDSC, the S2MPB03's LDO values, the table) when it
+    leaves the pipeline up; `cam_pipe_down()` does the full power-down later from the camera thread (stream off,
+    `cam_rx_down` with the RCGs parked, pins/reset/MCLK back, the GDSC collapsed, the LDOs back).
+  - At boot iOS opened and closed the camera: one session, then a full power-down ("titan_top_gdsc back: 0x22f001",
+    "S2MPB03 #2 back: LDO2 0x20 LDO6 0x28").
+  - In the Camera app: open, flip, flip back, Home, reopen, shutter, with `phone.py alive` = iOS running after every
+    step. Log: "THE PIPELINE STAYS UP" / "(the pipeline was already up)" for the switch; "the pipeline goes down",
+    "THE PIPELINE GOES DOWN", "... the camera is off" on the close; fresh bring-ups on the reopens; **"a photograph of
+    4032x3024 encoded in 164 ms"; IMG_0002.JPG saved** (1,890,464 bytes).
+- **Open (camera):** a lit scene (owner); colour tuning; the other sensors; the JPEG preference built into the
+  image (on this phone it is kept by var_store); a fast bring-up again (paced, ~6 s per open).
