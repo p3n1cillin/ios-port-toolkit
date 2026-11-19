@@ -2986,10 +2986,14 @@ redwood_r5q_cam_run(bool (*cb)(const uint8_t *frame, uint32_t bytes, void *ctx),
 	 * cam_fast=1 brings back the fast bring-up.
 	 */
 	{
-		uint32_t fast = 0;
+		/*
+		 * (Test 331) Fast again by default: with the RCGs parked before PLL0 goes off (Test 327), Test 330 ran eight
+		 * fast power cycles (~0.37 s each) and 60 s of frames without a hang. cam_slow=1 brings the pacing back.
+		 */
+		uint32_t slow = 0;
 
-		(void)PE_parse_boot_argn("cam_fast", &fast, sizeof(fast));
-		rxlog_fast = fast != 0;
+		(void)PE_parse_boot_argn("cam_slow", &slow, sizeof(slow));
+		rxlog_fast = slow == 0;
 	}
 	camsensor_on = true;
 	camsensor_done = false;

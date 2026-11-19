@@ -743,3 +743,10 @@ candidate designs).
     4032x3024 encoded in 164 ms"; IMG_0002.JPG saved** (1,890,464 bytes).
 - **Open (camera):** a lit scene (owner); colour tuning; the other sensors; the JPEG preference built into the
   image (on this phone it is kept by var_store); a fast bring-up again (paced, ~6 s per open).
+- **Test 330 (the t329 kernel; `cam_fast=1`, `cam_persist=0`, 8 short sessions + 60 s): THE FAST BRING-UP HOLDS.**
+  Eight full power cycles in ~3 s (~0.37 s each), then 60 s (1,800 frames), "the phone is still up". The pacing was
+  only ever hiding the RCG/PLL0 problem fixed in Test 327. (The first try never flashed: the cycle's "end the run"
+  step had not stopped iOS -- "a kernel is running (oem stop ends it)"; `phone.py stop` first, then it went.)
+- **Test 331 (kernel t331): fast by default** (`cam_slow=1` for the pacing). In the Camera app: the first session
+  0.13 s after the camera's power-up began (was ~6 s), "a photograph of 4032x3024 encoded in 187 ms", saved;
+  Home: "the camera is off". iOS up throughout.

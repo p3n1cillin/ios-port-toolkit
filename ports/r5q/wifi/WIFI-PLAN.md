@@ -1072,3 +1072,20 @@ run ends with the modem shut down through TZ, after asking it to stop over SMP2P
     left is not visible from the DT: a Samsung board step (an extra enable in Samsung's kernel source, which we do
     not have), or a codec power sequence the AOP/ADSP does for Android that we do not ask for.
   - `mic=8` is not in the standard args; the probe stays in the kernel for later.
+
+## Microphone (2026-11-19, desk check): Samsung's own kernel source read -- no Samsung step
+
+- Samsung's S10 Lite kernel tree is public: github.com/sm8150-samsung/android_kernel_samsung_r5q (lineage-19.0,
+  read through the GitHub API, nothing downloaded or kept).
+- `arch/arm64/boot/dts/samsung/sm8150-sec-r5q-audio.dtsi`: includes Qualcomm's standard `sm8150-audio-overlay.dtsi`;
+  disables the codec's `swr_master`, `clock_audio` (the LPASS pin clock: LN_BB_CLK2 is the codec's MCLK, as used
+  here), wcd9360 and fsa4480; adds the TAS2562 amplifier and Samsung's `q6audio-adaptation` (AFE ports 0x1002/0x1003,
+  voice tracking 0x4001); the tavil card's mic routing (Handset AMIC1, Sub AMIC3, 3rd AMIC4, 4th AMIC2). No codec
+  enable GPIO, no extra regulator.
+- `techpack/audio/asoc/codecs/wcd9xxx-core.c`: Samsung's only changes are `CONFIG_SEC_SND_DEBUG` panics when the
+  SLIMbus logical address cannot be had. `wcd9xxx-utils.c` `wcd9xxx_reset`: reset low (sleep state), 20 ms, high,
+  20 ms -- Qualcomm's, as ours.
+- **So the codec's bring-up on this phone is Qualcomm's standard one, and ours matches it** (supplies, reset, MCLK,
+  the order from Android's boot log). The WCD9340 still never reports present on SLIMbus. Left: the ADSP's SLIMbus
+  manager side (what Android's NGD driver, slim-msm-ngd.c, sends the DSP before devices are enumerated), compared
+  message by message with what redwood_adsp.c sends.
