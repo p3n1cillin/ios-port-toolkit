@@ -27,7 +27,7 @@ binaries, no build outputs and no phone backups are in this repository (see [the
 | `wifi/WIFI-PLAN.md` | everything since Test 111, step by step with what every test showed: Wi-Fi, sound, GPU, apps, sensors, CoreMotion, the compass, the microphone |
 | `SESSION.md` | the test-by-test log of the earlier stages |
 
-## State (Test 289)
+## State (Test 331)
 
 **Works:**
 
@@ -52,18 +52,19 @@ binaries, no build outputs and no phone backups are in this repository (see [the
 
 **Partly:**
 
+- **Camera:** the phone's own rear sensor (S5K3L6) in iOS's Camera app: preview at 1028x772, iOS's auto-exposure
+  driving the sensor, instant camera switches, photos saved (JPEG; HEIC's software encoder runs out of memory), the
+  camera powered off when the app closes. Every iOS camera is this one sensor for now; no colour tuning yet; a
+  picture of a lit scene still to be seen. How it was made stable: wifi/CAMERA-PLAN.md, docs/CAMERA.md.
 - **Compass:** the Compass app shows a heading, then freezes. Indoor interference is suspected; still being checked.
 
 **Not yet:**
 
 - **Microphone:** the WCD9340 codec never enumerates on SLIMbus and is silent over SPI too (Tests 265-266). What is ruled out is in WIFI-PLAN, "Tests 237-240" and after.
 - **Metal:** there is no GPU driver for iOS, so the map in Maps and live wallpapers are missing.
-- **Camera:** iOS's capture path works end to end with a synthetic picture (`cam=5 cam_fake=1`: Camera.app shows
-  the kernel's colour chart; wifi/CAMERA-PLAN.md). On the hardware side, one sensor (the S5K3L6) is powered and
-  streams on its own tables, the chip receives its frames without errors, and whole frames (dark so far) have
-  been written into memory (Tests 274-288); full frames and the hand-over to iOS are next.
 - **Radios:** cellular; Bluetooth audio.
-- **FairPlay:** App Store apps won't run; this needs Apple's FairPlay kernel extension.
+- **FairPlay:** App Store apps don't run yet (their code is FairPlay-encrypted). Not ruled out: a feasibility study
+  of what decrypting them needs on this kernel is to come.
 
 Setting up a machine to build and run it: [docs/SETUP.md](../../docs/SETUP.md). Licences: the loader and the kernel
 drivers are Apple Public Source License 2.0 (modified from the donor port), the rest MIT; see
