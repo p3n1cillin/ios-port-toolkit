@@ -1169,3 +1169,18 @@ run ends with the modem shut down through TZ, after asking it to stop over SMP2P
   the codec's power-up as Android's audio HAL drives it (the WCD9340 may need its first register writes through the
   DSP's codec driver, `cdc_apr_if`, before it enumerates), or a hardware fault on this unit. `adsp_diag=1` stays in
   the kernel as a tool (not in the standard args).
+
+## Messages' red "!" badge (2026-11-20, desk + phone, after Test 400): iOS's own "iMessage signed out"
+
+- The badge comes back at every boot, set by imagent (SpringBoard logs "[com.apple.MobileSMS] Setting badge string to
+  !"). sms.db has no messages and no chats, so nothing failed. Resetting the badge from inside Messages once
+  (libr5q-clearbadge, wifi/inject_clearbadge.m) cleared it until the next boot.
+- **Why** (wifi/inject_badgewatch.m, injected into imagent, plus the shared cache read with dsc_sel):
+  - `-[IMDBadgeUtilities _updateBadge]` posts the string "!" when `_shouldShowFailureString`, else the unread count.
+  - `_shouldShowFailureString` = `_showingFailure || isUnexpectedlyLoggedOut` (it logs "_shouldShowFailureString
+    _showingFailure %@ _isUnexpectedlyLoggedOut %@"). `isUnexpectedlyLoggedOut` is a stored flag (ivar +9), set from
+    the account login-status notifications, and ignored only while satellite messaging is on (`isStewieActive`).
+  - So iOS believes the iMessage account was signed out unexpectedly. A real iPhone shows the same "!".
+- iMessage cannot sign in on this port (no Apple ID sign-in, no device attestation). Turning iMessage off in
+  Settings > Messages should clear the badge. That is the owner's setting to change, so it has not been changed.
+- Tools: inject_badgewatch.m (wraps IMDBadgeUtilities' badge methods, prints their addresses), inject_clearbadge.m.
