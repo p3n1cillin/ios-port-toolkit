@@ -74,7 +74,8 @@ binaries, no build outputs and no phone backups are in this repository (see [the
 **Not yet:**
 
 - **Microphone:** the WCD9340 codec never enumerates on SLIMbus and is silent over SPI too (Tests 265-266). What is ruled out is in WIFI-PLAN, "Tests 237-240" and after.
-- **Metal:** there is no GPU driver for iOS, so the map in Maps and live wallpapers are missing.
+- **Metal:** there is no Metal device for iOS, so the map in Maps and live wallpapers are missing. The plugin entry
+  point exists (wifi/METAL-FEASIBILITY.md); a Metal implementation over the GL path is a large project (AIR shaders).
 - **Radios:** cellular: the modem runs, goes online and receives (GSM cells found, Test 352); no SIM in the phone
   yet, and iOS's CommCenter is not on it yet (wifi/CELLULAR-PLAN.md). Bluetooth audio.
 - **FairPlay:** App Store apps can't run (their code is FairPlay-encrypted). The study (wifi/FAIRPLAY-FEASIBILITY.md)
