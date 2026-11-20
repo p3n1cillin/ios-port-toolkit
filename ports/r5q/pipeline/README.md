@@ -31,7 +31,12 @@ Notes:
 
 `phone-args.txt` is the standard boot-arg set. Change it when a feature's arg becomes part of every boot.
 
-## The standard image (2026-11-20, Test 395)
+## The standard image (2026-11-20, Test 398)
+
+`port/build/r5q-install-boot-standard.img` = r5q-install-boot-398.img: kernel t398 (the IMX586's full frame at line
+length 10752: its black level right again; wifi/CAMERA-PLAN.md, Tests 396-398), root test395. Before it, Test 395:
+
+## The standard image before (2026-11-20, Test 395)
 
 `port/build/r5q-install-boot-standard.img` is now a copy of r5q-install-boot-395.img: kernel t394, root test395. The
 root is test370's tree with one change: `libr5q-media.dylib` is injected into mediaserverd and turns off the

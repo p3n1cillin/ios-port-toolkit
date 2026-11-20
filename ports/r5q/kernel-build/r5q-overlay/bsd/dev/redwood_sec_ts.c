@@ -2416,8 +2416,17 @@ cam_exposure_apply(void)
 	}
 	was = bb;
 	bb = &cam_bus_keep;
+	/*
+	 * (Test 396) The Sony sensors' mode tables (IMX586, IMX616) set 0x0220 = 0x62 and a short exposure of their own,
+	 * 0x0224 = 500 lines (and the IMX616 a short gain, 0x0216): in that readout the picture follows the short exposure,
+	 * so 0x0202 alone changed nothing -- a frame of 4 lines and one of 2362 came out alike (wifi/camgrab.c), iOS's
+	 * auto-exposure could only raise the gain, and the preview was a dim, noisy purple. Both exposures and both gains
+	 * are written now, in the same group hold.
+	 */
 	if ((problem = bb_write16(0x0104, 1, 1)) == NULL && (problem = bb_write16(0x0340, (uint16_t)w_fl, 2)) == NULL &&
-	    (problem = bb_write16(0x0202, (uint16_t)w_ln, 2)) == NULL && (problem = bb_write16(0x0204, (uint16_t)w_g, 2)) == NULL) {
+	    (problem = bb_write16(0x0202, (uint16_t)w_ln, 2)) == NULL && (problem = bb_write16(0x0204, (uint16_t)w_g, 2)) == NULL &&
+	    (cam_live == NULL || ((problem = bb_write16(0x0224, (uint16_t)w_ln, 2)) == NULL &&
+	    (problem = bb_write16(0x0216, (uint16_t)w_g, 2)) == NULL))) {
 		problem = bb_write16(0x0104, 0, 1);
 	}
 	bb = was;
@@ -3395,11 +3404,40 @@ static const struct sony_cam imx586_cam = {
  * (Test 350) The IMX586's whole res5 frame (2000x1500) for iOS: its line takes ~4.9 us on four lanes at ~1 Gb/s, so the
  * line length tripled (16128, ~11.7 us a line at 19.2 MHz) and frame length 3571 (~30 a second at 24 MHz).
  */
-static const struct sony_cam imx586_full = {
+/*
+ * (Test 397) Line length 10752 (as the cropped mode's), frame 5356: the same ~30 a second, and the sensor's black
+ * level right again (a dark frame at 4 lines and 1x: mean 3 of 1023, flat, where 16128 gave a ramp to ~137 with
+ * column stripes); a 2000-pixel line (~4.9 us on the link) still fits its ~7.8 us. CSID: 1504 packets a frame, ECC 0,
+ * CRC 0. cam586_ll=N (below) tries another.
+ */
+static struct sony_cam imx586_full = {
 	.name = "main camera", .tab = "camera-imx586.tab", .mode = "res5", .crop_x = 0, .crop_y = 0, .width = 2000,
-	.height = 1500, .frame_lines = 3571, .line_length = 16128, .phy = 0, .settle = 28, .iop_mpy = 160, .line_num = 919,
-	.line_den = 1167, .frame_num = 3571, .frame_den = 3268, .margin = 48,
+	.height = 1500, .frame_lines = 5356, .line_length = 10752, .phy = 0, .settle = 28, .iop_mpy = 160, .line_num = 919,
+	.line_den = 778, .frame_num = 5356, .frame_den = 3268, .margin = 48,
 };
+
+/*
+ * (Test 397) Boot-arg cam586_ll=N: the full frame's line length N instead of 16128, the frame length and iOS's line
+ * ratio scaled to keep the same frame rate and exposure times. Why: at 16128 a dark frame (4 lines, 1x) is not black
+ * -- a level ramping from ~3 at the top to ~137 at the bottom, with column stripes, half the pixels clipped at 0, scaling
+ * with gain and not with exposure -- while the cropped mode (line length 10752) gives a flat 0 (wifi/camgrab.c +
+ * wifi/camraw.py). iOS is told black 0, so that offset was the Camera's flat purple streaks.
+ */
+static void rxlog(const char *format, ...) __printflike(1, 2);
+static void
+imx586_full_tune(void)
+{
+	uint32_t ll = 0;
+
+	if (PE_parse_boot_argn("cam586_ll", &ll, sizeof(ll)) && ll >= 8000 && ll <= 32000) {
+		imx586_full.line_length = (uint16_t)ll;
+		imx586_full.frame_lines = (uint16_t)(3571u * 16128u / ll);      /* (the same ~30 a second as 3571 at 16128) */
+		imx586_full.frame_num = imx586_full.frame_lines;
+		imx586_full.line_den = 1167u * ll / 16128u;
+		rxlog("main camera: full frame with line length %u, frame %u lines, line ratio %u/%u\n", ll,
+		    imx586_full.frame_lines, imx586_full.line_num, imx586_full.line_den);
+	}
+}
 
 static void
 mainsensor_probe(uint32_t main_level)
@@ -3565,6 +3603,7 @@ mainsensor_probe(uint32_t main_level)
 		rxlog("main camera: 7-bit 0x1a: ID %s %02x%02x%s\n", problem ? problem : "", id[0], id[1],
 		    problem == NULL && id[0] == 0x05 && id[1] == 0x86 ? ": THE IMX586 ANSWERS" : "");
 		if (problem == NULL && id[0] == 0x05 && id[1] == 0x86 && main_level >= 2) {
+			imx586_full_tune();
 			sony_stream(&cam, main_level, main_level == 7 && cam_full_frames() ? &imx586_full : &imx586_cam);
 		}
 	}

@@ -49,4 +49,5 @@ build memq      memq.c
 build wiredq    wiredq.c
 build blkbench  blkbench.c
 build vmq       vmq.c
+build camgrab   camgrab.c
 echo "phone tools in $OUT"

@@ -109,6 +109,23 @@ frames" from "the hardware gives frames".
   frame lines likewise, the gain into the sensor's coding (Samsung SMIA 32 = 1x; Sony `1024 - 1024 / gain`), and the
   coarse time within the sensor's margin (Sony: frame − 48).
 
+## Checking the picture against the raw data (r5q, 2026-11-20)
+
+If the Camera app's picture looks wrong, look at the sensor's raw frame before touching the rendering. On r5q,
+`camgrab` takes one frame from the kernel's camera device (optionally at a given exposure and gain), and `camraw.py`
+renders it on the PC and prints per-line, per-column and per-row levels.
+
+Two measurements settle most questions:
+- **A dark frame** (shortest exposure, 1x gain) must be flat at the black level the ISP is told. A ramp, column
+  stripes, or a level that scales with gain but not exposure means the sensor's black clamp is not working.
+- **An exposure sweep** at 1x must change the level roughly in proportion to the exposure.
+
+On the S10 Lite the IMX586's black clamp broke when the line length was tripled (16128) to fit its full 2000x1500
+frame on the link: a dark ramp to ~137 of 1023. The ISP was told black 0, so after white balance the Camera showed
+flat purple streaks. The cropped mode's line length (10752) still fits the line's transfer time, and restores a flat
+black. Sony mode tables may also set a second, short exposure (`0x0220 = 0x62`, `0x0224`); write it together with
+`0x0202`.
+
 ## Privacy and licensing
 
 Never publish the vendor's sensor module files, the tables derived from them, or the sensor registry. The tables

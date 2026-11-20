@@ -947,3 +947,25 @@ candidate designs).
   mediaserverd 75 MB. **A HEIC photo saves** (IMG_0004.HEIC, 1.56 MB), and **a video saves** (IMG_0005.MOV). The
   preview is still the purple, smeared picture (a lit scene still needs the owner).
 
+- **Tests 396-398 (kernels t396-t398): THE MAIN CAMERA'S BLACK LEVEL, AND THE FLAT PURPLE STREAKS.**
+  - New tools: `camgrab [SENSOR] [SKIP] [OUT] [LINES GAIN]` (wifi/camgrab.c, phone side) takes one raw frame from
+    /dev/redwood-camera, optionally at an exposure of its own. `camraw.py FRAME` (PC side) unpacks RAW10, renders it
+    half-size and prints per-line, per-column and per-row levels. Frames show the room: local only.
+  - The HEIC photo (IMG_0004) and the raw frame agreed: the picture iOS makes is faithful to the sensor's data. The
+    data itself was wrong.
+    - A **dark frame** (4 lines, 1x) of the IMX586's full 2000x1500 mode (Test 350's: line length tripled to 16128)
+      was not black: a level ramping from ~3 at the top to ~137 at the bottom, column stripes, 45% of pixels at 0.
+      It scaled with gain and not with exposure, and R≈G≈B.
+    - iOS is told black 0. With white balance R×2.1, B×1.8 that offset became the flat purple streaks.
+    - The cropped mode (line length 10752) gives a dark frame of mean 1.2, flat.
+  - **Test 397:** boot-arg `cam586_ll=N` sets the full frame's line length, with the frame length and iOS's line ratio
+    scaled. At **10752** (frame 5356 lines, ratio 919/778, the same ~30 a second) the dark frame is mean 3, flat.
+    The link stays clean: 1504 packets a frame, ECC 0, CRC 0. The top ~16 rows keep a small fading offset (~50→40).
+  - **Test 398:** 10752 is the default (imx586_full). Standard image = r5q-install-boot-398.img (kernel t398, root
+    test395). IMG_0007.HEIC saved; mediaserverd 102 MB.
+  - **Test 396 (kept):** the Sony mode tables set `0x0220 = 0x62` and a short exposure of their own (`0x0224 = 500`;
+    the IMX616 also a short gain, `0x0216`). The kernel now writes both exposures and both gains in one group hold.
+    Measured afterwards: the exposure response (4 → 3000 lines) was about the same as before, so this was not the
+    cause. It keeps the two in step.
+  - Still for the owner: a lit scene, for colour (white balance and tuning). In a dark room iOS's auto-exposure sits
+    at ~7 ms and 3-5x gain, and the preview is noise.
