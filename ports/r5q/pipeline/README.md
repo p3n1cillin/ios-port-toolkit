@@ -30,3 +30,14 @@ Notes:
 | `bash pipeline/test.sh B "label" [+args…]` | a whole test in one command: the kernel built (or `KERNEL=xnu-r5q-tNNN.macho` reused), the root (newest, or `ROOT=build`), the image from test B-1, the run (`FOLLOW=` seconds) |
 
 `phone-args.txt` is the standard boot-arg set. Change it when a feature's arg becomes part of every boot.
+
+## The standard image (2026-11-20, Test 391)
+
+`port/build/r5q-install-boot-standard.img` (a copy of r5q-install-boot-391.img: kernel t389, root test370 -- CommCenter
+allowed, the baseband firmware tree bound -- and the loader that makes the `baseband` and camera `isp` nodes in test
+builds). `phone-args.txt` now ends with `bbstub=1 bbnode=1 bbfake=1 bbkick=20`: iOS's cellular stack comes up on the
+modem by itself (wifi/CELLULAR-PLAN.md, Tests 389-391). The set before: port/build/phone-args.before-t391.txt; the
+image before: r5q-install-boot-363.img. Back to the standard: `python phone.py cycle port/build/r5q-install-boot-standard.img 90 std`.
+After changing device-tree nodes, MobileGestalt's cache in /private/var keeps the old answers: delete
+`/private/var/containers/Shared/SystemGroup/systemgroup.com.apple.mobilegestaltcache/Library/Caches/com.apple.MobileGestalt.plist`,
+run `/redwood/bin/var_store save`, reboot.

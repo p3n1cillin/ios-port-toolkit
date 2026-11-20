@@ -431,3 +431,25 @@ bytes). The log then shows what CommCenter asks, in order, before anything is ma
   fails ("Engage failure") -- the transport's reopening has to work for resets, and then the hand engage may not be
   needed at all. (2) MobileGestalt telephony capabilities for the Settings/status-bar UI. (3) A SIM, for
   registration, calls, SMS and data (WDS data would also need a network interface: AppleIPAppender's packet path).
+
+## Tests 389-391: no injected helper, and the Cellular section in Settings
+
+- **389 (kernel t389): the kick.** After a baseband reset the manager engages its router by itself; what failed
+  before was the transport's reopening -- the reads posted before the abort were never completed. Now an abort
+  (selector 6) completes every pending read with kIOReturnAborted and drops queued replies. And with boot-arg
+  `bbkick=SECONDS`, that many seconds after a new CommCenter first identifies itself to AppleBaseband (selector 15),
+  the kernel sends one PCI event (IOGeneralInterest 0xe3ff8100, `{1, 0, 0}`) on AppleBasebandPCIControl: the manager
+  resets ("PCI-EVENT: pci error: kABPCompletionOutOfRange"), boots (fake) again and **engages on its own**:
+  `kDisengaged -> kEngaged`, IsReady, SIM NoSim -- **from boot, no injected library**. A 10-minute soak: no other
+  reset, the same CommCenter, Wi-Fi fine.
+- **390-391: MobileGestalt.** New phone tools `wifi/mgq.c` (MobileGestalt answers by key; never for identifiers)
+  and `wifi/dtq.c` (an IODeviceTree entry's property names and children). `HasBaseband` and `cellular-data` were
+  false: `cellular-data` = `HasBaseband` = "is there a `baseband` entry in IODeviceTree" (libMobileGestalt +0x2fc64,
+  an IORegistry search by name), and there was none -- **every image is an R5Q_XNU_TEST loader build, and `bbnode=1`
+  and `cam=5` were only read in the production scan**, so since Test 364 the node never existed (nor the camera's
+  `isp` node). Fixed in loader.c (both read in the test builds' scan too); the node now also carries the iPhone X's
+  own properties (class 3, device_type, compatible baseband,n41, imeisv, config; device-imei all zeros, as in the
+  20F66 DeviceTree.d22ap fetched from the IPSW). Then MobileGestalt's cache (in /private/var, a RAM disk saved by
+  var_store) still held the old answers: deleted, `/redwood/bin/var_store save`, reboot -> rebuilt:
+  **HasBaseband = true, cellular-data = true, still-camera = true; Settings shows "Cellular"**, and the status bar
+  the no-service dots.

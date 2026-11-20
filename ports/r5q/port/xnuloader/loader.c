@@ -3600,6 +3600,13 @@ run_kernel(int have_checkpoint, uint64_t checkpoint)
 		/* r5q (Test 179): "torch=N" here too -- the flash said to be there (MobileGestalt's camera-flash: Control Center's
 		 * flashlight), the light the kernel's (bsd/dev/redwood_torch.c, the PM8150L's flash module) */
 		torch_requested |= starts_with(c, "torch=") && (c == pi.cmdline || c[-1] == ' ') && c[6] >= '1' && c[6] <= '9';
+		/*
+		 * r5q (Test 391) here too, and not only in the production scan below: every image is an R5Q_XNU_TEST build, so
+		 * "cam=5" and "bbnode=1" never made their nodes (dtq: IODeviceTree:/arm-io held only gic and disp0), and
+		 * MobileGestalt's HasBaseband (it looks for a "baseband" entry in the device tree) stayed false.
+		 */
+		camera_requested |= starts_with(c, "cam=5") && (c == pi.cmdline || c[-1] == ' ') && (c[5] == 0 || c[5] == ' ');
+		baseband_requested |= starts_with(c, "bbnode=1") && (c == pi.cmdline || c[-1] == ' ') && (c[8] == 0 || c[8] == ' ');
 	}
 #ifdef R5Q_LAB_TIMED
 	if (lab_ufs && kernel_mpidr != this_mpidr) {
@@ -4101,8 +4108,22 @@ run_kernel(int have_checkpoint, uint64_t checkpoint)
 	 * without one. The radio type the iPhone X (iPhone10,3) has: Qualcomm's, "Mav17". No compatible a driver matches.
 	 */
 	if (baseband_requested) {
+		/*
+		 * r5q (Test 390) as the iPhone X's own node (the 20F66 DeviceTree.d22ap): class 3, device_type, its compatible,
+		 * imeisv, config -- MobileGestalt answered HasBaseband = false and cellular-data = false with only a
+		 * compatible. device-imei is left all zeros, as the IPSW has it (iBoot fills it on an iPhone; nothing here
+		 * puts the phone's own IMEI into the device tree).
+		 */
+		static const uint8_t bb_config[40] = { 0xfa, 0, 0, 0, 0xf4, 0x01, 0, 0, 0x44, 0x48, 0, 0, 0xe8, 0x03, 0, 0,
+			0x64, 0, 0, 0, 0x64, 0, 0, 0, 0x83, 0, 0, 0, 0x25, 0, 0, 0, 0x14, 0, 0, 0, 0x64, 0, 0, 0 };
+		static const uint8_t bb_imei[32] = { 0 };
 		dt_begin(&w, "baseband");
-		dt_prop_str(&w, "compatible", "baseband,mav17");
+		dt_prop_str(&w, "compatible", "baseband,n41");
+		dt_prop_str(&w, "device_type", "baseband");
+		dt_prop_u32(&w, "class", 3);
+		dt_prop_u32(&w, "imeisv", 0x36);
+		dt_prop(&w, "config", bb_config, sizeof(bb_config));
+		dt_prop(&w, "device-imei", bb_imei, sizeof(bb_imei));
 		dt_end(&w);
 	}
 	dt_begin(&w, "gic");

@@ -60,3 +60,15 @@ Everything above was found from iOS's own log, read on the PC:
 
 The `qmux` category logs every QMI frame CommCenter sends and parses (`QMI: Svc=... Req/Resp MsgId=... Bin=[...]`),
 which makes framing bugs easy to see.
+
+## Without the injected helper, and the UI (Tests 389-391)
+
+- **Engage from boot.** The manager engages its router after a baseband reset, but not after its first fake boot.
+  The kernel sends one PCI event (an IOGeneralInterest message `0xe3ff8100`, argument `{u32 event; u64; u64}`) on
+  AppleBasebandPCIControl about 20 s after CommCenter starts (boot-arg `bbkick`). The manager resets and engages by
+  itself. For that to work, abortChannelAsync must complete the reads still posted (kIOReturnAborted); otherwise
+  every engage after a reset fails.
+- **Settings' Cellular section.** MobileGestalt's `cellular-data` is `HasBaseband`, which means an IODeviceTree entry
+  named `baseband` exists. Give the device tree a node like the real phone's (the IPSW's DeviceTree, with identifiers
+  left zero). Then delete MobileGestalt's cache (`systemgroup.com.apple.mobilegestaltcache/.../com.apple.MobileGestalt.plist`)
+  so it recomputes. `mgq` and `dtq` (tiny phone tools) show the answers and the device-tree entries.

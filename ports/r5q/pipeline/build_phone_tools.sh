@@ -41,4 +41,6 @@ build r5q_reboot  r5q_reboot.c
 build magrec      magrec.c
 build sym_probe   sym_probe.c
 build klog        klog.c
+build mgq       mgq.c         -framework CoreFoundation
+build dtq       dtq.c         -framework CoreFoundation -framework IOKit
 echo "phone tools in $OUT"

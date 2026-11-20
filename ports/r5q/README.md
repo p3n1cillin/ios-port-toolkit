@@ -76,13 +76,11 @@ binaries, no build outputs and no phone backups are in this repository (see [the
 - **Microphone:** the WCD9340 codec never enumerates on SLIMbus and is silent over SPI too (Tests 265-266). What is ruled out is in WIFI-PLAN, "Tests 237-240" and after.
 - **Metal:** there is no Metal device for iOS, so the map in Maps and live wallpapers are missing. The plugin entry
   point exists (wifi/METAL-FEASIBILITY.md); a Metal implementation over the GL path is a large project (AIR shaders).
-- **Radios:** cellular: the modem runs, goes online and receives (GSM cells found, Test 352); no SIM in the phone
-  yet. iOS's side, as an experiment (boot-args `bbstub=1 bbfake=1`, Tests 355-374): CommCenter runs on kernel stubs,
-  its baseband manager takes its fake-boot path, its IPC router is engaged (by an injected helper for now), and
-  CommCenter's QMI reaches the modem's own services through a kernel QMUX-to-QRTR bridge (Tests 378-388): the
-  baseband stays ready, iOS reads the modem's firmware version, IMEI and SIM state ("no SIM") from the modem itself
-  (wifi/CELLULAR-PLAN.md, docs/CELLULAR.md). Settings has no Cellular section yet (MobileGestalt).
-  Bluetooth audio.
+- **Radios:** cellular: in the standard boot (since Test 391) iOS's CommCenter runs on the phone's own modem: the
+  baseband manager boots (fake: the modem already runs), engages and stays ready; CommCenter's QMI goes to the modem
+  through a kernel QMUX-to-QRTR bridge; Settings has its Cellular section; the SIM state comes from the modem ("no
+  SIM" -- there is none in the phone). Registration, calls, SMS and data need a SIM (and data a packet interface).
+  Bluetooth audio. (wifi/CELLULAR-PLAN.md, docs/CELLULAR.md)
 - **FairPlay:** App Store apps can't run (their code is FairPlay-encrypted). The study (wifi/FAIRPLAY-FEASIBILITY.md)
   found that Apple's FairPlay kext makes the device's keys with the SoC's fused UID and GID AES keys, which only
   Apple silicon has. Apps without FairPlay encryption (Apple's own, ones built from source) are the route.

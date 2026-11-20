@@ -13,3 +13,6 @@ Wi-Fi, audio and sensors DSPs (the sensors DSP held for the kernel to release), 
 - Test 289: a 4 MB block below 4 GB for the camera's image engine, passed to the kernel as `camdma_pa=`.
 - `loader.c` (Test 364): with `bbnode=1`, a "baseband" node in the device tree it builds (compatible
   "baseband,mav17"), for iOS's telephony stack.
+- `loader.c` (Tests 390-391): `bbnode=1` and `cam=5` are also read in the boot-argument scan the test builds use (every
+  image is one), so the `baseband` node (now with the iPhone X's own non-identifying properties) and the camera's
+  `isp` node are made; MobileGestalt's HasBaseband/cellular-data and still-camera follow them.

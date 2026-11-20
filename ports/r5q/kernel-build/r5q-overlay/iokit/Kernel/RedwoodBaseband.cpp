@@ -103,6 +103,48 @@ OSDefineMetaClassAndStructors(RedwoodBasebandUserClient, IOUserClient);
 
 static IOLock * gBBLock;        /* (Test 379) the transport state of every connection: external methods run concurrently */
 
+/*
+ * (Test 389) The kick: after its fake boot the baseband manager never engages its IPC router by itself, but it does
+ * after a baseband reset -- and any PCI event (an IOGeneralInterest message 0xe3ff8100 on AppleBasebandPCIControl,
+ * argument {u32 event; u64; u64}: libIOABP +0x1cbc) makes it ask for one. So, with boot-arg bbkick=SECONDS, that many
+ * seconds after a new CommCenter first identifies itself to AppleBaseband, one PCI event is sent: the manager resets
+ * the baseband (fake again) and engages the router on its own -- no injected helper.
+ */
+static IOService * gPCIControl;
+static int gKickedPid;
+
+extern "C" kern_return_t kernel_thread_start(thread_continue_t continuation, void * parameter, thread_t * new_thread);
+extern "C" void thread_deallocate(thread_t thread);
+
+static void
+bb_kick_thread(void * arg, __unused wait_result_t wr)
+{
+	uint32_t seconds = (uint32_t) (uintptr_t) arg;
+	struct { uint32_t event; uint32_t pad; uint64_t arg1, arg2; } ev = { 1, 0, 0, 0 };
+
+	IOSleep(seconds * 1000);
+	if (gPCIControl != NULL) {
+		IOReturn r = gPCIControl->messageClients(0xe3ff8100, &ev, sizeof(ev));
+		bblog("RedwoodBaseband: kick: PCI event %u sent to AppleBasebandPCIControl's clients (0x%x)\n", ev.event, r);
+	}
+}
+
+static void
+bb_maybe_kick(int pid)
+{
+	uint32_t seconds = 0;
+	thread_t th;
+
+	if (pid == gKickedPid || !PE_parse_boot_argn("bbkick", &seconds, sizeof(seconds)) || seconds == 0) {
+		return;
+	}
+	gKickedPid = pid;
+	if (kernel_thread_start(bb_kick_thread, (void *) (uintptr_t) seconds, &th) == KERN_SUCCESS) {
+		thread_deallocate(th);
+		bblog("RedwoodBaseband: kick: CommCenter[%d] is new; a PCI event in %u s\n", pid, seconds);
+	}
+}
+
 void
 RedwoodBasebandUserClient::free(void)
 {
@@ -397,6 +439,13 @@ RedwoodBasebandUserClient::externalMethod(uint32_t selector, IOExternalMethodArg
 	char procname[32] = "?", hex[3 * 24 + 1] = "";
 
 	fCalls++;
+	if (selector == 15 && fOwner != NULL && strcmp(fOwner->getName(), "AppleBaseband") == 0) {
+		char who[32] = "?";
+		proc_selfname(who, sizeof(who));
+		if (strcmp(who, "CommCenter") == 0) {
+			bb_maybe_kick(proc_selfpid());     /* (Test 389) */
+		}
+	}
 	if (fCalls <= 300 || fCalls % 200 == 0) {
 		for (uint32_t i = 0, n = 0; s != NULL && i < args->structureInputSize && i < 24; i++) {
 			n += snprintf(hex + n, sizeof(hex) - n, "%02x ", s[i]);
@@ -424,9 +473,27 @@ RedwoodBasebandUserClient::externalMethod(uint32_t selector, IOExternalMethodArg
 	 */
 	if (args->asyncWakePort != MACH_PORT_NULL && fOwner != NULL && strcmp(fOwner->getName(), "AppleBasebandPCIInterface") == 0 &&
 	    (selector == 6 || selector == 7)) {
+		uint32_t aborted = 0;
+
+		/*
+		 * (Test 389) An abort ends the reads still posted: completed kIOReturnAborted, and the replies waiting dropped.
+		 * Left pending, the transport never finished stopping after a baseband reset, and every engage after it failed
+		 * ("Engage failure" every 6 s, Tests 386-387).
+		 */
+		if (selector == 6 && gBBLock != NULL) {
+			IOLockLock(gBBLock);
+			while (fReadCount > 0) {
+				io_user_reference_t none[2] = { 0, 0 };
+				fReadCount--;
+				sendAsyncResult64(fReads[fReadCount].ref, kIOReturnAborted, none, 2);
+				aborted++;
+			}
+			fOutLen = 0;
+			IOLockUnlock(gBBLock);
+		}
 		IOReturn sent = sendAsyncResult64(args->asyncReference, kIOReturnSuccess, NULL, 0);
-		bblog("RedwoodBaseband: ... selector %u completed (channel %llu): 0x%x\n", selector,
-		    args->scalarInputCount > 0 ? in[0] : 0, sent);
+		bblog("RedwoodBaseband: ... selector %u completed (channel %llu): 0x%x; %u reads aborted\n", selector,
+		    args->scalarInputCount > 0 ? in[0] : 0, sent, aborted);
 	}
 	/* (Test 379) read (3: buffer, size) waits for a reply; write (2: buffer, length) is read in, answered, completed */
 	if (args->asyncWakePort != MACH_PORT_NULL && fOwner != NULL && strcmp(fOwner->getName(), "AppleBasebandPCIInterface") == 0 &&
@@ -541,7 +608,10 @@ RedwoodBasebandPublish(void)
 	done = true;
 	(void) publish(OSTypeAlloc(AppleBaseband), "AppleBaseband", NULL);
 	(void) publish(OSTypeAlloc(AppleIPAppender), "AppleIPAppender", NULL);
-	(void) publish(OSTypeAlloc(AppleBasebandPCIControl), "AppleBasebandPCIControl", NULL);
+	gPCIControl = OSTypeAlloc(AppleBasebandPCIControl);
+	if (!publish(gPCIControl, "AppleBasebandPCIControl", NULL)) {
+		gPCIControl = NULL;
+	}
 	(void) publish(OSTypeAlloc(AppleBasebandPCIPDPManagerBase), "AppleBasebandPCIPDPManagerBase", NULL);
 	for (unsigned i = 0; i < sizeof(channels) / sizeof(channels[0]); i++) {
 		(void) publish(OSTypeAlloc(AppleBasebandPCIInterface), "AppleBasebandPCIInterface", channels[i]);
