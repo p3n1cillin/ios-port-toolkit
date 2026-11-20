@@ -144,6 +144,10 @@ my_start(id self, SEL cmd, id *error)
 	objc_retain(self);
 	snap((void *)self);              /* before the original: the node's values going in */
 	BOOL ok = orig_start(self, cmd, error);
+	/* (audiodump5) the silence filling on from the start, as before Test 395, for 10 s (audiodump4: 0.3 s) */
+	set_fill((void *)self, 1);
+	dispatch_after_f(dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC),
+	    dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0), (void *)self, fill_off);
 	snap((void *)self);              /* right after it (this one schedules the 2 ms train) */
 	return ok;
 }

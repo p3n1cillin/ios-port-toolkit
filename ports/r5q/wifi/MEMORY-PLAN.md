@@ -186,3 +186,16 @@ microphone it changes nothing heard (the input is silence); it matters once the 
 - **Caution:** the 4 s dump of the first build read a node already freed (the session had restarted): garbage, no
   crash. libr5q-audiodump3 (the same file, rewritten) retains the node. It samples just the clock fields at `-start:`
   (before and after the original) and every ~2 ms for ~0.6 s, to catch the first callback.
+- **Result on kernel t404 (libr5q-audiodump3/4):**
+  - audiodump3 (filling off): before `-start:` `_nextExpectedHostTime` is 0 and `_nextExpectedSampleTime` invalid, so
+    the first callback only sets them (the handler's `cbz` skips the check). From callback 2 the expected host time
+    sits within ~1-2 ms of the real callback's (e.g. 5878430582 against now 5878485792 ticks) and the sample time
+    advances 941 a callback (956, 1980, 2921, ...).
+  - audiodump4 (filling **on from the start**, then off at 0.3 s; 15 callbacks): `_silenceFramesGenerated...` 0
+    throughout, the clocks as above.
+  - **The 468.7 s gap does not occur on today's build:** host and sample clocks agree from the first callback. It
+    was seen on kernels t394-t395 and is not reproducible now. libr5q-media stays as the guard: with no working
+    microphone, filling silence buys nothing, and the gap could come back.
+  - A 10 s run with filling on (audiodump5) could not start a Camera session: the phone's USB link dropped (the
+    phone was moved), and `openurl` over Wi-Fi refuses while it is locked. Every audiodump injection was taken out
+    again (`kern.exec_inject` holds none).
