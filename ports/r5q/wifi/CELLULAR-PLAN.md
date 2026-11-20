@@ -209,3 +209,40 @@ bytes). The log then shows what CommCenter asks, in order, before anything is ma
 - **Standing:** CommCenter runs on the stubs. The manager's gate is "Baseband Firmware Path Not Found", with the
   folder and an iPhone-named package both in place. The radio type it resolves for this phone, and the exact path
   or file it wants, are what its logs would say.
+
+## Test 367 (kernel t367, `vfslog=1`): where the manager really looks
+
+- `bsd/vfs/vfs_lookup.c` in the overlay (Apple's XNU file): `namei()` wrapped, so a lookup whose path names the
+  baseband's firmware ("standalone/firmware", "Baseband/", ".bbfw") is logged with its process and result into the
+  loader's ring.
+- **Result:** `CommCenter[41] looks up /private/preboot/726564776F6F6400.../usr/local/standalone/firmware/Baseband/Mav17:
+  NOT FOUND (2)`. The manager looks on the **preboot volume, under the boot manifest's hash** (here hex for
+  "redwood", the port's own), not at /usr/local. abm-helper and CommCenter also look up their log folders (found).
+- **Test 368:** the firmware tree (`usr/local/...`) as `/redwood/share/preboot`, shown on a synthetic
+  `/private/preboot/<hash>` by the init script's second `r5q_bind`.
+- **Test 368:** the synthetic `/private/preboot/<hash>` was not made (the 96-character name), so the lookup still
+  failed. **Test 369:** a tree holding `<hash>/usr/local/...` (`/redwood/share/prebootroot`) bound over the existing,
+  empty `/private/preboot`. **THE MANAGER FINDS THE FIRMWARE:** `.../Baseband/Mav17: found`, then each image
+  (sbl1, rpm, restoresbl1, qdsp6sw, mba, apps) read ~32 times. New AppleBaseband calls for the first time: selector 6
+  then selector 1 (scalar 1) ~15 times each (boot attempts), and AppleIPAppender selector 15 (12 bytes out). Its
+  stats now say `modem boot up failure [... BBUpdater error 2 - Assertion failure ( ::memcmp( fHeader.e_ident,
+  kIdentMagic, ...) )]`: BBUpdater parses the images as ELF and the 4 KB zero placeholder for qdsp6sw.mbn is not
+  one.
+- **Test 370:** qdsp6sw.mbn as an ELF stand-in made from the real one: its ELF header and 29 program headers and its
+  hash segment (the first 11,464 bytes), every later segment's file size 0 (the loadable ones are up to 19.7 MB; the
+  whole image would not fit the boot image).
+- **Test 370 result: THE MANAGER OPENS THE PCI TRANSPORT.** With the ELF stand-in, BBUpdater gets past the images:
+  16 connections to `AppleBasebandPCIInterface`, each open (selector 0, scalar 0), **readRegister** (selector 5)
+  with register 4 (96 bytes out), 3 (24 bytes) and 0 (4 bytes), then close (selector 1). Those sizes fit Qualcomm's
+  boot-host registers: a 96-byte OEM public-key hash, the 24-byte MSM hardware ID, a 4-byte serial/execution
+  environment. BBUpdater's chip query: "CHIPID=0x%x SNUM=0x%s, PKHASH=0x%s CERTID=0x%x". Its stats now:
+  `modem boot up failure [output did not return done]` (libBasebandManager: BBUpdater's output has no "done").
+- The lookup log shows the one file it wants and lacks: **`.../Baseband/Mav17/bbticket.der`: NOT FOUND** -- the
+  baseband ticket an iPhone's restore gets from Apple, signed for that phone's own modem (its serial and key hash).
+  (Its other misses -- xbl_cfg.elf, xbl_support.elf, uefi.elf, hyp.mbn, aop.mbn, devcfg.mbn, apdp.mbn, dsp3.mbn,
+  multi_image*.mbn, wdt.mbn -- are images of other chip generations.)
+- **The way on:** not a forged Apple ticket. libBasebandManager has its own **fake-boot path** ("#I Faking bootup",
+  "Wait for Ready on Fake Boot", at +0x7fc14), which skips BBUpdater and waits for the transport. That fits this
+  phone, whose modem is already running. Its switch is a flag taken from the `abm::Overrides` CommCenter passes to
+  `abm::InitServer`. Next: read how CommCenter fills those overrides (a preference or boot-arg). Then the stubs'
+  QMUX channels have to answer the QMI that follows, carried to the modem's QRTR services.

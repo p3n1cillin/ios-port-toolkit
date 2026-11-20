@@ -61,6 +61,8 @@ These files replace the donor's files of the same path in its `xnu/files/` tree 
   last 16 samples of each kept with their times (`struct redwood_motion` version 2).
 - `bsd/dev/redwood_sec_ts.c` (Tests 334-351): the front (IMX616) and main (IMX586) cameras through a common Sony
   streaming path (`sony_stream`), their whole binned frames for iOS.
+- `bsd/vfs/vfs_lookup.c` (Test 367): Apple's open-source XNU file (xnu-8796.121.2) with `namei()` wrapped: with
+  `vfslog=1`, a lookup of a path naming the baseband's firmware is logged with its process and result.
 - `iokit/conf/files` (Test 355): Apple's open-source XNU file (xnu-8796.121.2) as the donor ships it, with
   `iokit/Kernel/RedwoodBaseband.cpp` added to the build.
 - `osfmk/arm/io_map.c` (Test 252): Apple's open-source XNU file (xnu-8796.121.2) with the I/O submap at 64 MB instead of
