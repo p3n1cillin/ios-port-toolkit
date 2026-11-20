@@ -162,3 +162,37 @@ bytes). The log then shows what CommCenter asks, in order, before anything is ma
   for booting, are in AppleBasebandManager's server (AppleBasebandManager.framework, started by
   `AppleBasebandManagerStartServer`), the next thing to read; its client constants name the boot states but not
   their numbers.
+
+## The gate, found (2026-11-20): "Baseband Firmware Path Not Found"
+
+- **Where the manager's code is:** CommCenter hosts it (`abm::InitServer` / `abm::StartServer`, imported from
+  AppleBasebandManager.framework). That framework is only a loader ("Failed on loading BasebandManager library for
+  initializing server"): it opens **`/usr/lib/libBasebandManager.dylib`** (Qualcomm; `libBasebandManagerICE.dylib`
+  for Intel). Its logs ("#I boot state changing %s -> %s", "Faking bootup", "Failed on preparation for booting!:
+  Reason: %s", "Listening for PCI events", ...) are os_log formats, in the `__oslogstring` section;
+  `tools/ios/dsc_strings.py` now lists that section too. abm-helper only hosts `abm::HelperServer` (logs, traces).
+- **Its own word, on the phone:** `/private/var/wireless/Library/Logs/log-bb-live-stats.txt` (read with the new
+  `r5qfs cat PATH`), one line per boot attempt:
+  `reset: reason=modem boot up failure [Baseband Firmware Path Not Found]` ("Failed to find the firmware in %s").
+  **That is why it never booted, whatever the stubs answered.** The path is fixed in libBasebandCapabilities:
+  `/usr/local/standalone/firmware/Baseband/Mav17` (no override found), which an iPhone's restore fills from
+  `usr/standalone/update/Mav17.Release.bbfw` (a zip, 34 MB: acdb, apps, mba, qdsp6sw (59 MB), rpm, sbl1, tz,
+  restoresbl1, bbcfg .mbn, Info.plist, Options.plist; Qualcomm MDM9655 firmware) and which this port's system image
+  never had.
+- **Test 365:** the folder provided without rebuilding the 2.5 GB system image. The firmware tree (local only, never
+  published; `qdsp6sw.mbn` a 4 KB placeholder, since the stubs ignore what is sent and the full one would not fit
+  the 64 MB boot image) goes into the root as `/redwood/share/usr-local` (`EXTRA_SHARE`). A second `r5q_bind` in the
+  init script (`rc.r5q.bbfw`, chained after the ringtones', still as process 1) shows it on `/usr/local`.
+- **Test 365 result:** the bind works -- `/usr/local/standalone/firmware/Baseband/Mav17` lists the firmware files on
+  the phone -- but the manager still wrote "Baseband Firmware Path Not Found" for this boot (5:26, the cycle began
+  5:23).
+- **Test 366:** the package added under the name an iPhone has there, `Mav17-<version>.Release.bbfw`
+  (`Mav17-8.50.04.Release.bbfw`; the version from its Info.plist: 8.50.04, ChipId 0x0003B0E1), rebuilt with the 4 KB
+  `qdsp6sw.mbn` placeholder (2.4 MB). **Still "Firmware Path Not Found"** (5:33). libBBUpdaterDynamic asserts "Failed
+  finding the bbfw path." and wants an `apTicket` and `/bbupdate_profile.plist` further on.
+- **What is not known yet:** whether the manager resolves this phone's radio type to Mav17 at all. The stats line
+  reads `AP=20F66;BB=;Machine=iPhone10,3` (no baseband identity). The type comes from libBasebandCapabilities, likely
+  through MobileGestalt (whose `baseband` node reads are `function-bb_ap_time_sync` and a hashed key,
+  "5dyhCh3dm1vSOaNK+US1Qw"). The manager's own messages ("Failed to find the firmware in "%s"" with the path it
+  tried) are info-level or go through CommCenter's logger, and do not reach the forwarded os_log here. Next: get
+  those lines (a logging profile or the logger's preference), which would name the path it looks in.

@@ -5,6 +5,7 @@
  *   r5qfs mkdir PATH UID GID MODE   every missing directory on the way made, the last owned UID:GID, MODE octal
  *   r5qfs chown PATH UID GID    one path
  *   r5qfs rm PATH               one file (not a directory)
+ *   r5qfs cat PATH              a file's bytes to standard output (2026-11-20: CommCenter's logs and state files)
  */
 #include <dirent.h>
 #include <errno.h>
@@ -101,6 +102,20 @@ main(int argc, char **argv)
 	} else if (strcmp(argv[1], "chown") == 0 && argc == 5) {
 		bad = chown(argv[2], (uid_t)atoi(argv[3]), (gid_t)atoi(argv[4])) != 0;
 		bad = bad ? (printf("chown: %s\n", strerror(errno)), 1) : do_stat(argv[2]);
+	} else if (strcmp(argv[1], "cat") == 0 && argc == 3) {
+		FILE *f = fopen(argv[2], "rb");
+		char buf[4096];
+		size_t n;
+
+		bad = f == NULL;
+		if (bad) {
+			printf("cat %s: %s\n", argv[2], strerror(errno));
+		} else {
+			while ((n = fread(buf, 1, sizeof(buf), f)) > 0) {
+				fwrite(buf, 1, n, stdout);
+			}
+			fclose(f);
+		}
 	} else if (strcmp(argv[1], "rm") == 0) {
 		bad = unlink(argv[2]) != 0;
 		printf("rm %s: %s\n", argv[2], bad ? strerror(errno) : "done");

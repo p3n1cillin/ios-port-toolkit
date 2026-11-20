@@ -1,4 +1,4 @@
-"""dsc_strings.py CACHE IMAGE REGEX: C strings in an image's __TEXT (__cstring) that match REGEX (split cache aware)."""
+"""dsc_strings.py CACHE IMAGE REGEX: C strings in an image's __TEXT (__cstring, and since 2026-11-20 __oslogstring: os_log formats) that match REGEX (split cache aware)."""
 import glob, re, struct, sys
 
 path, name, pattern = sys.argv[1], sys.argv[2], re.compile(sys.argv[3].encode(), re.I)
@@ -53,7 +53,7 @@ for _ in range(ncmds):
             so = off + 72 + 80 * s
             sect = hdr[so:so + 16].split(b'\0')[0]
             addr, sz = struct.unpack_from('<QQ', hdr, so + 32)
-            if sect in (b'__cstring', b'__objc_methname', b'__objc_classname'):
+            if sect in (b'__cstring', b'__objc_methname', b'__objc_classname', b'__oslogstring'):
                 data = mem(addr, sz) or b''
                 for st in data.split(b'\0'):
                     if pattern.search(st) and st not in seen:
