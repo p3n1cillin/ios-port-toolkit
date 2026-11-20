@@ -27,7 +27,7 @@ binaries, no build outputs and no phone backups are in this repository (see [the
 | `wifi/WIFI-PLAN.md` | everything since Test 111, step by step with what every test showed: Wi-Fi, sound, GPU, apps, sensors, CoreMotion, the compass, the microphone |
 | `SESSION.md` | the test-by-test log of the earlier stages |
 
-## State (Test 348)
+## State (Test 349)
 
 **Works:**
 
@@ -67,8 +67,8 @@ binaries, no build outputs and no phone backups are in this repository (see [the
   - not yet: the macro S5K5E9, full-field (uncropped) frames, and a picture of a lit scene.
 
   How it was made stable: wifi/CAMERA-PLAN.md, docs/CAMERA.md.
-- **Compass:** the Compass app shows a heading, then freezes. Since Test 348 apps get motion data at ~72 a
-  second and the compass at ~32 (were 23 and 10); CoreMotion's magnetometer calibration still has to be made by
+- **Compass:** the Compass app shows a heading, then freezes. Since Test 349 apps get motion data at ~84 a
+  second and the compass at 50 (were 23 and 10); CoreMotion's magnetometer calibration still has to be made by
   turning the phone (owner test, outdoors best).
 
 **Not yet:**

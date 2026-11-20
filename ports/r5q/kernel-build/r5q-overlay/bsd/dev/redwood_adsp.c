@@ -2951,8 +2951,18 @@ struct redwood_motion {
 	int32_t lux;
 	int32_t prox[2];                        /* near 1 / far 0; the raw reading */
 	uint64_t time[SEE_KINDS];
+	/*
+	 * (Test 349, version 2) The last 16 samples of the accelerometer, the gyroscope and the compass, each with its
+	 * number (count[] when it came) and time: the SLPI delivers in small bursts, and a reader that takes only the
+	 * newest one missed some (Test 348: apps 71.6 a second of ~100). Entry n % 16 holds sample n.
+	 */
+	struct {
+		int32_t v[3];
+		uint32_t n;
+		uint64_t time;
+	} ring[3][16];
 };
-static struct redwood_motion motion = { .version = 1 };
+static struct redwood_motion motion = { .version = 2 };
 
 static int
 motion_sysctl(__unused struct sysctl_oid *oidp, __unused void *arg1, __unused int arg2, struct sysctl_req *req)
@@ -3217,6 +3227,17 @@ see_event(const uint64_t from[2], uint32_t msg_id, const uint8_t *p, uint32_t le
 			}
 			motion.count[kind]++;
 			motion.time[kind] = mach_absolute_time();
+			if (kind <= SEE_MAG) {
+				uint32_t n = motion.count[kind];
+
+				/* (Test 349) the number last, after the values: a reader that sees it may take the entry */
+				motion.ring[kind][n % 16].v[0] = data[0];
+				motion.ring[kind][n % 16].v[1] = data[1];
+				motion.ring[kind][n % 16].v[2] = data[2];
+				motion.ring[kind][n % 16].time = motion.time[kind];
+				__asm__ volatile ("dmb ish" ::: "memory");
+				motion.ring[kind][n % 16].n = n;
+			}
 			motion.seq++;
 			if (motion.count[kind] <= 3 || motion.count[kind] % 2000 == 0) {
 				tell("slpi: see: %s sample %u: %d %d %d (x1000), status %u\n", see_kind_name[kind], motion.count[kind], data[0], data[1],

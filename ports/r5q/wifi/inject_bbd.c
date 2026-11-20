@@ -119,7 +119,47 @@ struct redwood_motion {                 /* as redwood_adsp.c */
 	int32_t lux;
 	int32_t prox[2];
 	uint64_t time[SEE_KINDS];
+	struct {                        /* (Test 349, version 2) the last 16 samples of accelerometer, gyroscope, compass */
+		int32_t v[3];
+		uint32_t n;
+		uint64_t time;
+	} ring[3][16];
 };
+
+/*
+ * (Test 349) The samples of sensor `kind' that came since *last: from the kernel's ring (version 2), each with its own
+ * time; at most 16 (older ones are gone); one whose entry was being written as we read it is left out. With an older
+ * kernel (no ring) the newest one alone, as before. Returns how many were put in v/t.
+ */
+static unsigned
+motion_new(const struct redwood_motion *m, int kind, uint32_t *last, int32_t v[16][3], uint64_t t[16])
+{
+	uint32_t count = m->count[kind], from = *last + 1, got = 0;
+
+	if (count == *last) {
+		return 0;
+	}
+	if (m->version < 2) {
+		const int32_t *now = kind == 0 ? m->accel : kind == 1 ? m->gyro : m->mag;
+
+		memcpy(v[0], now, sizeof(v[0]));
+		t[0] = m->time[kind];
+		*last = count;
+		return 1;
+	}
+	if (count - from >= 16) {
+		from = count - 15;
+	}
+	for (uint32_t n = from; n != count + 1; n++) {
+		if (m->ring[kind][n % 16].n == n) {
+			memcpy(v[got], m->ring[kind][n % 16].v, sizeof(v[0]));
+			t[got] = m->ring[kind][n % 16].time;
+			got++;
+		}
+	}
+	*last = count;
+	return got;
+}
 
 struct sensor_service {
 	CFMutableDictionaryRef properties;
@@ -672,59 +712,64 @@ sensors_thread(__unused void *arg)
 				say(line);
 			}
 		}
-		if (compass != NULL && m.count[2] != last_mag) {
-			double raw[3] = { m.mag[0] / 1000.0, m.mag[1] / 1000.0, m.mag[2] / 1000.0 };
-			IOHIDEventRef event;
-
-			magcal_feed(raw);                       /* (Test 243) hard iron off, see magcal_feed */
-			event = IOHIDEventCreateCompassEvent(NULL, mach_absolute_time(), raw[0] - magcal_offset[0],
-			    raw[1] - magcal_offset[1], raw[2] - magcal_offset[2], 0);
-
-			last_mag = m.count[2];
-			if (event != NULL) {
-				IOHIDEventSetIntegerValue(event, 0x4, 1);
-				IOHIDVirtualServiceClientDispatchEvent(compass, event);
-				CFRelease(event);
-			}
-		}
-		if (gyro != NULL && m.count[1] != last_gyro) {
-			IOHIDEventRef event = IOHIDEventCreateGyroEvent(NULL, mach_absolute_time(), m.gyro[0] / 1000.0, m.gyro[1] / 1000.0,
-			    m.gyro[2] / 1000.0, 0);
-
-			last_gyro = m.count[1];
-			if (event != NULL) {
-				IOHIDEventSetIntegerValue(event, 0x4, 1);
-				IOHIDVirtualServiceClientDispatchEvent(gyro, event);
-				CFRelease(event);
-			}
-		}
-		if (m.count[0] == last) {
-			continue;
-		}
-		last = m.count[0];
+		/* (Test 349) every new sample of each, each with the time it came (the kernel's ring), not only the newest */
 		{
-			double x = -m.accel[0] / 9806.65, y = -m.accel[1] / 9806.65, z = -m.accel[2] / 9806.65;
-			IOHIDEventRef event = IOHIDEventCreateAccelerometerEvent(NULL, mach_absolute_time(), x, y, z, 0);
+			int32_t v[16][3];
+			uint64_t t[16];
+			unsigned n;
 
-			if (event != NULL) {
-				IOHIDEventSetIntegerValue(event, 0x4 /* is built-in */, 1);
-				IOHIDVirtualServiceClientDispatchEvent(accel, event);
-				CFRelease(event);
-			}
-			{
-				/* (Test 224) the orientation, once it has held for 0.2 s (Test 348: 20 samples at ~100 a second) */
-				long now = orientation_of(x, y, z);
+			if (compass != NULL && (n = motion_new(&m, 2, &last_mag, v, t)) != 0) {
+				for (unsigned i = 0; i < n; i++) {
+					double raw[3] = { v[i][0] / 1000.0, v[i][1] / 1000.0, v[i][2] / 1000.0 };
+					IOHIDEventRef event;
 
-				steady = now == seen ? steady + 1 : 0;
-				seen = now;
-				if (steady >= 20 && now != 0 && now != shown) {
-					shown = now;
-					orientation_send(now);
+					magcal_feed(raw);               /* (Test 243) hard iron off, see magcal_feed */
+					event = IOHIDEventCreateCompassEvent(NULL, t[i], raw[0] - magcal_offset[0], raw[1] - magcal_offset[1],
+					    raw[2] - magcal_offset[2], 0);
+					if (event != NULL) {
+						IOHIDEventSetIntegerValue(event, 0x4, 1);
+						IOHIDVirtualServiceClientDispatchEvent(compass, event);
+						CFRelease(event);
+					}
 				}
 			}
-			if (sent++ < 3 || sent % 6000 == 0) {
-				snprintf(line, sizeof(line), "r5q-bbd: sensors: accelerometer event %u: %.3f %.3f %.3f g\n", sent, x, y, z);
-				say(line);
+			if (gyro != NULL && (n = motion_new(&m, 1, &last_gyro, v, t)) != 0) {
+				for (unsigned i = 0; i < n; i++) {
+					IOHIDEventRef event = IOHIDEventCreateGyroEvent(NULL, t[i], v[i][0] / 1000.0, v[i][1] / 1000.0,
+					    v[i][2] / 1000.0, 0);
+
+					if (event != NULL) {
+						IOHIDEventSetIntegerValue(event, 0x4, 1);
+						IOHIDVirtualServiceClientDispatchEvent(gyro, event);
+						CFRelease(event);
+					}
+				}
+			}
+			n = motion_new(&m, 0, &last, v, t);
+			for (unsigned i = 0; i < n; i++) {
+				double x = -v[i][0] / 9806.65, y = -v[i][1] / 9806.65, z = -v[i][2] / 9806.65;
+				IOHIDEventRef event = IOHIDEventCreateAccelerometerEvent(NULL, t[i], x, y, z, 0);
+
+				if (event != NULL) {
+					IOHIDEventSetIntegerValue(event, 0x4 /* is built-in */, 1);
+					IOHIDVirtualServiceClientDispatchEvent(accel, event);
+					CFRelease(event);
+				}
+				{
+					/* (Test 224) the orientation, once it has held for 0.2 s (Test 348: 20 samples at ~100 a second) */
+					long now = orientation_of(x, y, z);
+
+					steady = now == seen ? steady + 1 : 0;
+					seen = now;
+					if (steady >= 20 && now != 0 && now != shown) {
+						shown = now;
+						orientation_send(now);
+					}
+				}
+				if (sent++ < 3 || sent % 6000 == 0) {
+					snprintf(line, sizeof(line), "r5q-bbd: sensors: accelerometer event %u: %.3f %.3f %.3f g\n", sent, x, y, z);
+					say(line);
+				}
 			}
 		}
 	}

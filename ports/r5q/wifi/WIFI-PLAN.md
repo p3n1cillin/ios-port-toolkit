@@ -1123,3 +1123,13 @@ run ends with the modem shut down through TZ, after asking it to stop over SMP2P
   0.0" with the phone lying still on a desk. CoreMotion builds its magnetometer calibration from the device being
   turned through orientations, so it needs the owner's figure-of-eight, outdoors best. The raw field here is again
   ~5 µT horizontal of |B| ~50 µT (dip ~84°; ~66° expected), as in Test 243: the indoor reading.
+- **Test 349 (kernel t349, root test349): every sample, each with its own time.** `struct redwood_motion` version 2
+  adds, at its end, a 16-entry ring per motion sensor (accelerometer, gyroscope, compass): entry n % 16 holds sample n
+  with its values and kernel time, the number written last (after a `dmb ish`) so a reader takes no half-written
+  entry. backboardd's injector (`motion_new()` in inject_bbd.c) dispatches every sample since its last, stamped with
+  the sample's own time (falling back to the newest-only path with a version-1 kernel).
+  - **In an app (`cm_rate`): compass 50.0/s (all the SLPI sends; was 32.4), accelerometer 84.2/s, gyroscope 81.6/s**
+    (were 71.6). The rest of the gap to ~100 is beyond the injector (CoreMotion's own pacing toward an app at a 10 ms
+    request); device motion is stable.
+  - (The first run sat at "waiting for the phone": iOS up, "USB live mode: no", fastboot calls hanging. `r5q_reboot`
+    over r5qd restarted it, the loader came back on USB, and `phone.py cycle` flashed the already-built image.)
