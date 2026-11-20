@@ -1194,3 +1194,7 @@ run ends with the modem shut down through TZ, after asking it to stop over SMP2P
 - The real failure, from WeatherDaemon: "Error while creating local signature ... error=AMSErrorDomain Code=12
   'Mescal Failed'". Mescal is Apple's FairPlay-based request signing (AppleMediaServices). Without FairPlay no
   request is signed, so WeatherKit refuses. Earlier notes assumed this; now it is measured.
+- **Fixed (Test 401):** libr5q-imagent.dylib (wifi/inject_imagent.m) in imagent makes
+  `-[IMDBadgeUtilities isUnexpectedlyLoggedOut]` answer NO. iMessage can never sign in here, so that warning is
+  always noise. A real failed message (`_showingFailure`) still shows "!"; iMessage's own setting is untouched.
+  After a clean boot of root test401 the Messages icon has no badge. Standard image = Test 401.

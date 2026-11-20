@@ -31,7 +31,12 @@ Notes:
 
 `phone-args.txt` is the standard boot-arg set. Change it when a feature's arg becomes part of every boot.
 
-## The standard image (2026-11-20, Test 400)
+## The standard image (2026-11-20, Test 401)
+
+`port/build/r5q-install-boot-standard.img` = r5q-install-boot-401.img: kernel t398, root test401 (= test400 +
+libr5q-imagent.dylib in imagent: no "iMessage was signed out" "!" on Messages' icon; wifi/WIFI-PLAN.md). Before it:
+
+## The standard image before (2026-11-20, Test 400)
 
 `port/build/r5q-install-boot-standard.img` = r5q-install-boot-400.img: kernel t398, root test400 (= test395 + the Metal
 driver in /redwood/lib + libr5q-poster.dylib in PosterBoard and the poster extensions: **the wallpapers show** on the

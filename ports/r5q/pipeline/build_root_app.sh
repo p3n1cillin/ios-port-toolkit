@@ -46,6 +46,9 @@ clang -target arm64-apple-ios16.5 -isysroot $SDK -fuse-ld=lld -O1 -dynamiclib -i
 # added after build.sh from port/build/metal (the bundle as RedwoodMetal + RedwoodMetal-Info.plist), see the end.
 clang -target arm64-apple-ios16.5 -isysroot $SDK -fuse-ld=lld -O1 -dynamiclib -fobjc-arc -framework Foundation -framework UIKit -framework Metal -framework IOKit -install_name /redwood/lib/libr5q-poster.dylib -o obj/libr5q-poster.dylib $W/inject_poster.m 2>&1 | grep -v 'warning\|^ \|^$\|generated' || true
 POSTERS="PosterBoard CollectionsPoster PhotosPosterProvider GradientPosterExtension EmojiPosterExtension PridePosterExtension UnityPosterExtension ExtragalacticPoster LegacyPoster WeatherPoster AegirPoster"
+# (Test 401) libr5q-imagent.dylib into imagent: no "iMessage was signed out" "!" on Messages' icon -- iMessage can
+# never sign in on this port, so that flag is always set (wifi/inject_imagent.m); a real failed message still badges
+clang -target arm64-apple-ios16.5 -isysroot $SDK -fuse-ld=lld -O1 -dynamiclib -fobjc-arc -framework Foundation -install_name /redwood/lib/libr5q-imagent.dylib -o obj/libr5q-imagent.dylib $W/inject_imagent.m 2>&1 | grep -v 'warning\|^ \|^$\|generated' || true
 EXTRA_LINE=""
 rm -f obj/libr5q-sbdiag.dylib
 if [ -n "$SBDIAG" ]; then
@@ -83,7 +86,7 @@ if [ -f $IOS_WORK/linux-source/fw-camera-r5q/camera-imx586.isp ]; then
 	cp $IOS_WORK/linux-source/fw-camera-r5q/camera-imx586.isp $IOS_WORK/linux-source/fw-camfake/camera-s5khm2sd.isp
 fi
 grep -q 'fw-camfake' build.sh || sed -i 's|^if \[ -d \.\./fw-gpu \]; then|if [ -d ../fw-camfake ]; then mkdir -p root/fw; cp ../fw-camfake/* root/fw/; fi      # (r5q: synthetic camera table)\n&|' build.sh
-INJECT="$(printf '%s\n' '/redwood/lib/libredwood.dylib backboardd containermanagerd containermanagerd_system' '/redwood/lib/libredwood-sb.dylib SpringBoard' '/redwood/lib/libredwood-media.dylib mediaserverd' '/redwood/lib/libredwood-app.dylib Sileo' '/redwood/lib/libredwood-tweaks.dylib Preferences' "/redwood/lib/libr5q-app.dylib $APPS" "/redwood/lib/libr5q-bbd.dylib backboardd" "/redwood/lib/libr5q-media.dylib mediaserverd" "/redwood/lib/libr5q-poster.dylib $POSTERS" "$EXTRA_LINE")"
+INJECT="$(printf '%s\n' '/redwood/lib/libredwood.dylib backboardd containermanagerd containermanagerd_system' '/redwood/lib/libredwood-sb.dylib SpringBoard' '/redwood/lib/libredwood-media.dylib mediaserverd' '/redwood/lib/libredwood-app.dylib Sileo' '/redwood/lib/libredwood-tweaks.dylib Preferences' "/redwood/lib/libr5q-app.dylib $APPS" "/redwood/lib/libr5q-bbd.dylib backboardd" "/redwood/lib/libr5q-media.dylib mediaserverd" "/redwood/lib/libr5q-poster.dylib $POSTERS" "/redwood/lib/libr5q-imagent.dylib imagent" "$EXTRA_LINE")"
 echo "inject: $(echo "$INJECT" | tr '\n' ';' | wc -c) bytes"
 env REST=1 PREBUILT=1 INJECT="$INJECT" ${GL:+GL="$GL"} ${EXTRA:+EXTRA="$EXTRA"} ${EXTRA_SHARE:+EXTRA_SHARE="$EXTRA_SHARE"} ${RC_JOBS:+RC_JOBS="$RC_JOBS"} ${RC:+RC="$RC"} ./build.sh > /tmp/userland-t$N.log 2>&1 || { tail -5 /tmp/userland-t$N.log; exit 1; }
 ls root/lib | grep r5q | tr '\n' ' '; echo
