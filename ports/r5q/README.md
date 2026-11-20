@@ -78,8 +78,10 @@ binaries, no build outputs and no phone backups are in this repository (see [the
   point exists (wifi/METAL-FEASIBILITY.md); a Metal implementation over the GL path is a large project (AIR shaders).
 - **Radios:** cellular: the modem runs, goes online and receives (GSM cells found, Test 352); no SIM in the phone
   yet. iOS's side, as an experiment (boot-args `bbstub=1 bbfake=1`, Tests 355-374): CommCenter runs on kernel stubs,
-  its baseband manager takes its fake-boot path ("Baseband bootup succeeded") and makes QMI clients (NAS, UIM, DMS,
-  WDS, WMS, ...), but its IPC router stays disengaged: no QMI reaches the modem yet (wifi/CELLULAR-PLAN.md).
+  its baseband manager takes its fake-boot path, its IPC router is engaged (by an injected helper for now), and
+  CommCenter's QMI reaches the modem's own services through a kernel QMUX-to-QRTR bridge (Tests 378-388): the
+  baseband stays ready, iOS reads the modem's firmware version, IMEI and SIM state ("no SIM") from the modem itself
+  (wifi/CELLULAR-PLAN.md, docs/CELLULAR.md). Settings has no Cellular section yet (MobileGestalt).
   Bluetooth audio.
 - **FairPlay:** App Store apps can't run (their code is FairPlay-encrypted). The study (wifi/FAIRPLAY-FEASIBILITY.md)
   found that Apple's FairPlay kext makes the device's keys with the SoC's fused UID and GID AES keys, which only

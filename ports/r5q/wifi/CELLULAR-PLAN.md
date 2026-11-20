@@ -345,3 +345,89 @@ bytes). The log then shows what CommCenter asks, in order, before anything is ma
   engage: vtable 0x1d90fad68, thunk +0x186a28 -> +0x1865e8). Candidates: TransportModule (+0x170000..+0x173000,
   `fTransportService`) on a boot-state or operating-mode event. Then the kernel side: answer QMI CTL GET_CLIENT_ID on
   the `qmux1` channel and bridge each client's QMI to the modem over QRTR.
+
+## Test 377 (the t374 image; `libr5q-abm.dylib` injected into CommCenter): the router engaged by hand
+
+- New `wifi/inject_abm.c` (built into port/build/phone-tools/libr5q-abm.dylib, put in with `r5qd_client.py reload
+  ... CommCenter`): 20 s after CommCenter starts it finds the QMITransportService object by scanning CommCenter's
+  writable memory for its two vtable pointers (0x1d90facb8 at +0, 0x1d90fad68 at +0x68, plus the cache slide), checks
+  the engage method's first two instructions, and calls engage(this). One object found.
+- **Result: the engage runs.** `----------------- Engaging -----------------`, `IPC state is kDisengaged`, then
+  libPCITransport (through libBasebandCommandDriversQMI's logger): threads made, `bh::init ... in addComp added 1,
+  started 1, service 0x9c07` -- it matched and opened an AppleBasebandPCIInterface -- then `task::poison ... control:
+  status 0xe00002d6` (kIOReturnTimeout) and `0xe00002eb` (kIOReturnAborted), `TelephonyBasebandPCITransportCreate:
+  failed to create transport internal`, `Failed to engage router`, `Engage failure:`, and the manager asks for a
+  baseband HardReset (reason TransportError) -- boot state Booted -> Resetting.
+- The kernel stubs saw, per engage: AppleBasebandPCIInterface open (selector 0, scalar 0), **startChannelAsync
+  (selector 7) for channel 0 and 1, both ASYNC**, then after the timeout abortChannelAsync (selector 6) for both. The
+  stubs answered success but never sent the async completions the transport waits for.
+- Seen during these runs: r5qd over Wi-Fi went silent for about a minute after the engage failure and reset request
+  (the "Wi-Fi stall" of Test 358 again?), then answered again by itself.
+
+## Test 378 (kernel t378): start/abort channel completed
+
+- RedwoodBaseband.cpp: on AppleBasebandPCIInterface, async selectors 6 and 7 are completed at once with
+  `sendAsyncResult64(asyncReference, kIOReturnSuccess)`; the interface's protocol is logged when a connection opens.
+- **Test 378 result: THE TRANSPORT RUNS.** With start completed, libPCITransport opens the interface whose protocol
+  is **`qmux_test`**, posts eight async reads (selector 3: user buffer, 0x1800 bytes) and sends async writes
+  (selector 2: user buffer, length): QMUX frames. libPCITransport's completion block takes (status, size, cookie):
+  async results carry two arguments, the byte count and 0. Wi-Fi kept working (frame counters rising), though r5qd
+  answered late for a while.
+
+## Test 379 (kernel t379): writes read in, QMI CTL answered in the kernel
+
+- RedwoodBaseband.cpp: per connection, pending reads (async reference, user address, size) and replies waiting for
+  a read; a write is copied in from CommCenter with `IOMemoryDescriptor::withAddressRange(addr, len,
+  kIODirectionOut, task)` and completed `{len, 0}`; a reply is written into the oldest read's buffer and that read
+  completed `{bytes, 0}`. One IOLock for all of it (external methods run concurrently).
+- The frames are **standard QMUX**: `01 <len u16> <flags> <service> <client>` + the QMI message. CommCenter's start:
+  CTL SYNC (0x27), 0x26 (TLVs 01=01, 10=02 00), 0x2a, then **GET_CLIENT_ID (0x22)** for NAS (3), UIM (0xb), DMS (2),
+  Voice (9), ... -- answered here (result TLV 02, TLV 01 = service, client), and the clients go on to their own
+  services: DMS 0x23 (revision) and Apple's 0x5557, NAS 0x4f, UIM 0x2e/0x2f (event registration, card status),
+  PDS (6) 0x36, service 0xc 0x01/0x1a, and Apple's own services 0xe1, 0xe2 (many messages), 0xe4, 0xe7.
+- New `pipeline/cell_engage.sh`: logging prefs, inject libr5q-abm.dylib, restart CommCenter, follow over USB.
+
+## Test 380 (kernel t380): the QMI bridged to the modem over QRTR
+
+- redwood_wifi.c `redwood_bb_qmi_send/close`: for each (connection, service, client) a QRTR port of ours, and the QMI
+  message sent as it is to the modem's server of that service (the QMI bytes are the same in QMUX and QRTR);
+  whatever the modem sends that port goes back as a QMUX frame (`01 len 80 svc client` + message) into the
+  client's reads. A service the modem does not offer (Apple's 0xe1..0xe8 ...) is answered with a QMI error (result
+  1, error 0x31) so its client does not wait forever. Sending happens outside the transport's lock (the link's
+  thread takes it to deliver replies).
+- **Test 380 result: THE MODEM ANSWERS iOS.** NAS requests from CommCenter reach the modem's NAS server over QRTR
+  (ports opened per client: NAS -> 0:53, DMS -> 0:70, UIM -> 0:65, Voice -> 0:52, WMS -> 0:71, WDS -> 0:57, COEX ->
+  0:45) and its responses (0x03, 0x33, 0x45) and indications (NAS 0x34, 145 bytes) come back. But many sends failed
+  with ENOSPC: the kernel's QRTR port table had 16 entries, and CommCenter opens dozens of clients (WDS alone 10).
+
+## Tests 381-388: from the first answers to a stable, engaged baseband
+
+- **381:** QRTR ports 16 -> 96, bridges 48 -> 96. Every standard service answers (DMS revision 0x23 90 bytes, WDS
+  0xa2, QOS 0x2b, COEX ...). With the router engaged by hand: `IPC state kDisengaged -> kEngaged`,
+  `----- Engaged -----`, `boot state Booted -> IsReady` (`EventTransportIsReady`), CommCenter learns the IMEI (kept
+  out of every file here) and `noSIM`; registration `kNotRegistered`. But requests timed out (ATCS_TIMEOUT) and the
+  manager reset the baseband: the kernel had dropped 70 replies (16 one-frame slots; CommCenter keeps few reads posted).
+- **382:** replies kept as whole QMUX frames back to back (64 KB), as many per read as fit -- CommCenter's QMux parses
+  several frames per read ("More bytes in the buffer ... continuing"). No more drops, but still no non-CTL response
+  parsed by CommCenter.
+- **383:** the deliveries logged with their first bytes: one began with a stray `00` -- the stream was misaligned.
+- **384: the bug:** the error reply for services the modem lacks (Apple's 0xe1/0xe2/0xe4/0xe7/0xe8 ...) said QMUX length
+  18 for a 20-byte frame (should be 19): one extra byte each time, and every frame after it misread. Fixed. Also seen:
+  the phone's Wi-Fi was deauthenticated by the access point and stayed down after the engage.
+- **385:** COEX (0x22) kept from the modem (answered with an error): **Wi-Fi stays up**, and **229 QMI responses and
+  indications from the modem are parsed by CommCenter.** `SIM state is kSimStateNoSim`, `Settled physical SIM
+  state: kInsertedNoSim` -- the modem's own answer (there is no SIM in the phone). Then a reset: `AP-triggered:
+  locationd Qmi Error Response: QMI_ERR_INVALID_INDEX ... QMI_PDS_RESET` -- locationd asks the baseband for GPS
+  through PDS (service 6), and this modem's PDS answers differently.
+- **386:** PDS RESET answered in the kernel: locationd's next request (GET_GPS_SERVICE_VERSION) failed the same way.
+- **387:** every PDS request answered with success: locationd then said "Invalid Data" and asked for a reset again.
+- **388: no PDS client at all** (CTL GET_CLIENT_ID for service 6 refused, error 0x05): **no reset, 0 ATCS timeouts;
+  the baseband stays Engaged / IsReady, SIM state NoSim, and iOS knows the modem: `Baseband version set to:
+  MPSS.HE.1.0.c2-00491-SM8150_GEN_PACK-1.8238.35`.** Settings shows no Cellular row yet (MobileGestalt's telephony
+  capabilities are not set on this port) -- with no SIM in the phone it would say "No SIM" in any case.
+- New time-savers: `pipeline/cell_engage.sh` (logging prefs, inject, restart CommCenter, follow over USB) and
+  `pipeline/cell_read.sh N` (pull the unified log, CommCenter's entries, the cellular summary).
+- **Still open:** (1) the engage is done by hand (libr5q-abm.dylib); after a baseband reset the manager's own engage
+  fails ("Engage failure") -- the transport's reopening has to work for resets, and then the hand engage may not be
+  needed at all. (2) MobileGestalt telephony capabilities for the Settings/status-bar UI. (3) A SIM, for
+  registration, calls, SMS and data (WDS data would also need a network interface: AppleIPAppender's packet path).

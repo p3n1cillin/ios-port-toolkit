@@ -77,4 +77,7 @@ New in this directory (not the donor's): `bsd/dev/redwood_wlfw_ath10k.h` and `re
 from Linux's ath10k (ISC, see their headers); `bsd/dev/redwood_wpa.h` (WPA2's key handling for the kernel's
 supplicant); `iokit/Kernel/RedwoodBaseband.cpp` (Tests 355-358: listening stubs of the IOKit services iOS's
 telephony stack opens -- AppleBaseband, AppleIPAppender, AppleBasebandPCIControl, AppleBasebandPCIInterface; and
-since Test 374 AppleBasebandPCIPDPManagerBase, which libPCITransport's PCI event listener watches).
+since Test 374 AppleBasebandPCIPDPManagerBase, which libPCITransport's PCI event listener watches; since Tests
+378-388 a QMUX transport on AppleBasebandPCIInterface -- async reads and writes, QMI CTL answered in the kernel, every
+other service's QMI bridged to the modem over QRTR by `redwood_bb_qmi_send` in bsd/dev/redwood_wifi.c, whose QRTR port
+table grew from 16 to 96).

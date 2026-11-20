@@ -2810,7 +2810,7 @@ struct redwood_qrtr_port {
 
 static LCK_MTX_DECLARE(qrtr_lock, &wifi_lock_group);    /* the tables below */
 static LCK_MTX_DECLARE(qrtr_calling, &wifi_lock_group); /* held by the link's thread around a callback */
-static struct redwood_qrtr_port qrtr_ports[16];
+static struct redwood_qrtr_port qrtr_ports[96];     /* (Test 381: 16 -> 96; iOS's QMI clients each take one, Test 380) */
 static struct {
 	uint32_t service, instance, node, port;
 	bool there;
@@ -10833,6 +10833,93 @@ cell_ask(uint32_t service, uint16_t msg, const uint8_t *tlvs, size_t tlvs_len, s
 		sleep_ms(10);
 	}
 	return NULL;
+}
+
+/*
+ * (Test 380) iOS's QMI to the modem: the bridge RedwoodBaseband.cpp's QMUX transport uses. CommCenter's QMI clients
+ * (one QMUX client ID per service client) speak through Apple's PCI transport; here each (service, client) gets its
+ * own QRTR port, and its QMI messages -- the same bytes in QMUX and in QRTR: flags, transaction, message, length,
+ * TLVs -- go to the modem's server of that service as they are. What the modem sends that port (responses,
+ * indications) goes back through RedwoodBasebandQmiReceive(). Services the modem does not offer get no port.
+ */
+extern void RedwoodBasebandQmiReceive(void *client, uint8_t service, uint8_t qmux_client, const void *message,
+    size_t length);
+
+struct bb_bridge {
+	bool                            used;
+	void                            *client;
+	uint8_t                         service, qmux_client;
+	struct redwood_qrtr_port        *port;
+};
+static struct bb_bridge bb_bridges[96];
+static LCK_MTX_DECLARE(bb_bridge_lock, &wifi_lock_group);
+
+static void
+bb_bridge_receive(void *context, __unused uint32_t node, __unused uint32_t port, const void *data, size_t length)
+{
+	struct bb_bridge *b = context;
+
+	if (b->used) {
+		RedwoodBasebandQmiReceive(b->client, b->service, b->qmux_client, data, length);
+	}
+}
+
+/* 0 sent; ENOENT the modem has no server of that service; another errno otherwise */
+int redwood_bb_qmi_send(void *client, uint8_t service, uint8_t qmux_client, const void *message, size_t length);
+int
+redwood_bb_qmi_send(void *client, uint8_t service, uint8_t qmux_client, const void *message, size_t length)
+{
+	struct bb_bridge *b = NULL;
+	uint32_t node, port;
+
+	if (!cell_where(service, &node, &port)) {
+		return ENOENT;
+	}
+	lck_mtx_lock(&bb_bridge_lock);
+	for (unsigned i = 0; i < sizeof(bb_bridges) / sizeof(bb_bridges[0]) && b == NULL; i++) {
+		if (bb_bridges[i].used && bb_bridges[i].client == client && bb_bridges[i].service == service &&
+		    bb_bridges[i].qmux_client == qmux_client) {
+			b = &bb_bridges[i];
+		}
+	}
+	for (unsigned i = 0; i < sizeof(bb_bridges) / sizeof(bb_bridges[0]) && b == NULL; i++) {
+		if (!bb_bridges[i].used) {
+			b = &bb_bridges[i];
+			b->client = client;
+			b->service = service;
+			b->qmux_client = qmux_client;
+			b->port = qrtr_open(bb_bridge_receive, NULL, b);
+			if (b->port == NULL) {
+				b = NULL;
+				break;
+			}
+			b->used = true;
+			tell("cell: bridge: service 0x%x client %u has QRTR port %u (to %u:%u)\n", service, qmux_client,
+			    b->port->number, node, port);
+		}
+	}
+	lck_mtx_unlock(&bb_bridge_lock);
+	return b == NULL ? ENOSPC : qrtr_send(b->port, node, port, message, length);
+}
+
+/* every port of that connection closed (CommCenter's transport closes): no callback for it after this returns */
+void redwood_bb_qmi_close(void *client);
+void
+redwood_bb_qmi_close(void *client)
+{
+	for (unsigned i = 0; i < sizeof(bb_bridges) / sizeof(bb_bridges[0]); i++) {
+		struct redwood_qrtr_port *port = NULL;
+
+		lck_mtx_lock(&bb_bridge_lock);
+		if (bb_bridges[i].used && bb_bridges[i].client == client) {
+			port = bb_bridges[i].port;
+			bb_bridges[i].used = false;
+		}
+		lck_mtx_unlock(&bb_bridge_lock);
+		if (port != NULL) {
+			qrtr_close(port);
+		}
+	}
 }
 
 static void
