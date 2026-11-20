@@ -3565,6 +3565,7 @@ run_kernel(int have_checkpoint, uint64_t checkpoint)
 	int torch_requested = 0;
 	/* "cam=5" there too: the phone's wide camera is iOS's (bsd/dev/redwood_camera.c) */
 	int camera_requested = 0;
+	int baseband_requested = 0;      /* r5q (Test 364): "bbnode=1", the device tree's "baseband" node */
 	/* "wlan_en=1" (read) or "=2" (drive high): the y2q's Wi-Fi enable through UEFI's pin driver (wlan_en_start) */
 #ifndef R5Q_XNU_TEST
 	int wlan_en_requested = 0;
@@ -3619,6 +3620,7 @@ run_kernel(int have_checkpoint, uint64_t checkpoint)
 		    (c[9] == 0 || c[9] == ' ');
 		torch_requested |= starts_with(c, "torch=") && (c == pi.cmdline || c[-1] == ' ') && c[6] >= '1' && c[6] <= '9';
 		camera_requested |= starts_with(c, "cam=5") && (c == pi.cmdline || c[-1] == ' ') && (c[5] == 0 || c[5] == ' ');
+		baseband_requested |= starts_with(c, "bbnode=1") && (c == pi.cmdline || c[-1] == ' ') && (c[8] == 0 || c[8] == ' ');
 		if (starts_with(c, "wlan_en=") && (c == pi.cmdline || c[-1] == ' ') && c[8] >= '1' && c[8] <= '2') {
 			wlan_en_requested = c[8] - '0';
 		}
@@ -4090,6 +4092,17 @@ run_kernel(int have_checkpoint, uint64_t checkpoint)
 	if (camera_requested) {
 		dt_begin(&w, "isp");
 		dt_prop_u32(&w, "camera-rear", 1);
+		dt_end(&w);
+	}
+	/*
+	 * r5q (Test 364) With bbnode=1, a "baseband" node: launchd picks CommCenter's cellular variant by it
+	 * (_LimitLoadToDeviceTree), and MobileGestalt reads IODeviceTree:/baseband for its baseband answers. Tests 357-358:
+	 * with the stubs (bbstub=1) iOS's AppleBasebandManager only ever polled the baseband's state, as for a device
+	 * without one. The radio type the iPhone X (iPhone10,3) has: Qualcomm's, "Mav17". No compatible a driver matches.
+	 */
+	if (baseband_requested) {
+		dt_begin(&w, "baseband");
+		dt_prop_str(&w, "compatible", "baseband,mav17");
 		dt_end(&w);
 	}
 	dt_begin(&w, "gic");

@@ -146,3 +146,19 @@ bytes). The log then shows what CommCenter asks, in order, before anything is ma
   device tree's `baseband` node (which launchd already uses to choose CommCenter's variant, and which our loader does
   not make) or MobileGestalt's baseband answers. That decides between continuing with stubs (an AppleBasebandPCIControl
   that reports a boot stage and a QMUX transport that answers) and a loader change (a `baseband` node).
+
+## Test 364 (loader `bbnode=1`: a "baseband" node in the device tree, compatible "baseband,mav17"; with the stubs)
+
+- MobileGestalt reads `IODeviceTree:/baseband` (libMobileGestalt, two places; property names behind CFString constants,
+  e.g. `baseband-board-snum` among its strings), and launchd picks CommCenter's variant by the node. The loader now
+  makes the node with `bbnode=1` (port/xnuloader/loader.c, beside the camera's `isp` node).
+- **Result: no change.** The same calls (CommCenter: AppleIPAppender 4/8/16x5/6/17/9/11, AppleBaseband 15/32/3/23/22;
+  abm-helper: AppleBaseband 3) and no AppleBasebandPCI* connection. The node's presence is not the gate either.
+- Next: who calls `TelephonyBasebandControllerGetBasebandState` and what it compares the answer with (the static way
+  to the value, or the condition, that makes AppleBasebandManager go on to boot).
+- `TelephonyBasebandControllerGetBasebandState` (libTelephonyBasebandDynamic +0x42ec) calls the library's generic
+  wrapper (+0xca0) with method code 26 ("get baseband state"; 42 is "get coredump ready status", 25 the one before it),
+  which the wrapper turns into the AppleBaseband selector seen on the wire (3). The value's meaning, and the condition
+  for booting, are in AppleBasebandManager's server (AppleBasebandManager.framework, started by
+  `AppleBasebandManagerStartServer`), the next thing to read; its client constants name the boot states but not
+  their numbers.

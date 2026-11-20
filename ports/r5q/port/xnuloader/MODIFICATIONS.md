@@ -11,3 +11,5 @@ allowlisted writes, boot-args, clock, peeks, screenshots, touch gestures), the P
 TrustZone (PAS) with rmtfs memory and the AOP, the S2MU106 charger set-up over QUP0 SE4 at every start, loading the
 Wi-Fi, audio and sensors DSPs (the sensors DSP held for the kernel to release), and the build-time test labels. The `build-*.sh` scripts here are new.
 - Test 289: a 4 MB block below 4 GB for the camera's image engine, passed to the kernel as `camdma_pa=`.
+- `loader.c` (Test 364): with `bbnode=1`, a "baseband" node in the device tree it builds (compatible
+  "baseband,mav17"), for iOS's telephony stack.
