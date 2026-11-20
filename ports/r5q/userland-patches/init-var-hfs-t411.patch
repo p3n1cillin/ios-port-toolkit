@@ -1,0 +1,208 @@
+--- a/src/init.c
++++ b/src/init.c
+@@ -836,6 +836,29 @@
+ 	return (ssize_t)got;
+ }
+ 
++/*
++ * /private/var on the phone's flash (var_hfs=1, kernel t410+ with ufs_var=1; wifi/STORAGE-PLAN.md): an HFS+
++ * volume on /dev/ufs_var, darwin from 16 GiB to its end (~100 GB), in place of the 1.6 GB memory filesystem.
++ * It keeps everything itself, so the skeleton only adds what is missing, and var_store's archive is loaded once,
++ * on the first boot that has the volume, to carry the memory filesystem's last state across.
++ */
++struct hfs_mount_args {
++	char *fspec;
++	unsigned int hfs_uid, hfs_gid;
++	unsigned short hfs_mask;
++	unsigned int hfs_encoding;
++	struct { int tz_minuteswest, tz_dsttime; } hfs_timezone;
++	int flags, journal_tbuffer_size, journal_flags, journal_disable;
++};
++#define VAR_SEEDED "/private/var/.redwood-var-seeded"
++static int var_on_flash;
++
++static void
++sync_volumes(void)
++{
++	(void)mini_syscall(36 /* SYS_sync */, 0, 0, 0, 0, 0, 0);
++}
++
+ static void
+ mount_writable(void)
+ {
+@@ -847,11 +870,31 @@
+ 	struct stat st;
+ 
+ 	printf("\n-- writable filesystem --\n");
+-	ok = mount("ramfs", "/private/var", 0, NULL) == 0;
++	{
++		const char *hfs = boot_arg("var_hfs");
++
++		if (hfs != NULL && strcmp(hfs, "1") == 0) {
++			struct hfs_mount_args a;
++
++			memset(&a, 0, sizeof(a));
++			a.fspec = (char *)"/dev/ufs_var";
++			a.hfs_uid = a.hfs_gid = 0xffffffffu;   /* VNOVAL: the volume's own owners */
++			a.hfs_mask = 0xffff;
++			a.hfs_encoding = 0xffffffffu;
++			var_on_flash = mount("hfs", "/private/var", 0, &a) == 0;
++			if (!var_on_flash) {
++				printf("  the flash volume (hfs on /dev/ufs_var): %s; a memory filesystem instead\n", strerror(errno));
++			}
++			check(var_on_flash, "mount the flash volume (hfs, /dev/ufs_var) on /private/var");
++		}
++	}
++	ok = var_on_flash || mount("ramfs", "/private/var", 0, NULL) == 0;
+ 	if (!ok) {
+ 		printf("  mount: %s\n", strerror(errno));
+ 	}
+-	check(ok, "mount a memory filesystem on /private/var");
++	if (!var_on_flash) {
++		check(ok, "mount a memory filesystem on /private/var");
++	}
+ 
+ 	/* the directories of the data volume, as listed in the template that ships with iOS (ios165/mkvarskel.py) */
+ 	read_whole(in_image("/etc/var.skel"), skeleton, sizeof(skeleton));
+@@ -866,7 +909,16 @@
+ 		if (count == 5 && f[0][0] == 'd') {
+ 			int mode = (int)parse_number(f[1], 8);
+ 
+-			ok = mkdir(f[4], mode) == 0 && chmod(f[4], mode) == 0 &&
++			/* (on the flash volume a directory of an earlier boot is kept as it is: iOS may have changed it) */
++			if (var_on_flash && mkdir(f[4], mode) != 0 && errno == 17 /* EEXIST */) {
++				made++;
++				if (!end) {
++					break;
++				}
++				line = end + 1;
++				continue;
++			}
++			ok = (var_on_flash || mkdir(f[4], mode) == 0) && chmod(f[4], mode) == 0 &&
+ 			    chown(f[4], (int)parse_number(f[2], 10), (int)parse_number(f[3], 10)) == 0;
+ 			if (!ok) {
+ 				printf("  %s: %s\n", f[4], strerror(errno));
+@@ -876,7 +928,11 @@
+ 			symlink(f[1], f[2]);
+ 		} else if (count == 6 && f[0][0] == 'f') {
+ 			/* a file of ours to start with (build.sh: the var/ directory): mode, owner, group, path, source in the image */
+-			if (!copy_file(in_image(f[5]), f[4], (int)parse_number(f[1], 8), (int)parse_number(f[2], 10),
++			struct stat had;
++
++			if (var_on_flash && lstat(f[4], &had) == 0) {
++				/* kept from an earlier boot, as iOS left it */
++			} else if (!copy_file(in_image(f[5]), f[4], (int)parse_number(f[1], 8), (int)parse_number(f[2], 10),
+ 			    (int)parse_number(f[3], 10))) {
+ 				printf("  %s: %s\n", f[4], strerror(errno));
+ 			}
+@@ -892,6 +948,11 @@
+ 	 * older system, to be converted by logd_helper; these are brand new.
+ 	 */
+ 	for (unsigned i = 0; ok && i < sizeof(markers) / sizeof(markers[0]); i++) {
++		struct stat had;
++
++		if (var_on_flash && stat(markers[i], &had) == 0) {
++			continue;
++		}
+ 		fd = open(markers[i], O_WRONLY | O_CREAT, 0644);
+ 		ok = fd >= 0 && chown(markers[i], 272, 272) == 0;
+ 		close(fd);
+@@ -920,7 +981,8 @@
+ 		 */
+ 		if (strcmp(jb, "/private/preboot/jb") == 0 && stat("/private/preboot/jb-rw", &st) == 0) {
+ 			if (mount("ramfs", "/private/preboot/jb-rw", 0, NULL) == 0 &&
+-			    symlink("/private/preboot/jb-rw/procursus", "/private/var/jb") == 0) {
++			    (symlink("/private/preboot/jb-rw/procursus", "/private/var/jb") == 0 ||
++			    (var_on_flash && errno == 17 /* the link of an earlier boot, on the flash volume */))) {
+ 				to = "/private/preboot/jb-rw/procursus";
+ 			} else {
+ 				printf("  the prefix on /private/preboot/jb-rw: %s\n", strerror(errno));
+@@ -1002,7 +1064,17 @@
+ 	if (wanted == NULL || strcmp(wanted, "1") != 0) {
+ 		return;
+ 	}
+-	printf("\n-- the data volume of the last boot --\n");
++	if (var_on_flash) {
++		struct stat had;
++
++		if (stat(VAR_SEEDED, &had) == 0) {
++			printf("\n-- the data volume of the last boot: the flash volume keeps it itself --\n");
++			return;
++		}
++		printf("\n-- the data volume of the last boot: var_store's archive, once, onto the new flash volume --\n");
++	} else {
++		printf("\n-- the data volume of the last boot --\n");
++	}
+ 	argv[0] = (char *)in_image("/bin/var_store");
+ 	argv[1] = (char *)"load";
+ 	argv[2] = NULL;
+@@ -1014,6 +1086,13 @@
+ 	}
+ 	if (pid < 0 || wait4(pid, &status, 0, NULL) != pid || !WIFEXITED(status)) {
+ 		printf("  var_store did not run\n");
++	} else if (var_on_flash) {
++		int fd = open(VAR_SEEDED, O_WRONLY | O_CREAT, 0644);
++
++		if (fd >= 0) {
++			close(fd);
++		}
++		sync_volumes();
+ 	}
+ }
+ 
+@@ -1039,6 +1118,44 @@
+ 	return n < 0 ? -1 : count;
+ }
+ 
++/*
++ * A directory and everything in it removed (on the flash volume /private/var outlives the boot, so what an
++ * earlier boot's checks left in /tmp/t is still there, and the checks expect to make it new).
++ */
++static void
++remove_tree(const char *dir, int depth)
++{
++	static char buf[8][4096];
++	char *b = buf[depth < 8 ? depth : 7];
++	off_t position = 0;
++	ssize_t n;
++	int fd = depth < 8 ? open(dir, O_RDONLY | O_DIRECTORY, 0) : -1;
++
++	if (fd >= 0) {
++		while ((n = getdirentries(fd, b, 4096, &position)) > 0) {
++			for (ssize_t at = 0; at < n; at += ((struct dirent *)(b + at))->d_reclen) {
++				const char *name = ((struct dirent *)(b + at))->d_name;
++				char full[1024];
++				struct stat st;
++
++				if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0 || strlen(dir) + strlen(name) + 2 > sizeof(full)) {
++					continue;
++				}
++				strcpy(full, dir);
++				strcpy(full + strlen(full), "/");
++				strcpy(full + strlen(full), name);
++				if (lstat(full, &st) == 0 && (st.st_mode & S_IFMT) == S_IFDIR) {
++					remove_tree(full, depth + 1);
++				} else {
++					unlink(full);
++				}
++			}
++		}
++		close(fd);
++	}
++	rmdir(dir);
++}
++
+ static void
+ test_writable(void)
+ {
+@@ -1052,6 +1169,10 @@
+ 	int fd, fd2, good, s;
+ 	ssize_t n;
+ 
++	if (var_on_flash) {
++		remove_tree("/tmp/t", 0);
++		remove_tree("/tmp/t", 0);     /* (a listing that is being emptied can skip names: twice) */
++	}
+ 	if (mkdir("/tmp/t", 0755) != 0) {
+ 		return;         /* no writable filesystem in this configuration */
+ 	}

@@ -1,0 +1,59 @@
+--- a/src/camera_isp.c
++++ b/src/camera_isp.c
+@@ -221,12 +221,36 @@
+ 	double target = 0.15 * WHITE, mean = s->mean[1] * isp->digital > 0.5 ? s->mean[1] * isp->digital : 0.5;
+ 	double bright = s->bright * isp->digital;
+ 	uint32_t fast = f->frame_lines_min - f->margin, longest = isp->max_frame_lines ? isp->max_frame_lines : 2 * f->frame_lines_min;
++
++	/*
++	 * (r5q, Test 413) Exposure time is free up to the frame the sensor really runs: the kernel keeps the r5q's sensors
++	 * at ~30 frames a second (frames of at least 3268 of iOS's lines) whatever the mode's shortest frame says (817
++	 * lines, 120 a second). Gain went to 16x at 7.8 ms while the frame was 33 ms long: the back camera's preview indoors
++	 * was all noise. The time first, up to the frame as it runs; then the gain.
++	 */
++	if (f->frame_lines > f->frame_lines_min && f->frame_lines - f->margin > fast) {
++		fast = f->frame_lines - f->margin;
++		longest = longest > f->frame_lines ? longest : f->frame_lines;
++	}
+ 	uint32_t lines, gain, frame_lines = 0;
+ 	double digital = 1;
+ 
++	/*
++	 * (r5q, Test 413) And two frames more once it is: the IMX586's first frame after a change is often black (its
++	 * level at the black level, whatever the exposure) -- measured, it sent the exposure up fourfold, the next frames
++	 * were too bright, it came down, the next first frame was black again: the preview pumped between black and
++	 * white and never settled.
++	 */
++	static uint32_t settle;
++
+ 	if (isp->asked && (f->exposure_lines != isp->asked_lines || f->gain != isp->asked_gain)) {
++		settle = 2;
+ 		return false;                   /* (the last change not in the frames yet) */
+ 	}
++	if (settle > 0) {
++		settle--;
++		return false;
++	}
+ 	/* (the measured levels are the sensor's: digital gain is applied to the picture only) */
+ 	ratio = target / mean;
+ 	if (bright * ratio > 0.9 * WHITE && bright > 0) {
+@@ -237,9 +261,16 @@
+ 		return false;
+ 	}
+ 	want = now * pow(ratio, 0.7);
+-	if (want <= fast) {
+-		lines = want < 4 ? 4 : (uint32_t)want;
+-		gain = f->gain_unity;
++	/*
++	 * (r5q, Test 413) Never exactly 1x: the IMX586 (the r5q's back camera) gives a frame of nothing but its black level
++	 * at analog gain code 0, while 1.4x is a normal picture -- at 1x the exposure saw black, jumped up, overshot and came
++	 * back, for ever. 1.25x at the least; the time takes the rest.
++	 */
++	double floor_gain = 1.25;
++
++	if (want <= fast * floor_gain) {
++		lines = want / floor_gain < 4 ? 4 : (uint32_t)(want / floor_gain);
++		gain = (uint32_t)(f->gain_unity * floor_gain);
+ 	} else if (want <= (double)fast * 16) {
+ 		lines = fast;
+ 		gain = (uint32_t)(want / fast * f->gain_unity);

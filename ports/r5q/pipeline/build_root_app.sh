@@ -100,6 +100,12 @@ if [ -f $U/init ] && [ -f $U/var_store ]; then
 	REMAKE=1
 	echo "build_root_app: init and var_store from source (port/build/userland)"
 fi
+if [ -f $U/libredwood-media.dylib ]; then
+	cp $U/libredwood-media.dylib root/lib/libredwood-media.dylib     # (Test 413) the camera's ISP from source
+	chmod 755 root/lib/libredwood-media.dylib
+	REMAKE=1
+	echo "build_root_app: libredwood-media.dylib from source (port/build/userland)"
+fi
 # (Test 400) the Metal driver into the built tree, then the image made again (build.sh made root/ and root.apfs)
 M=$R5Q_PORT/port/build/metal
 if [ -f $M/libredwoodmetal.dylib ] && [ -f $M/libredwoodair.dylib ] && [ -f $M/RedwoodMetal ] && [ -f $M/RedwoodMetal-Info.plist ]; then

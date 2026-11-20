@@ -8,13 +8,13 @@ scripts are what has been used since. They were kept outside the tree until Test
 | Kernel | `wsl -e bash -lc "cd /tmp && python3 -I $R/build_xnu_linux.py $R $R/port/build/xnu-r5q-tN.macho"` (R = this port from WSL) | `port/build/xnu-r5q-tN.macho` (+ `.build.log`, `.receipt.json`) |
 | Root volume | `wsl -e bash -c "bash $R/pipeline/build_root_app.sh N"` | `port/build/testN-root.apfs.new`: the donor userland's boot volume with our injected libraries (`wifi/inject_app.c`, `wifi/inject_bbd.c`), r5qd, the launchd jobs |
 | Test image | `cp port/xnuloader/build-testA.sh port/xnuloader/build-testB.sh; bash pipeline/mktest.sh A B xnu-r5q-tK.macho testX-root.apfs.new "label"` | `pipeline/gen/genB.py` from `genA.py`, then the loader, shim and the 64 MiB `port/build/r5q-install-boot-B.img` |
-| Run | `python phone.py cycle port/build/r5q-install-boot-B.img SECS [boot-argsâ€¦]` | flash, restart, follow the log into `port/build/cycles/` |
+| Run | `python phone.py cycle port/build/r5q-install-boot-B.img SECS [boot-argsÃ¢â‚¬Â¦]` | flash, restart, follow the log into `port/build/cycles/` |
 | Live changes | `python wifi/r5qd_client.py reload LIB PROGRAM` / `put` / `kill` / `run` | no reboot (injected libraries, /var files, test tools) |
 
 Notes:
 
 - Do **not** `export MSYS_NO_PATHCONV=1` for `mktest.sh`; do set it for `phone.py sh` and `r5qd_client.py`.
-- `phone.py cycle â€¦ ARGS`: plain `key=val` ARGS **replace** the stored boot-args. Use `+key=val`, `-key` or `std`
+- `phone.py cycle Ã¢â‚¬Â¦ ARGS`: plain `key=val` ARGS **replace** the stored boot-args. Use `+key=val`, `-key` or `std`
   for changes to the standard set in `phone-args.txt` (below).
 - Kernel builds take about 10 minutes. Run them in the background.
 - Every test's purpose and result goes into `wifi/WIFI-PLAN.md` as it is run.
@@ -24,12 +24,24 @@ Notes:
 | Command | Does |
 | --- | --- |
 | `phone.py cycle IMG SECS +key=val -key` | boot-args as **changes to the standard set** in `phone-args.txt` (`std` = the standard set as is). No more retyping the whole set; a plain `key=val` list still replaces it as before |
-| `phone.py cycle â€¦` (any) | if the run **ends the system**, says so with the 15 lines before it |
+| `phone.py cycle Ã¢â‚¬Â¦` (any) | if the run **ends the system**, says so with the 15 lines before it |
 | `phone.py rescue` | back to a running iOS from anything: a stuck USB link ("no link") is cleared by restarting the phone from iOS over Wi-Fi (`r5q_reboot`); then the listening window, where the **log slots are saved** (the crash's record, before a new run overwrites it), then iOS with the standard boot-args |
 | `bash pipeline/build_phone_tools.sh` (WSL) then `phone.py tools` | every on-phone tool built into `port/build/phone-tools/` and put into `/var/r5q/bin` in one go (after a crash `/var` may not have kept them) |
-| `bash pipeline/test.sh B "label" [+argsâ€¦]` | a whole test in one command: the kernel built (or `KERNEL=xnu-r5q-tNNN.macho` reused), the root (newest, or `ROOT=build`), the image from test B-1, the run (`FOLLOW=` seconds) |
+| `bash pipeline/test.sh B "label" [+argsÃ¢â‚¬Â¦]` | a whole test in one command: the kernel built (or `KERNEL=xnu-r5q-tNNN.macho` reused), the root (newest, or `ROOT=build`), the image from test B-1, the run (`FOLLOW=` seconds) |
 
 `phone-args.txt` is the standard boot-arg set. Change it when a feature's arg becomes part of every boot.
+
+## The standard image (2026-11-20, Test 413)
+
+`port/build/r5q-install-boot-standard.img` = r5q-install-boot-413.img: kernel t413, root test413, `phone-args.txt`
+unchanged. On top of Test 412:
+- **The kernel leak:** the camera's device mappings are kept and reused (`r5q_io_map_kept` in redwood_sec_ts.c).
+  Each session leaked ~1-2 MB of the I/O map, and a few dozen sessions in one run panicked in io_map. 47 sessions in
+  one run were fine.
+- **The library from source:** libredwood-media.dylib is built from source (`pipeline/build_init.sh`). Its
+  auto-exposure uses the whole ~33 ms frame before adding gain, never sits at gain code 0 (1x), and waits two frames
+  after each change (wifi/CAMERA-PLAN.md, "The back camera's exposure in the Camera app").
+- **Not yet seen in a lit room:** the room was dark by the time Test 413 ran. Before it:
 
 ## The standard image (2026-11-20, Test 412)
 
@@ -82,7 +94,7 @@ removed and test370's CommCenter job, then compared with test370 file by file; b
 library too. Before that, kernel t394 with root test370 (Test 394):
 `phone-args.txt` ends with `md_flash=90`. Ninety seconds after the flash driver is up, md0 (the 2.3 GB iOS system image
 the firmware copies into RAM) is checked against USERDATA and read from the flash from then on, and its RAM goes back to
-the system: about 27% â†’ 65% memory free (wifi/MEMORY-PLAN.md). `kern.redwood.md_flash` reads 1 once it has happened.
+the system: about 27% Ã¢â€ â€™ 65% memory free (wifi/MEMORY-PLAN.md). `kern.redwood.md_flash` reads 1 once it has happened.
 Kernel t394 also has `kern.redwood.wired` (`wiredq`). The set before: port/build/phone-args.before-t394.txt; the image
 before: port/build/r5q-install-boot-standard.before-t394.img (the Test 391 one below).
 

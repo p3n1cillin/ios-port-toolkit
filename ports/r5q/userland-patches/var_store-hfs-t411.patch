@@ -1,0 +1,52 @@
+--- a/src/var_store.c
++++ b/src/var_store.c
+@@ -1371,6 +1371,22 @@
+ 	mini_syscall(SYS_SIGRETURN, (long)context, style, token, 0, 0, 0);
+ }
+ 
++/*
++ * /private/var on the flash volume (init: var_hfs=1, an HFS+ volume on /dev/ufs_var) keeps itself: there is
++ * nothing to archive, and an archive of it would not fit a slot. At the end of a run the volume is synced instead,
++ * and the kernel is answered as for a save. statfs64(2) by hand: libmini has no statfs.
++ */
++static int
++var_is_on_flash(void)
++{
++	static unsigned char st[2168];
++
++	if (mini_syscall(345 /* SYS_statfs64 */, (long)"/private/var", (long)st, 0, 0, 0, 0) != 0) {
++		return 0;
++	}
++	return memcmp(st + 72, "hfs", 4) == 0;
++}
++
+ static int
+ watch(int seconds)
+ {
+@@ -1422,7 +1438,13 @@
+ 			if (terminated) {
+ 				printf("var_store: the system is shutting down: saving the data volume\n");
+ 			}
+-			ok = save_once();
++			if (var_is_on_flash()) {
++				(void)mini_syscall(36 /* SYS_sync */, 0, 0, 0, 0, 0, 0);
++				printf("var_store: /private/var is the flash volume: synced, nothing to archive\n");
++				ok = 1;
++			} else {
++				ok = save_once();
++			}
+ 			if (!ok) {
+ 				printf("var_store: this save came to nothing; the store keeps what it had\n");
+ 			}
+@@ -1520,7 +1542,10 @@
+ 		    strerror(errno));
+ 		return 1;
+ 	}
+-	if (strcmp(what, "save") == 0) {
++	if (strcmp(what, "save") == 0 && var_is_on_flash()) {
++		printf("var_store: /private/var is the flash volume: nothing to archive\n");
++		ok = 1;
++	} else if (strcmp(what, "save") == 0) {
+ 		ok = claim() && save();
+ 		release();
+ 	} else if (strcmp(what, "load") == 0) {

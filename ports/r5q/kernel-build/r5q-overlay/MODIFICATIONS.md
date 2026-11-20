@@ -105,4 +105,6 @@ table grew from 16 to 96).
   mapped with `buf_map()`.
 - `bsd/miscfs/apfs/apfs_vfsops.c` (the donor's file): the root volume reports its own size plus the size and free
   space of an HFS volume mounted at `/private/var`, as an APFS container shared by system and data would.
-
+- `bsd/dev/redwood_sec_ts.c` (Test 413): device mappings are kept and reused (`r5q_io_map_kept` in front of
+  `ml_io_map` / `ml_io_map_unmappable`). Each camera session had mapped the same ranges again and leaked the kernel's
+  I/O map.

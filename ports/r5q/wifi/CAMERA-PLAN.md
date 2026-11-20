@@ -39,7 +39,7 @@ candidate designs).
       `/dev/redwood-camera` serves mode 1, 4000x3000.
     - mediaserverd's injected capture device registered **two streams, back and front**, and the graph started
       them.
-    - **Camera.app opens with its full interface** (modes, shutter, 1×, switch camera) and the green in-use dot,
+    - **Camera.app opens with its full interface** (modes, shutter, 1Ã—, switch camera) and the green in-use dot,
       **but the preview is black.**
     - mediaserverd logs "no /dev/redwood-camera (Input/output error): no frames". **The open returns EIO even for
       root** (new tool `wifi/devread.c`: `/var/r5q/bin/devread PATH [BYTES] [r|rw]`). The node is major 20 and does
@@ -75,20 +75,20 @@ candidate designs).
   - #1 on GPIO94/95 (NORTH tile 0x03900000);
   - #2 on GPIO47/48 (EAST tile 0x03500000).
 
-  Pins and tiles come from the DT's `i2c-gpio` nodes and Linux pinctrl-sm8150.c. Register 0x00 and 0x02–0x2f are
+  Pins and tiles come from the DT's `i2c-gpio` nodes and Linux pinctrl-sm8150.c. Register 0x00 and 0x02â€“0x2f are
   read; 0x01 (STATUS / an interrupt latch) is skipped. The pins go back as found.
 - **Both chips answer: ID 0x02.** The same register map for both:
 
-  | Reg | #1 | #2 | Meaning (Samsung s2mpb03.h/.c: 0 ID, 1 STATUS, 2 CTRL, 3–9 LDO1–7_CTRL, 0xa–0xb slew) |
+  | Reg | #1 | #2 | Meaning (Samsung s2mpb03.h/.c: 0 ID, 1 STATUS, 2 CTRL, 3â€“9 LDO1â€“7_CTRL, 0xaâ€“0xb slew) |
   | --- | --- | --- | --- |
-  | 0x03–0x09 | 1c 20 2c 20 0e 28 28 | 1c 20 2c 20 0e 28 28 | LDO1–7: **bit 7 (enable) clear on every one: all off**; bits 5:0 the voltage |
+  | 0x03â€“0x09 | 1c 20 2c 20 0e 28 28 | 1c 20 2c 20 0e 28 28 | LDO1â€“7: **bit 7 (enable) clear on every one: all off**; bits 5:0 the voltage |
 
-  Voltage: LDO1, 2 and 4 = 0.7 V + n × 12.5 mV; LDO3 = 0.7 V + n × 25 mV; LDO5–7 = 1.8 V + n × 25 mV. For example,
+  Voltage: LDO1, 2 and 4 = 0.7 V + n Ã— 12.5 mV; LDO3 = 0.7 V + n Ã— 25 mV; LDO5â€“7 = 1.8 V + n Ã— 25 mV. For example,
   LDO3 0x2c gives 1.8 V. These are the reset values, not the DT's sensor voltages.
 - Done in this test: the regulators are reachable and readable from our kernel, and their register map is known
   (Samsung's open-source driver, e.g. github.com/ianmacd/gts6lwifi drivers/regulator/s2mpb03.c).
 - **Next (writes, the first of the camera port):**
-  1. set and enable one sensor's LDOs as the DT gives them (AVDD 2.8 V, DVDD about 1.05–1.1 V, IOVDD 1.8 V);
+  1. set and enable one sensor's LDOs as the DT gives them (AVDD 2.8 V, DVDD about 1.05â€“1.1 V, IOVDD 1.8 V);
   2. its MCLK (camcc) and its reset GPIO;
   3. read its chip ID over CCI;
   4. power everything down again.
@@ -211,7 +211,7 @@ candidate designs).
     and CSID 400, camnoc_axi, slow_ahb;
   - GCC hf/sf AXI branches;
   - **the titan power domain is 0xc1bc**: the donor's 0xc194 is a clock register here and must not be written;
-  - CSI-PHY v1.1 at 0xac65000 + 0x1000·n, with its own 4-lane D-PHY tables (settle 14 at lane +0x08);
+  - CSI-PHY v1.1 at 0xac65000 + 0x1000Â·n, with its own 4-lane D-PHY tables (settle 14 at lane +0x08);
   - RPMh: MMCX and MX levels and `ldoc3` (1.2 V CSI-PHY supply), through the Wi-Fi driver's TCS helper (one owner
     of TCS 1).
 - **SMMU:** one SMR (0x86200840: stream 0x840, mask 0x620) with an S2CR copied from a boot context bank whose
@@ -493,7 +493,7 @@ candidate designs).
   switch to 3 Mbit/s (a serial engine's GCC clock change). A separate hazard, not the camera's (noted for later).
   The camera lines of finished runs are found again after a reset in the loader's ring (`rxlog` ->
   `loader_log_putc`; firmware-ring-now.bin): Test 304's 150 holding lines, intact.
-  - GPU temperatures 52-59 °C in every run, the battery full: not heat or power.
+  - GPU temperatures 52-59 Â°C in every run, the battery full: not heat or power.
 - **Where it stands:** the receive side alone runs 150 s (304). Full unpaced sessions of ~20 s run (294-296). The
   paced runs hung while the **memory stage** (camera NoC, GCC AXI, IFE-lite, the SMMU match) stayed up but idle
   for over a minute after only 3 frames, and iOS's long Camera-app session hung. So the trigger looks like the
@@ -661,7 +661,7 @@ candidate designs).
   hung.** The Wi-Fi log (1 s polls) ended at "step: RCGs" (90.486 s).
 - **The Wi-Fi log made streaming (2026-11-19):** `klog -f SECS` sends only what is new every 50 ms (~60 KB a run,
   r5qd relays output as it comes) and `phone.py wlog` restarts it at once, writing each chunk to the file as it
-  arrives: a hang loses ≤ ~50 ms.
+  arrives: a hang loses â‰¤ ~50 ms.
 - **Test 326 (the t325 kernel again, streamed log): the same place, exactly.** Session 3: CSI-PHY 2 configured,
   CSID resets, "CSID RX cfg 0x232103 0x41, RDI0 ... ctrl 0x1", **"[94.978812] step: camera NoC (SMMU lock taken)"**,
   then nothing: the camnoc RCG (0xc170) switch and the camnoc_axi branch (0xc18c). Test 279's first hang note said
@@ -855,8 +855,8 @@ candidate designs).
     `frontsensor_probe(7)`. That is power, ID, init + res3, the crop, IOP 160, CSI-PHY 3 / settle 28, the receive
     path, "on", then **the same `cam_session_frames` loop** as the rear camera (the battery's lock let go), "off",
     and everything down. The front camera keeps no pipeline across switches.
-  - iOS's exposure on the IMX616: lines × 919/729 (its line is ~7.29 µs against the S5K3L6's 9.19), frame lines ×
-    5160/3268, coarse time ≤ frame − 48, analog gain as Sony's code 1024 − 1024/gain.
+  - iOS's exposure on the IMX616: lines Ã— 919/729 (its line is ~7.29 Âµs against the S5K3L6's 9.19), frame lines Ã—
+    5160/3268, coarse time â‰¤ frame âˆ’ 48, analog gain as Sony's code 1024 âˆ’ 1024/gain.
   - Kernel soak without the owner: `cam_soak_alt=1` alternates short sessions front/rear, `cam_soak_front=1` makes
     the long one the front camera's; the soak reader asks for an exposure at frame 15 (both sensors).
 - **Test 340 result: THE FRONT CAMERA STREAMS THROUGH THE SESSION PATH, switching with the rear.** Six short sessions
@@ -900,11 +900,11 @@ candidate designs).
   S5K3L6), RGGB. The soak's `cam_soak_alt=2` turns through the three cameras; `cam_soak_front=2` makes the long session
   the main camera's. The IMX586's tuning (`com.samsung.tuned.sony_imx586.bin`, `--crop 0.243,0.2427,0.757,0.7573`:
   corner gains ~1.8x over the crop) installed as the back slot's `camera-s5khm2sd.isp`.
-- **Test 343 (kernel t343; the three cameras in turn): ALL THREE SENSORS SERVE SESSIONS.** Six short sessions front →
-  main → ultra-wide → front → main → ultra-wide, each "30 frames handed over, 0 misses"; each front or main request
+- **Test 343 (kernel t343; the three cameras in turn): ALL THREE SENSORS SERVE SESSIONS.** Six short sessions front â†’
+  main â†’ ultra-wide â†’ front â†’ main â†’ ultra-wide, each "30 frames handed over, 0 misses"; each front or main request
   after the ultra-wide: "the S5K3L6's pipeline goes down first"; exposure "taken" on all three. Then **20 s from the
   main camera: 600 frames, 465,600 packets, ECC 0, CRC 0, SMMU gfsr 0**, no IFE violation; iOS running.
-  - Middle-line means: front 20 (facing up, a dim room), ultra-wide 15 (≈ its black level: facing the desk),
+  - Middle-line means: front 20 (facing up, a dim room), ultra-wide 15 (â‰ˆ its black level: facing the desk),
     **main 0-4**: dark too, but below the 64 (16 of 255) black level the iOS side assumes. The IMX586's pedestal may
     differ: to be checked in a lit scene (the pattern was exact, so the data path is not the cause).
 - **Test 345 (kernel t345; `cammain=2`, the main camera facing the desk): THE IMX586'S BLACK LEVEL IS 0.** A 10-bit
@@ -915,7 +915,7 @@ candidate designs).
   shadows would be crushed.
 - **Test 350 (kernel t350; the three-camera soak): THE SONY SENSORS' WHOLE BINNED FRAMES.** iOS's sessions no longer
   get the 1028x772 crop of the IMX586 and the IMX616 but their modes' whole frames: **IMX586 res5 2000x1500** (crop
-  0,0, line length tripled to 16128 so a 2500-byte line, ~4.9 µs on four lanes at ~1 Gb/s, fits its line time;
+  0,0, line length tripled to 16128 so a 2500-byte line, ~4.9 Âµs on four lanes at ~1 Gb/s, fits its line time;
   frame length 3571, ~30 a second at 24 MHz) and **IMX616 res3 1632x1224** (its own crop 4,0, frame 5160): the
   sensors' full field of view and 2.5-3.7x the pixels for photographs. (`struct sony_cam` has the frame's
   width/height; `imx586_full` / `imx616_full` for level 7; `cam_full=0` keeps the crops.)
@@ -927,7 +927,7 @@ candidate designs).
     line ratio now 919/1167).
   - mediaserverd needs no change: it offers iOS fixed formats (4032x3024 ...), renders them from any raw frame, and
     sizes its read from each frame's header.
-  - **Result:** six short sessions front (1632x1224) → main (2000x1500) → ultra-wide (1028x772), twice, each "30
+  - **Result:** six short sessions front (1632x1224) â†’ main (2000x1500) â†’ ultra-wide (1028x772), twice, each "30
     frames handed over, 0 misses"; then **20 s from the main camera: 600 frames, 902,400 packets (1,504 a frame),
     ECC 0, CRC 0**, WM0 at one address (0xd8200000), SMMU gfsr 0; iOS running.
 - **Test 351 (the t350 kernel; the standard image): iOS gets the whole frames.** mediaserverd: "frames of 2000x1500
@@ -955,17 +955,17 @@ candidate designs).
     data itself was wrong.
     - A **dark frame** (4 lines, 1x) of the IMX586's full 2000x1500 mode (Test 350's: line length tripled to 16128)
       was not black: a level ramping from ~3 at the top to ~137 at the bottom, column stripes, 45% of pixels at 0.
-      It scaled with gain and not with exposure, and R≈G≈B.
-    - iOS is told black 0. With white balance R×2.1, B×1.8 that offset became the flat purple streaks.
+      It scaled with gain and not with exposure, and Râ‰ˆGâ‰ˆB.
+    - iOS is told black 0. With white balance RÃ—2.1, BÃ—1.8 that offset became the flat purple streaks.
     - The cropped mode (line length 10752) gives a dark frame of mean 1.2, flat.
   - **Test 397:** boot-arg `cam586_ll=N` sets the full frame's line length, with the frame length and iOS's line ratio
     scaled. At **10752** (frame 5356 lines, ratio 919/778, the same ~30 a second) the dark frame is mean 3, flat.
-    The link stays clean: 1504 packets a frame, ECC 0, CRC 0. The top ~16 rows keep a small fading offset (~50→40).
+    The link stays clean: 1504 packets a frame, ECC 0, CRC 0. The top ~16 rows keep a small fading offset (~50â†’40).
   - **Test 398:** 10752 is the default (imx586_full). Standard image = r5q-install-boot-398.img (kernel t398, root
     test395). IMG_0007.HEIC saved; mediaserverd 102 MB.
   - **Test 396 (kept):** the Sony mode tables set `0x0220 = 0x62` and a short exposure of their own (`0x0224 = 500`;
     the IMX616 also a short gain, `0x0216`). The kernel now writes both exposures and both gains in one group hold.
-    Measured afterwards: the exposure response (4 → 3000 lines) was about the same as before, so this was not the
+    Measured afterwards: the exposure response (4 â†’ 3000 lines) was about the same as before, so this was not the
     cause. It keeps the two in step.
   - Still for the owner: a lit scene, for colour (white balance and tuning). In a dark room iOS's auto-exposure sits
     at ~7 ms and 3-5x gain, and the preview is noise.
@@ -1088,3 +1088,74 @@ candidate designs).
     library.
   - **Next:** a lit, still scene (daylight, or the lamp test), with both libraries at a fixed exposure
     (`camgrab =`). The standard injection list was put back afterwards, and the new library is not in the root.
+- **Lit-room check (owner stood the phone up, back camera facing the lit room; same evening):**
+  - **The Camera app's back preview is still only noise**, with no scene. The front camera shows a clean, dim scene.
+    The back preview uses the wide sensor (1). iOS's exposure sat at 777 lines with gain 138/32 (4.3x), not at the
+    maximum.
+  - **Raw frames (camgrab, sensor 1):**
+    - At 4x / 1600 lines and 8x / 3000 lines the sensor does see the room: a lit doorway or window with a dark frame
+      between two bright panels. The picture is very soft (out of focus) and has strong vertical column stripes.
+      The top ~20% of rows are black.
+    - At the app's 4.3x / 777 lines the scene is only ~10 counts above black, in the dead zone, so the preview is
+      noise.
+    - (camgrab's GAIN is in 1/32 units: `4` asks for 1/8x and gives an all-64 frame.)
+  - **The exposure is the problem, not the sensor.** Something stops the exposure well short; the ISP's `isp_ae` and
+    what iOS asks for are next to look at. The header's numbers are in iOS's units: `line_ns` 10199 ns with iOS's
+    frame of 825 lines. The kernel scales them by 919/462 to sensor lines of 4.63 us, so 777 iOS lines is ~7 ms, and
+    that conversion is consistent. 777 is iOS's shortest frame less the margin (`fast` in `isp_ae`), so the exposure
+    sits in the "raise the gain up to 16x" step and stopped at 4.3x. Why it stops with the scene ~10 counts above
+    black (`isp_ae` target: 15% of white) is the open question.
+  - **The column-gain correction, offline on these frames** (`isp_columns_learn`'s method; learnt on rows y%8==0,
+    scored on y%8==4): the column pattern went 10.2% -> 11.4% on one frame and 9.4% -> 7.8% on the other.
+    - The pattern is only partly fixed. Correlation of the per-column pattern is 0.59 between row sets of one
+      frame, 0.47 between the two frames and 0.64 between the middle and bottom rows. Gain and offset models fit
+      alike.
+    - Learning it from the scene also takes in the scene's own vertical edges.
+    - **Not shipped.** The way to do it is a calibration from dark or flat frames, or the sensor's optical-black
+      rows, not the live picture.
+
+## The back camera's exposure in the Camera app (owner, lit room; Test 413)
+
+- **Watching it:**
+  - The kernel logs iOS's requests ("camera sensor: exposure from iOS: ...", `phone.py wlog`).
+  - A debug build of libredwood-media also wrote its own status lines (green above black, gain, lux) to
+    /private/var/tmp/camsay.log. mediaserverd's stderr goes nowhere.
+  - `camera_test raw 150 sensor 1` (built for the phone) runs the same ISP loop outside the app.
+- **Finding 1, the strategy wasted the frame time.** `isp_ae` raised the gain to 16x at the mode's shortest frame:
+  817 of iOS's lines, "120 a second", so ~7.8 ms of exposure. But the kernel runs the r5q's sensors at frames of at
+  least 3268 lines (~33 ms) anyway. In a lit room it settled at 16x and 13 ms: the picture showed the room but was
+  mostly noise.
+  - **Fix:** the time first, up to the frame as it really runs (`f->frame_lines - margin`), then the gain. It now
+    exposes 32.9 ms.
+- **Finding 2, gain code 0.** At exactly 1x (Sony gain code 0) the IMX586 gave frames at its black level, "green 0
+  above black", while 1.4x was normal.
+  - **Fix:** a gain floor of 1.25x in `isp_ae`; the time takes the rest.
+- **Finding 3, the first frame after a change.** The first frame that reports a new exposure is often black at any
+  gain (3.2x black, 2.9x bright). Measured, it sent the exposure up fourfold and then back down again: the preview
+  pumped between black and white.
+  - **Fix:** `isp_ae` waits two more frames after the change shows before it measures.
+- **Finding 4, a kernel leak and panic.** During this work: "kmem_alloc(..., 557056, ...): failed with 3" in io_map
+  ← mainsensor_probe ← redwood_r5q_cam_run ← serve_ios.
+  - **Cause:** every camera session mapped the same TLMM, camera-clock, CSI and IFE ranges again (mainsensor_probe
+    alone ~1.1 MB) and never unmapped them. After a few dozen sessions in one run the I/O submap was full.
+  - **Fix (kernel t413):** in `redwood_sec_ts.c`, `ml_io_map` / `ml_io_map_unmappable` go through
+    `r5q_io_map_kept`, a table that hands back the mapping a range already has.
+- **Finding 5, the wrong colour tuning.** The library loads the **S5KHM2SD's** colour tuning
+  (`/redwood/fw/camera-s5khm2sd.isp`, the donor phone's sensor) for our IMX586 in the wide slot. Its colour matrices
+  and lens shading are not this sensor's; a likely part of the pink cast. Not fixed yet.
+- **Build change:** `pipeline/build_init.sh` now also builds libredwood-media.dylib from source, and build_root_app.sh
+  puts it into the root. Until now the root carried the donor's prebuilt one from 2026-11-15.
+- **The column-gain experiment:** taken out of the source. A copy of that version stays in WSL at
+  `/var/tmp/*.colgain`.
+- **Test 413 (kernel t413, root test413, the new libredwood-media from source): booted.**
+  - **In the Camera app:** the exposure went to 3228 of iOS's lines (29.7 ms) at 16x and stayed. The room was dark
+    by then: raw frames at 4x, 8x and 16x showed no scene, only the sensor's top-to-bottom ramp and column stripes,
+    grey (R = G = B). Their level follows the gain, not the exposure (16x: 149 / 155 / 169 for 3228 / 1600 / 777
+    lines). The highest exposure is the right answer to that.
+  - **Leak check:** 40 camgrab sessions one after another plus 7 earlier ones in the same run, no panic. The old
+    kernel panicked after a few dozen.
+  - **Still to see:** the preview in a lit room with the new exposure (daylight).
+  - **Next:**
+    - the IMX586's own colour tuning, in place of the S5KHM2SD's;
+    - the high-gain ramp and stripes (a dark-frame calibration);
+    - the soft focus (no autofocus moves this lens yet?).

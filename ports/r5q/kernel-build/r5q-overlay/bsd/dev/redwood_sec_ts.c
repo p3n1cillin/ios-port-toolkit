@@ -59,7 +59,55 @@
 #include <sys/systm.h>
 
 extern vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
+extern vm_offset_t ml_io_map_unmappable(vm_offset_t phys_addr, vm_size_t size, unsigned int flags);
 extern kern_return_t thread_terminate(thread_t thread);
+
+/*
+ * (Test 413) Every mapping of a device range made here is kept and given again: the camera's sessions mapped the same
+ * TLMM, camera clock, CSI and IFE ranges anew each time (mainsensor_probe alone ~1.1 MB) and never gave them back, and
+ * after a few dozen sessions in one run the kernel's I/O map was full -- "kmem_alloc(..., 557056, ...): failed with 3"
+ * in io_map from mainsensor_probe, a panic. Nothing here ever unmaps, so a range asked for again (same address, size
+ * and cache mode) gets the mapping it already has.
+ */
+static LCK_GRP_DECLARE(r5q_iomap_group, "r5q-iomap");
+static LCK_MTX_DECLARE(r5q_iomap_lock, &r5q_iomap_group);
+static struct {
+	vm_offset_t pa, va;
+	vm_size_t size;
+	unsigned int flags;
+	bool unmappable;
+} r5q_iomaps[128];
+static unsigned int r5q_iomaps_used;
+
+static vm_offset_t
+r5q_io_map_kept(vm_offset_t pa, vm_size_t size, unsigned int flags, bool unmappable)
+{
+	vm_offset_t va = 0;
+
+	lck_mtx_lock(&r5q_iomap_lock);
+	for (unsigned int i = 0; i < r5q_iomaps_used; i++) {
+		if (r5q_iomaps[i].pa == pa && r5q_iomaps[i].size == size && r5q_iomaps[i].flags == flags &&
+		    r5q_iomaps[i].unmappable == unmappable) {
+			va = r5q_iomaps[i].va;
+			break;
+		}
+	}
+	if (va == 0) {
+		va = unmappable ? ml_io_map_unmappable(pa, size, flags) : ml_io_map(pa, size);
+		if (va != 0 && r5q_iomaps_used < sizeof(r5q_iomaps) / sizeof(r5q_iomaps[0])) {
+			r5q_iomaps[r5q_iomaps_used].pa = pa;
+			r5q_iomaps[r5q_iomaps_used].va = va;
+			r5q_iomaps[r5q_iomaps_used].size = size;
+			r5q_iomaps[r5q_iomaps_used].flags = flags;
+			r5q_iomaps[r5q_iomaps_used].unmappable = unmappable;
+			r5q_iomaps_used++;
+		}
+	}
+	lck_mtx_unlock(&r5q_iomap_lock);
+	return va;
+}
+#define ml_io_map(pa, size)                     r5q_io_map_kept((vm_offset_t)(pa), (vm_size_t)(size), 0, false)
+#define ml_io_map_unmappable(pa, size, flags)   r5q_io_map_kept((vm_offset_t)(pa), (vm_size_t)(size), (flags), true)
 
 /*
  * Every line goes to the loader's log directly as well (as in redwood_buttons.c): without -v the
@@ -1982,7 +2030,7 @@ cam_rx_up(void)
  * the first frame done; the match is taken away only after it is off and a frame time has passed.
  */
 #include <vm/memory_types.h>             /* (Test 288) VM_WIMG_WCOMB */
-extern vm_offset_t ml_io_map_unmappable(vm_offset_t phys_addr, vm_size_t size, unsigned int flags);
+/* (ml_io_map_unmappable: declared at the top, kept by r5q_io_map_kept) */
 
 static vm_offset_t rx_ife, rx_smmu;
 static volatile uint8_t *rx_buf;
