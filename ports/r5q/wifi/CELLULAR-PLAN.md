@@ -246,3 +246,58 @@ bytes). The log then shows what CommCenter asks, in order, before anything is ma
   phone, whose modem is already running. Its switch is a flag taken from the `abm::Overrides` CommCenter passes to
   `abm::InitServer`. Next: read how CommCenter fills those overrides (a preference or boot-arg). Then the stubs'
   QMUX channels have to answer the QMI that follows, carried to the modem's QRTR services.
+
+## Test 371 (kernel t371, `bbfake=1`): CommCenter's override bool -- not the switch
+
+- CommCenter (0x100be56a0..0x100be5744) builds `abm::Overrides` on its stack: the constructor, then the AWD server
+  connection (a shared_ptr) at +0, and just before `abm::InitServer(getprogname(), overrides)` it clears the bool at
+  +0x10 (`strb wzr, [sp, #0x28]`). A kernel read-time patch (bsd/miscfs/apfs/apfs_vnops.c, gate bit 0 of boot-arg
+  `bbfake`) made it `strb w30` (a non-zero byte), with page 3045's SHA-256 in CommCenter's CodeDirectory (4 KB pages,
+  slot at file 0x1777364). CommCenter kept running and signed (its stubs log as before).
+- **Result: no change.** BBUpdater still opened AppleBasebandPCIInterface and read registers 4, 3, 0 (117 stub lines,
+  the same pattern as Test 370). So that bool is something else (and a raw byte like 0xbc would read as false where
+  code tests bit 0 anyway).
+- **Where the fake boot is decided** (desk work, 20F66 shared cache): libBasebandManager's bootup (+0x7fa2c; refuses
+  when the manager's state at +408 is 2..8, "Bootup request rejected as we are already in %s state") calls, at
+  +0x7fb2c, libBasebandCapabilities+0x94a8 -- a dispatch_once'd function that simply returns **1** on every product
+  -- and only when that is 0 jumps (+0x7fb3c `cbz w0`) to "#I Faking bootup" and "Wait for Ready on Fake Boot" (a
+  task waited on with no time limit). So an iPhone never fakes its boot; the switch is in code, not a preference.
+
+## Test 372 (kernel t372, `bbfake=3`): a wrong capability (a sum slipped)
+
+- Adding the `bl` offset at +0x7fb2c by hand gave 0x1bc5fda70 instead of 0x1bc5fd670, and so the wrong function:
+  libBasebandCapabilities+0x1f00 (true for radio types 1..13 with bit (type-1) of 0xf7; true for Mav17). Its store
+  was made `strb wzr` (subcache .13, page 4949). New `r5qfs peek PATH OFF LEN` showed both patches live on the phone
+  (CommCenter `fe a3 00 39`, the cache `7f 26 32 39`), and still BBUpdater ran 16 times and the stats said
+  `modem boot up failure [output did not return done]`. Recomputed (python, not by hand): the right target is +0x94a8.
+- Lesson (toolkit): compute branch targets with a script, never by hand; and verify a read-time patch with
+  `r5qfs peek` before reading the result.
+
+## Test 373 (kernel t373, `bbfake=1`): the bootup's own branch
+
+- Both earlier patches removed. libBasebandManager +0x7fb3c (`cbz w0, +0xa4`, subcache .17 file 0x15b1b3c) made
+  `b +0xa4`, with page 1388's hash (file 0x5cc2e61): this one decision, not the shared capability.
+- **Test 373 result: THE FAKE BOOT IS TAKEN, AND THE BASEBAND MANAGER SAYS IT BOOTED.** `r5qfs peek` showed the
+  branch live (`29 00 00 14`); no BBUpdater, no register reads, no new "modem boot up failure" in the stats. Its own
+  log (read on the PC, see below): `boot state changing Not Booted -> Booting`, `#I Faking bootup`, `#I Recovery
+  detected`, `#I Baseband bootup succeeded`, `boot state changing Booting -> Booted`, then `State change: kStarting
+  -> kStarted`. CommCenter then makes its QMI clients over the manager's QMux: NAS (0x3), UIM (0xb), DMS (0x2), VS
+  (0x9), WDS (0x1), WMS (0x5), CAT (0xa) and Apple's own BSP (0xe2), AUDIO (0xe1), COEX (0x22), MFSE (0x2c), P2P
+  (0xe8), ELQM (0xe7) -- every one `fQMuxState=kStopped`. The manager's router made channels `MAV_ROUTER_QMI_0` and
+  `MAV_ROUTER_QMI_1` and stays `IPC state kOffline -> kDisengaged`.
+- **What is missing next:** right after "Booted", `Could not create PCI event listener!` (boot.mod). That listener is
+  libPCITransport's: an `IOABPControlClass` (libIOABP: `AppleBasebandPCIControl`, IOGeneralInterest notifications)
+  and a `PDPListener` matched as **`AppleBasebandPCIPDPManagerBase`** (the packet-data manager) -- which the port
+  did not publish. (Newer phones use the AppleConvergedIPC* classes instead.)
+- **Seeing the manager's own lines -- solved.** Its `#I` lines are info-level and never reach the console. Instead
+  the phone's unified log is read on the PC: `wifi/r5q_pull.py` copies `/private/var/db/diagnostics` and
+  `/private/var/db/uuidtext` over r5qd (new `r5qfs dump PATH OFF LEN`, 60000 bytes a request, resumes, ~1 MB/s),
+  and the new `toolkit/tools/ios/tracev3.py` reads tracev3 (LZ4 chunksets, catalog, firehose entries, format strings
+  from uuidtext and the shared cache's 'hcsd' file, oversize entries). Written from the file layout itself; it
+  renders the kernel's and CommCenter's lines with their arguments (private ones as `<private>`). The pulled logs
+  stay local (port/build/oslog-NNN, never pushed).
+
+## Test 374 (kernel t374): the PDP manager stub
+
+- `AppleBasebandPCIPDPManagerBase` published beside the other stubs (RedwoodBaseband.cpp), so the PCI event listener
+  can be made.

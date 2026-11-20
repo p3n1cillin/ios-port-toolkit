@@ -13,6 +13,8 @@ All addresses are **unslid** VM addresses.
 | `dsc_sel.py CACHE IMAGE OFFSET COUNT` | disassemble an image's code, with each adrp+ldr/add annotated with the string or selector it reaches |
 | `dsc_dis.py CACHE ADDR N` / `dsc_words.py CACHE ADDR N` | N instructions / words at an address |
 | `dsc_callers.py CACHE IMAGE ADDR…` | every bl/b in an image to an address |
+| `dsc_target.py CACHE ADDR…` | where a bl/b really lands: through stub islands to the image and offset (never add branch offsets by hand) |
+| `tracev3.py LOGDIR [REGEX] [--pid N] [--sub S]` | the unified log (tracev3) read on the PC, info/debug lines included: pull `/private/var/db/diagnostics` and `/private/var/db/uuidtext` first (work/ios-r5q/wifi/r5q_pull.py) |
 | `dsc_where.py CACHE SLIDE ADDR…` | which image (and offset) a slid address from a crash log is in |
 | `dsc_fileoff.py CACHE ADDR` | which subcache file holds an address, at what offset, and the word there |
 | `dsc_cdpatch.py SUBCACHE OFFSET OLD NEW` | the CodeDirectory hash change that must go with changing that word (slot offset, old and new SHA-256) |

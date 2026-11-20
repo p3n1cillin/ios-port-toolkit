@@ -156,6 +156,12 @@ REDWOOD_BB_STUB(AppleBaseband);
 REDWOOD_BB_STUB(AppleIPAppender);
 REDWOOD_BB_STUB(AppleBasebandPCIControl);
 REDWOOD_BB_STUB(AppleBasebandPCIInterface);
+/*
+ * (Test 374) libPCITransport's PCI event listener (what libBasebandManager's boot.mod waits on after a boot, "Could not
+ * create PCI event listener!" without it) watches two services: AppleBasebandPCIControl (libIOABP's IOABPControlClass)
+ * and the packet-data manager, matched as AppleBasebandPCIPDPManagerBase (its PDPListener).
+ */
+REDWOOD_BB_STUB(AppleBasebandPCIPDPManagerBase);
 
 static bool
 publish(IOService * made, const char * name, const char * protocol)
@@ -200,6 +206,7 @@ RedwoodBasebandPublish(void)
 	(void) publish(OSTypeAlloc(AppleBaseband), "AppleBaseband", NULL);
 	(void) publish(OSTypeAlloc(AppleIPAppender), "AppleIPAppender", NULL);
 	(void) publish(OSTypeAlloc(AppleBasebandPCIControl), "AppleBasebandPCIControl", NULL);
+	(void) publish(OSTypeAlloc(AppleBasebandPCIPDPManagerBase), "AppleBasebandPCIPDPManagerBase", NULL);
 	for (unsigned i = 0; i < sizeof(channels) / sizeof(channels[0]); i++) {
 		(void) publish(OSTypeAlloc(AppleBasebandPCIInterface), "AppleBasebandPCIInterface", channels[i]);
 	}

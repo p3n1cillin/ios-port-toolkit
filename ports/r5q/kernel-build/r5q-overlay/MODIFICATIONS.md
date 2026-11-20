@@ -29,7 +29,9 @@ These files replace the donor's files of the same path in its `xnu/files/` tree 
 - `bsd/dev/redwood_buttons.c`: a read-only PMIC peek for diagnostics (`redwood_spmi_peek`).
 - `bsd/miscfs/apfs/apfs_vnops.c`: fixed changes to what a file reads, made as it is read, each only where the file's
   name, size and old bytes match (iOS's CoreMotion motion capabilities and compass factory in the dyld shared cache,
-  with the matching code-signature page hashes); see docs/SYSTEM-PATCHING.md.
+  with the matching code-signature page hashes); see docs/SYSTEM-PATCHING.md. Since Test 373 also, only with
+  boot-arg `bbfake=1`, the baseband manager's boot decision (libBasebandManager, subcache .17): its fake-boot path, so
+  it does not try to flash a modem that is already running.
 - `bsd/dev/redwood_wifi.c` (Tests 244-262, November 18-19): Bluetooth. The WCN3990 over a polled GENI UART, its
   firmware download, and its hand-over to iOS's bluetoothd: the kernel control `com.apple.uart.bluetooth`, an HCI
   filter, `/dev/uart.bluetooth`. See docs/BLUETOOTH.md.
@@ -74,4 +76,5 @@ insertion by program name, `kern.exec_inject`); here its setting holds 2048 byte
 New in this directory (not the donor's): `bsd/dev/redwood_wlfw_ath10k.h` and `redwood_wlfw_ath10k_ce.h`, generated
 from Linux's ath10k (ISC, see their headers); `bsd/dev/redwood_wpa.h` (WPA2's key handling for the kernel's
 supplicant); `iokit/Kernel/RedwoodBaseband.cpp` (Tests 355-358: listening stubs of the IOKit services iOS's
-telephony stack opens -- AppleBaseband, AppleIPAppender, AppleBasebandPCIControl, AppleBasebandPCIInterface).
+telephony stack opens -- AppleBaseband, AppleIPAppender, AppleBasebandPCIControl, AppleBasebandPCIInterface; and
+since Test 374 AppleBasebandPCIPDPManagerBase, which libPCITransport's PCI event listener watches).

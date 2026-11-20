@@ -7,6 +7,9 @@
  *   r5qfs rm PATH               one file (not a directory)
  *   r5qfs cat PATH              a file's bytes to standard output (2026-11-20: CommCenter's logs and state files)
  *   r5qfs cp FROM TO            a file copied, TO made 0644 (2026-11-20: a logging preference put in place)
+ *   r5qfs peek PATH OFF LEN     up to 256 bytes at OFF in hex, as the kernel serves them (2026-11-20: whether a
+ *                               read-time content patch is applied, Tests 371-372)
+ *   r5qfs dump PATH OFF LEN     up to 60000 raw bytes at OFF (wifi/r5q_pull.py: whole files and trees to the PC)
  */
 #include <dirent.h>
 #include <errno.h>
@@ -134,6 +137,47 @@ main(int argc, char **argv)
 			fclose(in);
 		}
 		printf("cp %s %s: %s\n", argv[2], argv[3], bad ? strerror(errno) : "done");
+	} else if (strcmp(argv[1], "peek") == 0 && argc == 5) {
+		FILE *f = fopen(argv[2], "rb");
+		long off = strtol(argv[3], NULL, 0), n = strtol(argv[4], NULL, 0);
+		unsigned char buf[256];
+		size_t got;
+
+		if (n > (long)sizeof(buf)) {
+			n = sizeof(buf);
+		}
+		bad = f == NULL || fseek(f, off, SEEK_SET) != 0;
+		if (bad) {
+			printf("peek %s: %s\n", argv[2], strerror(errno));
+		} else {
+			got = fread(buf, 1, (size_t)n, f);
+			printf("%s+0x%lx:", argv[2], off);
+			for (size_t i = 0; i < got; i++) {
+				printf(" %02x", buf[i]);
+			}
+			printf("\n");
+		}
+		if (f != NULL) {
+			fclose(f);
+		}
+	} else if (strcmp(argv[1], "dump") == 0 && argc == 5) {
+		/* raw bytes, at most 60000 (r5qd relays 64 KB of a program's output): wifi/r5q_pull.py chains these */
+		FILE *f = fopen(argv[2], "rb");
+		long off = strtol(argv[3], NULL, 0), n = strtol(argv[4], NULL, 0);
+		static unsigned char big[60000];
+		size_t got;
+
+		if (n > (long)sizeof(big)) {
+			n = sizeof(big);
+		}
+		bad = f == NULL || fseek(f, off, SEEK_SET) != 0;
+		if (!bad) {
+			got = fread(big, 1, (size_t)n, f);
+			fwrite(big, 1, got, stdout);
+		}
+		if (f != NULL) {
+			fclose(f);
+		}
 	} else if (strcmp(argv[1], "rm") == 0) {
 		bad = unlink(argv[2]) != 0;
 		printf("rm %s: %s\n", argv[2], bad ? strerror(errno) : "done");

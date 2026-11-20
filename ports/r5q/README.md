@@ -77,7 +77,10 @@ binaries, no build outputs and no phone backups are in this repository (see [the
 - **Metal:** there is no Metal device for iOS, so the map in Maps and live wallpapers are missing. The plugin entry
   point exists (wifi/METAL-FEASIBILITY.md); a Metal implementation over the GL path is a large project (AIR shaders).
 - **Radios:** cellular: the modem runs, goes online and receives (GSM cells found, Test 352); no SIM in the phone
-  yet, and iOS's CommCenter is not on it yet (wifi/CELLULAR-PLAN.md). Bluetooth audio.
+  yet. iOS's side, as an experiment (boot-args `bbstub=1 bbfake=1`, Tests 355-374): CommCenter runs on kernel stubs,
+  its baseband manager takes its fake-boot path ("Baseband bootup succeeded") and makes QMI clients (NAS, UIM, DMS,
+  WDS, WMS, ...), but its IPC router stays disengaged: no QMI reaches the modem yet (wifi/CELLULAR-PLAN.md).
+  Bluetooth audio.
 - **FairPlay:** App Store apps can't run (their code is FairPlay-encrypted). The study (wifi/FAIRPLAY-FEASIBILITY.md)
   found that Apple's FairPlay kext makes the device's keys with the SoC's fused UID and GID AES keys, which only
   Apple silicon has. Apps without FairPlay encryption (Apple's own, ones built from source) are the route.

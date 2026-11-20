@@ -23,6 +23,7 @@
 #include <sys/vnode_internal.h>
 #include <sys/xattr.h>
 #include <os/atomic_private.h>
+#include <pexpert/pexpert.h>
 #include <vfs/vfs_support.h>
 
 /* How much is read out of a file at a time when copying into a uio. */
@@ -480,6 +481,7 @@ struct apfs_content_patch {
 	uint64_t size, offset;
 	size_t len;
 	const uint8_t *old, *new;
+	int gate;               /* 0: always; else only when boot-arg bbfake has one of these bits (experiments, never standard) */
 };
 
 /*
@@ -518,17 +520,42 @@ static const uint8_t compass_page_hash_new[32] = {
 	0xc9, 0xc2, 0x4e, 0xdb, 0xd0, 0x66, 0x9e, 0x3d, 0x2d, 0x6c, 0xe4, 0xaf, 0x7f, 0x98, 0x27, 0x6d,
 };
 
+/*
+ * (Test 373, cellular) The baseband manager's fake boot. libBasebandManager's bootup (+0x7fa2c) asks
+ * libBasebandCapabilities+0x94a8 (a constant 1 on every product) whether to boot the modem itself, through BBUpdater
+ * -- which needs Apple's per-device bbticket.der, never forged here -- and when the answer is 0 logs "#I Faking
+ * bootup" and only waits for the transport ("Wait for Ready on Fake Boot"). This phone's modem is already running
+ * (started by the kernel), so that is the right path. The test of the answer (+0x7fb3c, `cbz w0, +0xa4`) made `b +0xa4`:
+ * this one decision changed, the shared capability left alone. Subcache .17, 16 KB pages: page 1388's hash with it.
+ * Only with boot-arg bbfake=1 (an experiment, never in the standard args).
+ * (Tests 371-372 changed other things first: CommCenter's abm::Overrides bool at +0x10, and libBasebandCapabilities'
+ * radio-type answer at +0x1f00 -- neither is on this path; a mis-added branch offset led to the second. Removed.)
+ */
+static const uint8_t abm_fake_old[4] = { 0x20, 0x05, 0x00, 0x34 };     /* cbz w0, +0xa4 */
+static const uint8_t abm_fake_new[4] = { 0x29, 0x00, 0x00, 0x14 };     /* b +0xa4 */
+static const uint8_t abm_fake_page_hash_old[32] = {
+	0x62, 0xf5, 0xff, 0xc3, 0x86, 0xbe, 0xb2, 0xb2, 0xea, 0x14, 0xac, 0x53, 0x10, 0x39, 0xc1, 0xcf,
+	0x05, 0x5e, 0x63, 0x27, 0xf2, 0xe0, 0x1f, 0x11, 0x81, 0x1a, 0xb8, 0xbd, 0xaa, 0x5c, 0xe0, 0x51,
+};
+static const uint8_t abm_fake_page_hash_new[32] = {
+	0xa1, 0x3a, 0x02, 0x65, 0x2e, 0x52, 0x0e, 0xf3, 0x56, 0xb2, 0xa3, 0xd0, 0x9f, 0xfe, 0x37, 0x59,
+	0x7f, 0xf3, 0xc2, 0xe3, 0x25, 0xb7, 0xa4, 0x5d, 0x02, 0x44, 0x90, 0x42, 0x7f, 0x77, 0x95, 0x56,
+};
+
 static const struct apfs_content_patch apfs_content_patches[] = {
 	{ "dyld_shared_cache_arm64.05", 114475008, 0x40750e8, 4, compass_call_old, compass_call_new },
 	{ "dyld_shared_cache_arm64.05", 114475008, 0x6d14481, 32, compass_page_hash_old, compass_page_hash_new },
 	{ "dyld_shared_cache_arm64.05", 114475008, 0x3dd8164, 4, caps_mask_old, caps_mask_new },
 	{ "dyld_shared_cache_arm64.05", 114475008, 0x6d12fa1, 32, caps_page_hash_old, caps_page_hash_new },
+	{ "dyld_shared_cache_arm64.17", 97419264, 0x15b1b3c, 4, abm_fake_old, abm_fake_new, 1 },
+	{ "dyld_shared_cache_arm64.17", 97419264, 0x5cc2e61, 32, abm_fake_page_hash_old, abm_fake_page_hash_new, 1 },
 };
 
 static void
 apfs_patch_content(vnode_t vp, uint64_t size, off_t at, uint8_t *buf, size_t len)
 {
 	static uint32_t applied, refused;
+	static int bbfake = -1;
 
 	for (size_t i = 0; i < sizeof(apfs_content_patches) / sizeof(apfs_content_patches[0]); i++) {
 		const struct apfs_content_patch *p = &apfs_content_patches[i];
@@ -537,6 +564,15 @@ apfs_patch_content(vnode_t vp, uint64_t size, off_t at, uint8_t *buf, size_t len
 		if (size != p->size || (uint64_t)at > p->offset || p->offset + p->len > (uint64_t)at + len ||
 		    vp->v_name == NULL || strcmp(vp->v_name, p->name) != 0) {
 			continue;
+		}
+		if (p->gate) {
+			if (bbfake < 0) {
+				int v = 0;
+				bbfake = PE_parse_boot_argn("bbfake", &v, sizeof(v)) ? v : 0;
+			}
+			if ((bbfake & p->gate) == 0) {
+				continue;
+			}
 		}
 		here = buf + (p->offset - (uint64_t)at);
 		if (memcmp(here, p->old, p->len) == 0) {

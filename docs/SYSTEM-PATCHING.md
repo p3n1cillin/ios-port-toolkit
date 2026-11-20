@@ -42,12 +42,15 @@ left alone, and a mismatch is logged. Patch the instruction and its page hash in
 1. **Find the instruction.** Find a unique string used near it with `tools/ios/dsc_whose.py CACHE 'text'`, which
    gives the string's address and every adrp+add that reaches it. Read the code with `tools/ios/dsc_sel.py CACHE
    IMAGE OFFSET COUNT`, which disassembles and annotates strings and selectors. For callers, use
-   `tools/ios/dsc_callers.py CACHE IMAGE ADDR`.
+   `tools/ios/dsc_callers.py CACHE IMAGE ADDR`. For where a call goes, use `tools/ios/dsc_target.py CACHE ADDR`: it
+   follows the stub island to the real function (a hand-added offset sent Test 372 to the wrong one).
 2. **Locate it in the files.** `tools/ios/dsc_fileoff.py CACHE ADDR` gives the subcache file, the offset and the
    current word.
 3. **Work out the signature change.** `tools/ios/dsc_cdpatch.py SUBCACHE OFFSET OLDWORD NEWWORD` gives the
    CodeDirectory's hash slot (file offset), and the old and new hash for that page (16 KB pages, SHA-256 on iOS 16).
 4. **Add both entries** to `apfs_content_patches[]`, rebuild the kernel, and boot.
+5. **Check it is live** before judging the result: `r5qfs peek /System/Cryptexes/OS/System/Library/Caches/com.apple.dyld/SUBCACHE OFF 4`
+   over r5qd reads the bytes as the kernel serves them (gate experiments with a boot-arg, e.g. `bbfake`).
 5. **Verify in memory:** `cm_test peek ADDR` from any process shows the new word. Also check that the boot shows no
    `SecTaskLoadEntitlements failed`.
 
@@ -78,3 +81,16 @@ afterwards.
   compass check (CoreMotion+0x11808) has dozens of callers, so only the compass factory's `bl` was changed.
 - Don't ship patched Apple binaries or cache pieces in the repository. Publish the patch (offsets, old and new
   bytes, how they were found), and make the patched file from the user's own copy.
+
+## Reading what iOS itself logs (info and debug lines included)
+
+The console (OS_ACTIVITY_DT_MODE, the kernel log) shows only default-level lines. Most daemons say what they are
+doing at info level (`#I ...` in CommCenter and the baseband manager). Those lines are kept on the phone in the unified
+log, so read them there:
+
+1. Copy `/private/var/db/diagnostics` and `/private/var/db/uuidtext` to the PC. The S10 Lite port uses
+   `work/ios-r5q/wifi/r5q_pull.py`: binary-safe over r5qd, 60000 bytes a request, resumable, about 1 MB/s. The shared
+   cache's string file alone is about 100 MB.
+2. `python3 tools/ios/tracev3.py LOGDIR 'REGEX'` (or `--pid N`, `--sub com.apple.telephony.abm`). It prints the
+   entries with their format strings filled in. Private arguments stay `<private>`.
+3. The copy holds private device data (names, addresses, identifiers). Keep it local and never commit it.
