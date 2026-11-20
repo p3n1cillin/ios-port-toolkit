@@ -10963,6 +10963,47 @@ cell_probe(__unused void *arg, __unused wait_result_t wr_unused)
 	cell_port = NULL;
 }
 
+/*
+ * (Test 358) The stubs' answers, settable while iOS runs: kern.redwood.bb_answer = selector << 16 | value sets the
+ * first scalar output the stubs return for that selector (Test 357: AppleBaseband selector 3, the baseband state,
+ * answered 0, and AppleBasebandManager went no further). Read: the last setting. r5q_sysctl NAME VALUE over r5qd.
+ */
+#include <sys/sysctl.h>
+uint64_t redwood_bb_answer[64];
+static int redwood_bb_answer_last;
+SYSCTL_DECL(_kern_redwood);
+
+static int
+bb_answer_sysctl(__unused struct sysctl_oid *oidp, __unused void *arg1, __unused int arg2, struct sysctl_req *req)
+{
+	int value = redwood_bb_answer_last, error;
+
+	error = sysctl_io_number(req, value, sizeof(value), &value, NULL);
+	if (error != 0 || req->newptr == 0) {
+		return error;
+	}
+	if (((uint32_t)value >> 16) >= 64) {
+		return EINVAL;
+	}
+	redwood_bb_answer[(uint32_t)value >> 16] = (uint32_t)value & 0xffff;
+	redwood_bb_answer_last = value;
+	printf("cell: the baseband stubs now answer selector %u with %u\n", (uint32_t)value >> 16, (uint32_t)value & 0xffff);
+	return 0;
+}
+
+SYSCTL_PROC(_kern_redwood, OID_AUTO, bb_answer, CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_LOCKED, NULL, 0, bb_answer_sysctl, "I",
+    "the baseband stubs' answer: selector << 16 | value");
+
+/* (Test 355) bbstub=1: iOS's baseband services as listening stubs (iokit/Kernel/RedwoodBaseband.cpp), 5 s in */
+static void
+bb_publish_thread(__unused void *arg, __unused wait_result_t wr_unused)
+{
+	extern void RedwoodBasebandPublish(void);
+
+	sleep_ms(5000);
+	RedwoodBasebandPublish();
+}
+
 static void
 bt_stage1(__unused void *arg, __unused wait_result_t wr_unused)
 {
@@ -11171,6 +11212,11 @@ redwood_wifi_init(void)
 		on = 0;
 		if (PE_parse_boot_argn("cell", &on, sizeof(on)) && on != 0 &&
 		    kernel_thread_start(cell_probe, NULL, &thread) == KERN_SUCCESS) {     /* (Test 352) cellular, a look */
+			thread_deallocate(thread);
+		}
+		on = 0;
+		if (PE_parse_boot_argn("bbstub", &on, sizeof(on)) && on != 0 &&
+		    kernel_thread_start(bb_publish_thread, NULL, &thread) == KERN_SUCCESS) {   /* (Test 355) */
 			thread_deallocate(thread);
 		}
 		return;

@@ -66,3 +66,65 @@ A kernel probe (redwood_wifi.c `cell_probe`, QMI over QRTR; it logs states only,
   6 abortChannelAsync, 7 startChannelAsync, 8 timeSyncAsync (1 each); 9 mapMemoryAsync; 10-12 unmapMemoryAsync. The
   control connection (`AppleBasebandPCIControl`): 0 readLogsAsync, 1 flushTraceBuffers / start, 2 dumpRegistry, 3
   event notification / loggerTune / getRegistryInfo, 4 and 5 trace and log buffers, 6 demo, 9 connect.
+
+## Test 354 (root test354: `ALLOW="locationd CommCenter"`, `OSLOG=... com.apple.CommCenter`): the donor's crash again
+
+- CommCenter's two plists share a label and launchd picks by the device tree (`_LimitLoadToDeviceTree: baseband` for
+  the cellular one, `_LimitLoadFromDeviceTree: baseband` for the non-cellular one); mkjobs.py drops the "To" condition
+  for a job allowed by name. CommCenter starts, answers its XPC services, then **crash-loops every ~15 s: 12 SIGABRT,
+  3 SIGSEGV** in 4 minutes. That is the donor's split: SIGSEGV after "Could not find AppleIPAppender service",
+  SIGABRT after "Unable to communicate with AppleBaseband driver". Those lines are info-level, below what
+  OS_ACTIVITY_DT_MODE prints here (two NSLog lines came through: "STK sessions are created").
+- The second message is in **`libTelephonyBasebandDynamic.dylib`** (`TelephonyBasebandController`): it looks for the
+  IOService **`AppleBaseband`** ("AppleBaseband IOService is not found. Finding it via matching service"), opens it,
+  "self-identifies", then GetBasebandState / SetBasebandState, Get/SetBasebandProperty, ResetModem, PollGPIO,
+  GetCoredumpReadyStatus, ReportThermalData, ResetSPMI, through a generic call wrapper
+  (`_TelephonyBasebandControllerCallMethodGeneric`).
+
+## Test 355 (kernel t355, `bbstub=1`): listening stubs
+
+`iokit/Kernel/RedwoodBaseband.cpp` publishes, 5 s into the boot, services under the class names iOS matches --
+`AppleBaseband`, `AppleIPAppender`, `AppleBasebandPCIControl`, and `AppleBasebandPCIInterface` for `qmux_control`,
+`qmux_loc`, `qmux_extra`, `qmux_logchannel`, `qmux_test` (property `ABPInterfaceProtocol`) -- whose user client
+answers every call with success and zeroed outputs and logs it (process, selector, scalars, structure sizes, first
+bytes). The log then shows what CommCenter asks, in order, before anything is made to answer for real.
+- **Test 355 result: COMMCENTER STOPS CRASHING.** With the stubs published, CommCenter runs as its first instance
+  (pid 29, with CommCenterMobileHelper) and no "exited due to" in the whole run, where Test 354 had a crash every
+  ~15 s. The phone's kernel buffer shows connections to `AppleBaseband` opened and closed. The stubs logged with
+  IOLog, which reaches only the phone's message buffer (66 KB through `klog`), not the USB follower, so most of the
+  call log was lost; Test 356 logs through printf.
+
+## Test 357 (kernel t357): what iOS asks of the baseband services (the stubs' log, through the loader's ring)
+
+- Published 5 s in: AppleBaseband, AppleIPAppender, AppleBasebandPCIControl, five AppleBasebandPCIInterface
+  (qmux_control, qmux_loc, qmux_extra, qmux_logchannel, qmux_test).
+- **CommCenter[28]**, in order:
+  - AppleIPAppender: selector 4 (structure 8 in: `c4 09 00 00 00 00 00 00`).
+  - AppleBaseband: selector 15 with a 64-byte name ("CommCenter: TelephonyBas..." = the self-identify), then selector
+    32 (scalar 3).
+  - AppleIPAppender: selector 8 (scalar -2), selector 16 x5 (scalars [n, 1], n = 0..4: per-interface), selector 6 (8
+    out), 17 (1 in, 1 out), 9.
+  - AppleBaseband: selector 3 (1 scalar out: **the baseband state**; the stub answers 0), 23 (1 out: a property), 22
+    (1 in: set property). It reopens AppleBaseband and self-identifies (selector 15) every few seconds.
+- **abm-helper[154]** (AppleBasebandManager's helper, so the cellular CommCenter path is running): opens
+  AppleBaseband, self-identifies, asks the state (selector 3).
+- **locationd** opens AppleBaseband too.
+- **No AppleBasebandPCI* connection yet:** with the state 0, AppleBasebandManager does not go on to the boot stage
+  and the QMUX channels. Next: which state value means "up" (AppleBasebandManager's boot states: BasebandBootStateIsReady,
+  ...Booted, ...WillReset, ...DidReset). Selector 3's and 23's answers made writable sysctls, to be tried live.
+
+## Test 358 (kernel t358): the stubs' answers set live; the state is not the gate
+
+- `kern.redwood.bb_answer = selector << 16 | value` (redwood_wifi.c) sets the first scalar output the stubs return
+  for a selector; `wifi/r5q_sysctl.c` now writes an integer (`r5q_sysctl NAME VALUE`; rebuild the phone tools with
+  `pipeline/build_phone_tools.sh` before `phone.py tools`, which only uploads). CommCenter reads the state only when
+  it starts, so each value was tried by restarting it (`r5qd_client.py kill CommCenter`; launchd respawns it).
+- **AppleBaseband selector 3 answered 1, 2, 3, 4, 5, 6, 8: no AppleBasebandPCI* connection with any of them.** Each
+  time: CommCenter opens AppleBaseband, self-identifies (15), selector 32 (3), 23, 22 (1), asks the state (3);
+  abm-helper asks the state (3). On its way down CommCenter calls selector 7 and selector 22 (0). So AppleBasebandManager
+  waits on something else before it starts the QMUX transport: an interest notification (the stubs accept a
+  notification port and send nothing), a boot stage on AppleBasebandPCIControl, or a registry property. Next: read
+  AppleBasebandManager's boot sequence (the framework and abm-helper) for what it waits on.
+- **Seen once (after ~30 min with CommCenter on the stubs): Wi-Fi traffic stalled** (frames sent/received stopped,
+  CE4 "wr 0 read 0"), r5qd silent, iOS otherwise up; a restart cleared it. Not yet known whether CommCenter (its
+  AppleIPAppender interfaces) caused it. `bbstub` stays out of the standard args until that is understood.

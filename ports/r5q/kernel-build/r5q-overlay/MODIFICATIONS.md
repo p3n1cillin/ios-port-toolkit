@@ -52,6 +52,15 @@ These files replace the donor's files of the same path in its `xnu/files/` tree 
   (mode 1028x772 kept on switches), and reads in flight counted so a session's end never frees the ring under them.
 - `bsd/dev/redwood_wifi.c` (Tests 276-305): `redwood_r5q_rpmh_level()` (an RPMh rail to a level) and
   `redwood_r5q_rpmh_bcm()` (a bus clock manager's bandwidth vote, as Linux's bcm-voter) for others in the kernel.
+- `bsd/dev/redwood_wifi.c` (Tests 352-358): `cell=1/2`, a QMI look at the modem over QRTR (SIM, operating mode,
+  registration; states only); `bbstub=1` publishing the baseband stubs, and `kern.redwood.bb_answer`, their answers set
+  while iOS runs.
+- `bsd/dev/redwood_adsp.c` (Tests 347-349): the motion sensors' rates as boot-args (`see_rate`, `see_mag_rate`) and the
+  last 16 samples of each kept with their times (`struct redwood_motion` version 2).
+- `bsd/dev/redwood_sec_ts.c` (Tests 334-351): the front (IMX616) and main (IMX586) cameras through a common Sony
+  streaming path (`sony_stream`), their whole binned frames for iOS.
+- `iokit/conf/files` (Test 355): Apple's open-source XNU file (xnu-8796.121.2) as the donor ships it, with
+  `iokit/Kernel/RedwoodBaseband.cpp` added to the build.
 - `osfmk/arm/io_map.c` (Test 252): Apple's open-source XNU file (xnu-8796.121.2) with the I/O submap at 64 MB instead of
   8 MB, and its use logged; a full submap made `ml_io_map` wait for ever.
 
@@ -60,4 +69,5 @@ insertion by program name, `kern.exec_inject`); here its setting holds 2048 byte
 
 New in this directory (not the donor's): `bsd/dev/redwood_wlfw_ath10k.h` and `redwood_wlfw_ath10k_ce.h`, generated
 from Linux's ath10k (ISC, see their headers); `bsd/dev/redwood_wpa.h` (WPA2's key handling for the kernel's
-supplicant).
+supplicant); `iokit/Kernel/RedwoodBaseband.cpp` (Tests 355-358: listening stubs of the IOKit services iOS's
+telephony stack opens -- AppleBaseband, AppleIPAppender, AppleBasebandPCIControl, AppleBasebandPCIInterface).
