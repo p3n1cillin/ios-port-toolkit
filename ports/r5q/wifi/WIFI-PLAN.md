@@ -1184,3 +1184,13 @@ run ends with the modem shut down through TZ, after asking it to stop over SMP2P
 - iMessage cannot sign in on this port (no Apple ID sign-in, no device attestation). Turning iMessage off in
   Settings > Messages should clear the badge. That is the owner's setting to change, so it has not been changed.
 - Tools: inject_badgewatch.m (wraps IMDBadgeUtilities' badge methods, prints their addresses), inject_clearbadge.m.
+
+## Weather's "No weather data" (2026-11-20, phone, after Test 400): FairPlay confirmed, with the log
+
+- The Weather app's connections refused were to `weather-analytics-events.apple.com`. On this network's DNS that
+  name answers 0.0.0.0 (a telemetry blocklist on the owner's network, not the phone: /etc/hosts is the stock one).
+  `dnsq` (wifi/dnsq.c) shows the data hosts resolve normally: weatherkit.apple.com, weather-data.apple.com,
+  weather-edge.apple.com, weather-map2.apple.com.
+- The real failure, from WeatherDaemon: "Error while creating local signature ... error=AMSErrorDomain Code=12
+  'Mescal Failed'". Mescal is Apple's FairPlay-based request signing (AppleMediaServices). Without FairPlay no
+  request is signed, so WeatherKit refuses. Earlier notes assumed this; now it is measured.
