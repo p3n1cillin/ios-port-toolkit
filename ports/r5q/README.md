@@ -1,4 +1,4 @@
-# Galaxy S10 Lite (r5q) — the native iOS port's working tree
+# Galaxy S10 Lite (r5q) â€” the native iOS port's working tree
 
 This is the port the toolkit at the repository root was distilled from: iOS 16.5 running natively on the
 Samsung Galaxy S10 Lite (SM-G770F, SM8150), installed in place of Android (iOS system volume on the phone's
@@ -20,12 +20,20 @@ binaries, no build outputs and no phone backups are in this repository (see [the
 | `wifi/*_test.*`, `wifi/magrec.c`, `wifi/cm_rate.m` | on-phone probes: CoreMotion, CoreLocation, orientation, video, the magnetometer |
 | `wifi/r5qsign.py`, `wifi/appinst.m`, `wifi/ipa_install.py` | signing and installing apps built here |
 | `pipeline/` | how a test is built now: the root volume, the test image, the run ([pipeline/README.md](pipeline/README.md)) |
-| `phone.py` | everything done with the phone from the PC: `cycle` (flash, restart, follow the log), `args`, `logs`, `smem`, `screenshot`, … |
+| `phone.py` | everything done with the phone from the PC: `cycle` (flash, restart, follow the log), `args`, `logs`, `smem`, `screenshot`, â€¦ |
 | `build_*.py`, `package_install_boot.py` | the build pipeline (kernel in a sandbox, loader, shim, BOOT image) |
 | `wifi/CAMERA-PLAN.md`, `wifi/CAMERA-FEASIBILITY.md` | the camera: how iOS 16.5 reaches it, the design, Tests 267-269 |
 | `wifi/BLUETOOTH-PLAN.md`, `wifi/BLUETOOTH-IOS-RESEARCH.md` | Bluetooth, Tests 244-262, and how iOS 16.5 reaches its controller |
 | `wifi/WIFI-PLAN.md` | everything since Test 111, step by step with what every test showed: Wi-Fi, sound, GPU, apps, sensors, CoreMotion, the compass, the microphone |
 | `SESSION.md` | the test-by-test log of the earlier stages |
+
+## Storage (Test 412, 2026-11-20)
+
+`/private/var` is a 100 GB journaled HFS+ volume on the phone's flash (darwin past 16 GiB, `/dev/ufs_var`), mounted
+by init (`var_hfs=1`) in place of the 1.6 GB RAM filesystem; iOS reports "3.7 GB of 103 GB Used". See
+[wifi/STORAGE-PLAN.md](wifi/STORAGE-PLAN.md); tools: `storage/mkplace.py`, `wifi/hfsplace.c`, `wifi/hfsmount.c`,
+`pipeline/build_init.sh` + `pipeline/macho_static.py` (static init from source with LLVM's linker),
+`pipeline/panic_sym.py`.
 
 ## State (Test 353)
 

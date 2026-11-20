@@ -3,7 +3,7 @@
 This directory is derived from [G986N-iOS](https://github.com/leh0726/G986N-iOS) (commit 946de0fed8e5), itself a
 port of [HackiOS](https://github.com/oosexgang/hackios-xnu-kernel) by OOSEX GANG, whose kernel side is under the
 Apple Public Source License 2.0 ([LICENSE](LICENSE)). It was changed for the Samsung Galaxy S10 Lite (r5q)
-native iOS port between November 1 and November 19, 2026; the git history of this repository has the details.
+native iOS port between November 1 and November 20, 2026; the git history of this repository has the details.
 
 These files replace the donor's files of the same path in its `xnu/files/` tree when the kernel is built
 (`kernel-build/build-xnu-sandbox.sh` copies them over it). What changed, broadly:
@@ -87,3 +87,22 @@ since Test 374 AppleBasebandPCIPDPManagerBase, which libPCITransport's PCI event
 378-388 a QMUX transport on AppleBasebandPCIInterface -- async reads and writes, QMI CTL answered in the kernel, every
 other service's QMI bridged to the modem over QRTR by `redwood_bb_qmi_send` in bsd/dev/redwood_wifi.c, whose QRTR port
 table grew from 16 to 96).
+
+/private/var on the flash (Tests 406-412, wifi/STORAGE-PLAN.md):
+
+- `bsd/hfs/` is Apple's open-source HFS, hfs-627.100.6 (APSL 2.0, [APPLE_LICENSE](bsd/hfs/APPLE_LICENSE)), built into
+  this kernel instead of loaded as hfs.kext. Each `core/*.c` file carries a "Modified for the Galaxy S10 Lite"
+  note and includes `kext-config.h` first:
+  - `kext-config.h`: CONFIG_PROTECT, QUOTA and secluded rename off; HFS_COMPRESSION on; the checked string
+    builtins off (`_FORTIFY_SOURCE 0`, Test 408); kext names mapped to their in-kernel spellings.
+  - `hfs_iokit.cpp` is replaced by the new `hfs_builtin.c`: VFS registration from `redwood_ufs_init()`, no sysctl
+    nodes, IOKit lookups stubbed.
+  - `hfs_encodings/` is copied as Apple ships it and not built.
+- `bsd/conf/files`: Apple's open-source XNU file (xnu-8796.121.2) with the donor's patch applied and the HFS sources
+  added.
+- `bsd/dev/redwood_ufs.c`: `/dev/ufs_var` and `/dev/rufs_var` (boot-arg `ufs_var=1`), darwin from 16 GiB to its end
+  as a disk. The logical block size can be set, partial writes are read-modify-write, and cluster I/O buffers are
+  mapped with `buf_map()`.
+- `bsd/miscfs/apfs/apfs_vfsops.c` (the donor's file): the root volume reports its own size plus the size and free
+  space of an HFS volume mounted at `/private/var`, as an APFS container shared by system and data would.
+

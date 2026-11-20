@@ -1047,3 +1047,44 @@ candidate designs).
   own session. Registers reset when a session starts its tables, so each try is one camgrab run. The aim: try the
   pedestal (0x0008/0x0009), the binning weight (0x0902) and others for the clipped shadows over Wi-Fi, without a
   kernel and a reboot for each. Run as Test 405 once USB is back.
+- **Test 405 (kernel t405) result, the dark shadows (2026-11-20):** booted; `camgrab ... ?ADDR` reads work (0x0008 = 64).
+  Writes during streaming may not take: `0008=0100` read back 0x0040 (the pedestal is probably standby-only).
+  - Linearity with the torch (4x, 200 vs 1600 lines, 16x16 blocks): ratio 10.7 for blocks at 3-10 above black and
+    6.6 at 10-30, against 8 expected. Blocks under ~2 at 200 lines read ~0. So there is a dead zone of about 1-2
+    counts at the bottom, not a large offset; above it the response is near-linear.
+  - The back camera faces away from the room's only light (the front camera sees the window). At 4x and 1600 lines
+    with the torch, almost all blocks are under 30 above black. Most of the "black shadows" in this room are a dark
+    scene plus that small dead zone. At 8x and above, vertical column stripes show again in lit areas.
+  - Tool note: `torchset` lights only on its second call after a session (the first returns "lit 0"), and
+    /var/r5q/bin/torchset was missing after the Test 405 boot (re-put it).
+- **Lamp test (owner pointed the back camera at a lamp, 2026-11-20, kernel t405):**
+  - 1x / 4x at ~15 ms: 99.9% / 96.5% of pixels at black; only the bulb shows. That is normal indoors: phones shoot
+    indoors at ~8-16x and 1/30 s.
+  - 16x at 1/30 s (3260 lines): 73% at black, mean 207. The lamp's glow is a smooth gradient, the reflections are
+    sharp, and there are **vertical column stripes** across the lit area.
+  - So sensitivity is roughly as expected for the setting. Left: column fixed-pattern noise at high gain, and a
+    dead zone of ~1-2 counts at black.
+  - Register checks over Wi-Fi (camgrab ?/=, working): 0x0204 analog gain as written; digital gains
+    0x020e/0x0210/0x0212/0x0214 = 0x0100 (1x); 0x0b05 = 1; 0x0220 = 0x62 written to 0 changes nothing. 0x0008
+    (pedestal) does not take a write while streaming.
+  - Next: per-column offset correction in the software ISP (camera_isp.c), learnt from the frame's own dark rows or
+    a dark frame. No public IMX586 driver with a register map was found (searches turned up only the IMX319, IMX258
+    and IMX355 drivers).
+- **Column-gain correction in the software ISP (2026-11-20 evening, kernel t412): built, not yet verified.**
+  - **What it does** (userland `camera_isp.c`, `isp_columns_learn`): each frame, a per-column gain is learnt as the
+    median of the 9 same-colour neighbours (every 8th row, values 20-900, ratio clamped 0.5-2, EMA 1/8) and divided
+    out in `cell()` and `unpack_line()`. The build is `port/build/phone-tools/libredwood-media.dylib`.
+  - **A/B on the phone** with `r5qd_client.py reload` into mediaserverd, `stripemetric.py` on Camera-preview
+    screenshots:
+
+    | Library | Level | Row streaks |
+    |---|---|---|
+    | old | 62-75 | 29-35% of level |
+    | new | 111 | 12% |
+    | old again | 124 | 5% |
+
+  - **No verdict yet.** The room was dark and the preview showed only sensor noise, no scene. Auto-exposure was
+    still raising the gain from capture to capture, so the level and the streak share follow the exposure, not the
+    library.
+  - **Next:** a lit, still scene (daylight, or the lamp test), with both libraries at a fixed exposure
+    (`camgrab =`). The standard injection list was put back afterwards, and the new library is not in the root.

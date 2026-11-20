@@ -351,16 +351,25 @@ def unstick_usb():
     return True
 
 
-def wait_for_phone(seconds=3600):
+def wait_for_phone(seconds=3600, unstick=False):
     """fastboot keeps asking until the phone shows up; its first command, the moment the loader listens (the first
-    15 s of every start with the cable in a PC), puts the phone into maintenance mode."""
-    try:
-        quick = subprocess.run([FASTBOOT, 'getvar', 'product'], capture_output=True, text=True, timeout=10)
-        if 'xnuloader' in quick.stdout + quick.stderr:
-            print('phone in maintenance mode')
-            return
-    except subprocess.TimeoutExpired:
-        unstick_usb()                                       # (2026-11-20: a stuck link, not a missing cable)
+    15 s of every start with the cable in a PC), puts the phone into maintenance mode.
+    unstick (only `cycle`'s catch after ending a run): when the loader's USB stays silent for three tries over ~45 s
+    while the device is present and iOS answers over Wi-Fi, restart the phone from iOS (unstick_usb). (2026-11-20: a
+    first version did this after one 10 s miss in every caller, and `phone.py open` restarted a working phone while
+    mediaserverd was restarting.)"""
+    if unstick:
+        for attempt in range(3):
+            try:
+                quick = subprocess.run([FASTBOOT, 'getvar', 'product'], capture_output=True, text=True, timeout=15)
+                if 'xnuloader' in quick.stdout + quick.stderr:
+                    print('phone in maintenance mode')
+                    return
+            except subprocess.TimeoutExpired:
+                continue
+            break                                           # (an answer, just not the loader: no restart)
+        else:
+            unstick_usb()                                   # (a stuck link, not a missing cable)
     print('waiting for the phone: start it (or plug it in) now ...', flush=True)
     r = subprocess.run([FASTBOOT, 'getvar', 'product'], capture_output=True, text=True, timeout=seconds)
     if 'xnuloader' not in r.stdout + r.stderr:
@@ -576,7 +585,7 @@ def cycle(image, follow, new_args=None):
         fb('reboot', check=False)                       # (maintenance mode: just restart)
         gone(30)
     print('2/5 catching the phone as it starts again', flush=True)
-    wait_for_phone()
+    wait_for_phone(unstick=True)                        # (the one place a stuck link is restarted)
     if image is None:
         print('3/5 (restart only: BOOT left as it is)', flush=True)
         settime()

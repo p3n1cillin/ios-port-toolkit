@@ -57,6 +57,8 @@
 #include <vm/memory_types.h>
 #include "redwood_ufshc.h"
 
+void hfs_builtin_start(void);         /* bsd/hfs/core/hfs_builtin.c */
+
 extern vm_offset_t ml_io_map_unmappable(vm_offset_t phys_addr, vm_size_t size, unsigned int flags);
 extern void IOSleep(unsigned int milliseconds);
 extern void loader_return(void);        /* osfmk/arm64/loader_return.c */
@@ -955,6 +957,286 @@ static const struct cdevsw ufs_cdevsw = {
 };
 
 /*
+ * (November 2026, Test 406) The data volume on the flash: /dev/ufs_var (block) and /dev/rufs_var (raw), the part of
+ * darwin from UFS_VAR_FIRST (16 GiB in) to its end, read and written, for an HFS volume at /private/var
+ * (wifi/STORAGE-PLAN.md). Only with ufs_write=1 ufs_var=1, and only once darwin passed every check above
+ * (ufs_write_part): every byte still goes through ufs_read() and ufs_write(), so nothing below UFS_WRITE_FIRST -- the
+ * iOS volume, the cryptexes -- and nothing outside darwin can be written by it either. Below UFS_VAR_FIRST stay the
+ * boot state (darwin's block 2091520) and var_store's two slots (8-12 GiB), untouched.
+ * The block device is synchronous, as the read-only one above: a buffer is read or written in the caller's thread.
+ */
+#define UFS_VAR_FIRST   4194304ULL              /* darwin's blocks of 4096: 16 GiB */
+static int ufs_var_bmajor = -1, ufs_var_cmajor = -1;
+static bool ufs_var_on;
+/*
+ * The block device's logical block size: HFS switches it to 512 to read the volume header and back to 4096
+ * (hfs_mountfs; Test 407: "DKIOCSETBLOCKSIZE failed" with 4096 only). Reads are by byte; a write that is not whole
+ * 4096-byte blocks is read, patched and written back whole (ufs_var_write).
+ */
+static uint32_t ufs_var_bsize = 4096;
+static LCK_MTX_DECLARE(ufs_var_rmw_mtx, &ufs_lck_grp);
+
+static uint64_t
+ufs_var_bytes(void)
+{
+	uint64_t all = ufs_part_bytes((uint32_t)ufs_write_part);
+
+	return all > UFS_VAR_FIRST * 4096 ? all - UFS_VAR_FIRST * 4096 : 0;
+}
+
+static int
+ufs_var_write(uint32_t part, uint64_t at, const uint8_t *src, uint64_t len)
+{
+	uint8_t *block;
+	int error = 0;
+
+	if (at % 4096 == 0 && len % 4096 == 0) {
+		return ufs_write(part, UFS_VAR_FIRST * 4096 + at, src, len);
+	}
+	block = kalloc_data(4096, Z_WAITOK);
+	if (block == NULL) {
+		return ENOMEM;
+	}
+	lck_mtx_lock(&ufs_var_rmw_mtx);
+	while (error == 0 && len > 0) {
+		uint64_t first = at & ~4095ULL, in = at - first, n = 4096 - in;
+
+		if (n > len) {
+			n = len;
+		}
+		if (in == 0 && n == 4096) {
+			error = ufs_write(part, UFS_VAR_FIRST * 4096 + first, src, 4096);
+		} else {
+			error = ufs_read(part, UFS_VAR_FIRST * 4096 + first, block, 4096);
+			if (error == 0) {
+				memcpy(block + in, src, (size_t)n);
+				error = ufs_write(part, UFS_VAR_FIRST * 4096 + first, block, 4096);
+			}
+		}
+		at += n;
+		src += n;
+		len -= n;
+	}
+	lck_mtx_unlock(&ufs_var_rmw_mtx);
+	kfree_data(block, 4096);
+	return error;
+}
+
+static int
+ufs_var_open(__unused dev_t dev, __unused int flags, __unused int devtype, __unused proc_t p)
+{
+	return ufs_ready && ufs_var_on && ufs_write_part >= 0 ? 0 : ENXIO;
+}
+
+static int
+ufs_var_close(__unused dev_t dev, __unused int flags, __unused int devtype, __unused proc_t p)
+{
+	return 0;
+}
+
+static void
+ufs_var_strategy(buf_t bp)
+{
+	uint64_t offset = (uint64_t)buf_blkno(bp) * ufs_var_bsize, len = buf_count(bp), size = ufs_var_bytes();
+	uint32_t part = (uint32_t)ufs_write_part;
+	int error;
+
+	if (!ufs_ready || !ufs_var_on || ufs_write_part < 0) {
+		buf_seterror(bp, ENXIO);
+		buf_biodone(bp);
+		return;
+	}
+	if (offset >= size || len > size - offset) {
+		buf_seterror(bp, offset == size ? 0 : EINVAL);
+		buf_setresid(bp, buf_count(bp));
+		buf_biodone(bp);
+		return;
+	}
+	/*
+	 * (Test 409: "Kernel data abort" at address 0 in ufs_request, from hfs_fsync -> cluster_push -> cluster_io) A
+	 * cluster I/O buffer holds its pages in a UPL with no kernel address (buf_dataptr is 0); buf_map gives one, and
+	 * for an ordinary buffer it returns the buffer's own data pointer.
+	 */
+	caddr_t data = NULL;
+
+	error = buf_map(bp, &data);
+	if (error == 0 && data == NULL) {
+		error = EFAULT;
+	}
+	if (error == 0) {
+		if (buf_flags(bp) & B_READ) {
+			error = ufs_read(part, UFS_VAR_FIRST * 4096 + offset, (uint8_t *)data, len);
+		} else {
+			error = ufs_var_write(part, offset, (const uint8_t *)data, len);
+		}
+		(void)buf_unmap(bp);
+	}
+	buf_setresid(bp, error ? buf_count(bp) : 0);
+	if (error) {
+		buf_seterror(bp, error);
+	}
+	buf_biodone(bp);
+}
+
+static int
+ufs_var_ioctl(__unused dev_t dev, u_long cmd, caddr_t data, __unused int fflag, __unused proc_t p)
+{
+	if (!ufs_ready || !ufs_var_on || ufs_write_part < 0) {
+		return ENXIO;
+	}
+	switch (cmd) {
+	case DKIOCGETBLOCKSIZE:
+		*(uint32_t *)data = ufs_var_bsize;
+		return 0;
+	case DKIOCGETPHYSICALBLOCKSIZE:
+		*(uint32_t *)data = 4096;
+		return 0;
+	case DKIOCSETBLOCKSIZE:
+		if (*(uint32_t *)data < 512 || *(uint32_t *)data > 4096 || (*(uint32_t *)data & (*(uint32_t *)data - 1)) != 0) {
+			return EINVAL;
+		}
+		ufs_var_bsize = *(uint32_t *)data;
+		return 0;
+	case DKIOCGETBLOCKCOUNT:
+		*(uint64_t *)data = ufs_var_bytes() / ufs_var_bsize;
+		return 0;
+	case DKIOCISWRITABLE:
+		*(uint32_t *)data = 1;
+		return 0;
+	case DKIOCGETMAXBLOCKCOUNTREAD:
+	case DKIOCGETMAXBLOCKCOUNTWRITE:
+		*(uint64_t *)data = ufs_buffer_size / ufs_var_bsize;
+		return 0;
+	case DKIOCSYNCHRONIZE:
+	case DKIOCSYNCHRONIZECACHE:
+		return 0;               /* each write is complete when ufs_write() returns */
+	case DKIOCGETFEATURES:
+		*(uint32_t *)data = 0;  /* no unmap, no forced unit access: none needed */
+		return 0;
+	default:
+		return ENOTTY;
+	}
+}
+
+static int
+ufs_var_psize(__unused dev_t dev)
+{
+	return (int)ufs_var_bsize;
+}
+
+static int
+ufs_var_rw(struct uio *uio, bool write)
+{
+	uint64_t size = ufs_var_bytes();
+	uint32_t part = (uint32_t)ufs_write_part;
+	uint8_t *bounce;
+	int error = 0;
+
+	if (!ufs_ready || !ufs_var_on || ufs_write_part < 0) {
+		return ENXIO;
+	}
+	if (uio_offset(uio) < 0 || (uint64_t)uio_offset(uio) % 4096 != 0 || (uint64_t)uio_resid(uio) % 4096 != 0) {
+		return EINVAL;
+	}
+	bounce = kalloc_data(ufs_buffer_size, Z_WAITOK);
+	if (bounce == NULL) {
+		return ENOMEM;
+	}
+	while (error == 0 && uio_resid(uio) > 0 && (uint64_t)uio_offset(uio) < size) {
+		uint64_t at = (uint64_t)uio_offset(uio), want = (uint64_t)uio_resid(uio);
+
+		if (want > ufs_buffer_size) {
+			want = ufs_buffer_size;
+		}
+		if (want > size - at) {
+			want = size - at;
+		}
+		if (write) {
+			error = uiomove((caddr_t)bounce, (int)want, uio);
+			if (error == 0) {
+				error = ufs_write(part, UFS_VAR_FIRST * 4096 + at, bounce, want);
+				if (error != 0) {
+					uio_setoffset(uio, (off_t)at);
+					uio_setresid(uio, uio_resid(uio) + (user_ssize_t)want);
+				}
+			}
+		} else {
+			error = ufs_read(part, UFS_VAR_FIRST * 4096 + at, bounce, want);
+			if (error == 0) {
+				error = uiomove((caddr_t)bounce, (int)want, uio);
+			}
+		}
+	}
+	kfree_data(bounce, ufs_buffer_size);
+	return error;
+}
+
+static int
+ufs_var_cread(__unused dev_t dev, struct uio *uio, __unused int ioflag)
+{
+	return ufs_var_rw(uio, false);
+}
+
+static int
+ufs_var_cwrite(__unused dev_t dev, struct uio *uio, __unused int ioflag)
+{
+	return ufs_var_rw(uio, true);
+}
+
+static const struct bdevsw ufs_var_bdevsw = {
+	.d_open     = ufs_var_open,
+	.d_close    = ufs_var_close,
+	.d_strategy = ufs_var_strategy,
+	.d_ioctl    = ufs_var_ioctl,
+	.d_dump     = eno_dump,
+	.d_psize    = ufs_var_psize,
+	.d_type     = D_DISK,
+};
+
+static const struct cdevsw ufs_var_cdevsw = {
+	.d_open       = ufs_var_open,
+	.d_close      = ufs_var_close,
+	.d_read       = ufs_var_cread,
+	.d_write      = ufs_var_cwrite,
+	.d_ioctl      = ufs_var_ioctl,
+	.d_stop       = eno_stop,
+	.d_reset      = eno_reset,
+	.d_ttys       = NULL,
+	.d_select     = eno_select,
+	.d_mmap       = eno_mmap,
+	.d_strategy   = eno_strat,
+	.d_reserved_1 = eno_getc,
+	.d_reserved_2 = eno_putc,
+	.d_type       = D_DISK,
+};
+
+/* ufs_var=1 (with ufs_write=1, after darwin was found writable): the two device nodes */
+static void
+ufs_var_init(void)
+{
+	uint32_t want = 0;
+
+	if (!PE_parse_boot_argn("ufs_var", &want, sizeof(want)) || want != 1) {
+		return;
+	}
+	if (ufs_write_part < 0 || ufs_var_bytes() < (1ULL << 30)) {
+		printf("ufs: var: no data volume device (darwin is not writable, or too small past 16 GiB)\n");
+		return;
+	}
+	ufs_var_bmajor = bdevsw_add(-1, &ufs_var_bdevsw);
+	ufs_var_cmajor = ufs_var_bmajor < 0 ? -1 : cdevsw_add_with_bdev(-1, &ufs_var_cdevsw, ufs_var_bmajor);
+	if (ufs_var_bmajor < 0 || ufs_var_cmajor < 0) {
+		printf("ufs: var: no device switch entry\n");
+		return;
+	}
+	ufs_var_on = true;
+	(void)devfs_make_node(makedev(ufs_var_bmajor, 0), DEVFS_BLOCK, UID_ROOT, GID_OPERATOR, 0640, "ufs_var");
+	(void)devfs_make_node(makedev(ufs_var_cmajor, 0), DEVFS_CHAR, UID_ROOT, GID_OPERATOR, 0640, "rufs_var");
+	printf("ufs: var: /dev/ufs_var and /dev/rufs_var: darwin from 16 GiB to its end, %llu MB, read and written\n",
+	    ufs_var_bytes() >> 20);
+}
+
+/*
  * The orderly end of a run, from osfmk/arm64/loader_return.c, in the thread that is about to hand
  * control back: ask the saver for the data volume and wait for it, so that a run need not have
  * been told to save. Bounded, and only when a saver registered -- the loader goes on feeding the
@@ -1642,6 +1924,8 @@ redwood_ufs_init(void)
 		}
 	}
 
+	ufs_var_init();                 /* (Test 406) /dev/ufs_var, for HFS at /private/var */
+
 	/*
 	 * ufs_native=1: through this kernel's own driver instead, its own transfer list in the
 	 * controller for the run, if all is as expected; 2: only look; 3: a dry run -- the list in and
@@ -1717,4 +2001,9 @@ redwood_ufs_init(void)
 			thread_deallocate(thread);
 		}
 	}
+	/*
+	 * (November 2026, Test 406) HFS is built into this kernel (bsd/hfs, hfs-627.100.6) for /private/var on the
+	 * flash: registered here, once the VFS is up and this driver, the one it sits on, is ready.
+	 */
+	hfs_builtin_start();
 }

@@ -90,6 +90,16 @@ INJECT="$(printf '%s\n' '/redwood/lib/libredwood.dylib backboardd containermanag
 echo "inject: $(echo "$INJECT" | tr '\n' ';' | wc -c) bytes"
 env REST=1 PREBUILT=1 INJECT="$INJECT" ${GL:+GL="$GL"} ${EXTRA:+EXTRA="$EXTRA"} ${EXTRA_SHARE:+EXTRA_SHARE="$EXTRA_SHARE"} ${RC_JOBS:+RC_JOBS="$RC_JOBS"} ${RC:+RC="$RC"} ./build.sh > /tmp/userland-t$N.log 2>&1 || { tail -5 /tmp/userland-t$N.log; exit 1; }
 ls root/lib | grep r5q | tr '\n' ' '; echo
+# (Test 411) init and var_store from source (pipeline/build_init.sh), in place of prebuilt/userland's, when built
+REMAKE=
+U=$R5Q_PORT/port/build/userland
+if [ -f $U/init ] && [ -f $U/var_store ]; then
+	cp $U/init root/sbin/init
+	cp $U/var_store root/bin/var_store
+	chmod 755 root/sbin/init root/bin/var_store
+	REMAKE=1
+	echo "build_root_app: init and var_store from source (port/build/userland)"
+fi
 # (Test 400) the Metal driver into the built tree, then the image made again (build.sh made root/ and root.apfs)
 M=$R5Q_PORT/port/build/metal
 if [ -f $M/libredwoodmetal.dylib ] && [ -f $M/libredwoodair.dylib ] && [ -f $M/RedwoodMetal ] && [ -f $M/RedwoodMetal-Info.plist ]; then
@@ -98,9 +108,10 @@ if [ -f $M/libredwoodmetal.dylib ] && [ -f $M/libredwoodair.dylib ] && [ -f $M/R
 	cp $M/RedwoodMetal root/lib/RedwoodMetal.bundle/RedwoodMetal
 	cp $M/RedwoodMetal-Info.plist root/lib/RedwoodMetal.bundle/Info.plist
 	chmod 755 root/lib/libredwoodmetal.dylib root/lib/libredwoodair.dylib root/lib/RedwoodMetal.bundle/RedwoodMetal
-	python3 ../tools/apfs/mkapfs.py -z --plain fw -o root.apfs redwood=root | tail -1
+	REMAKE=1
 else
 	echo "build_root_app: no Metal driver added (port/build/metal: libredwoodmetal.dylib, libredwoodair.dylib, RedwoodMetal, RedwoodMetal-Info.plist): the wallpapers will be black"
 fi
+[ -n "$REMAKE" ] && python3 ../tools/apfs/mkapfs.py -z --plain fw -o root.apfs redwood=root | tail -1
 cp root.apfs $R5Q_PORT/port/build/test$N-root.apfs.new
 echo "root test$N built"

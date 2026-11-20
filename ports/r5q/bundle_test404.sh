@@ -1,6 +1,6 @@
 #!/bin/bash
-set -eu
 R5Q_PORT=${R5Q_PORT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/." && pwd)}   # ports/r5q of this repository
+set -eu
 R=${R5Q_PORT}
 cd "$R"
 python3 package_test404.py "$R" | grep -E '"sha256"' | head -1
