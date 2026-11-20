@@ -31,7 +31,14 @@ Notes:
 
 `phone-args.txt` is the standard boot-arg set. Change it when a feature's arg becomes part of every boot.
 
-## The standard image (2026-11-20, Test 401)
+## The standard image (2026-11-20, Test 404)
+
+`port/build/r5q-install-boot-standard.img` = r5q-install-boot-404.img: kernel t404, root test401. The back camera
+(IMX586) gets its pixel PLL and output PLL right for the 19.2 MHz clock, line length 8000, and black level 64 for iOS:
+the white flashing and the ramp with column stripes are gone (wifi/CAMERA-PLAN.md, "The lit-scene look", Tests
+402-404). `phone.py cycle` now retries a flash refused with "a kernel is running". Before it:
+
+## The standard image before (2026-11-20, Test 401)
 
 `port/build/r5q-install-boot-standard.img` = r5q-install-boot-401.img: kernel t398, root test401 (= test400 +
 libr5q-imagent.dylib in imagent: no "iMessage was signed out" "!" on Messages' icon; wifi/WIFI-PLAN.md). Before it:

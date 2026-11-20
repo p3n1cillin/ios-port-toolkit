@@ -3984,6 +3984,8 @@ camdev_close(__unused dev_t dev, __unused int flags, __unused int type, __unused
 	return 0;
 }
 
+extern uint32_t redwood_r5q_cam586_black;      /* (r5q Test 404) redwood_sec_ts.c: the IMX586's black level, 0 or 64 */
+
 static int
 camdev_read(__unused dev_t dev, struct uio *uio, __unused int ioflag)
 {
@@ -4051,8 +4053,10 @@ camdev_read(__unused dev_t dev, struct uio *uio, __unused int ioflag)
 		 * (r5q Test 345) The IMX586 sends its picture with the black level already taken off: a dark frame reads
 		 * 0/0/0 (min/mean/max, 10-bit) on every Bayer site but a few hot pixels, where the S5K3L6 and the IMX616 sit
 		 * at 64. Subtracting 64 again would crush its shadows.
+		 * (r5q Test 404) With its pixel PLL right for our 19.2 MHz clock (redwood_sec_ts.c, imx586_full_tune) it
+		 * sits at 64 like the others: redwood_r5q_cam586_black says which.
 		 */
-		f.black = 0;
+		f.black = redwood_r5q_cam586_black;
 	}
 	f.sequence = place[b].sequence;
 	f.time = place[b].time;

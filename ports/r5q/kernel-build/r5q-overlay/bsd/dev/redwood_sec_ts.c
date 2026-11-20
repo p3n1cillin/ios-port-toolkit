@@ -2378,6 +2378,8 @@ struct sony_cam {
 	uint16_t width, height;                                    /* (Test 350) the frame: the crop's size */
 	uint32_t phy, settle, iop_mpy;
 	uint32_t line_num, line_den, frame_num, frame_den, margin; /* iOS's lines x num / den; its frame lines likewise */
+	uint32_t vt_mpy, exck;                                     /* (Test 402) 0: the tables' (imx586_full_tune) */
+	uint32_t op_div;                                           /* (Test 403) 0x030b; 0: the tables' */
 };
 static const struct sony_cam *cam_live;
 
@@ -3045,6 +3047,26 @@ sony_stream(struct bitbang *cam, uint32_t front_level, const struct sony_cam *c)
 				SLOG("output PLL multiplier %u (~%u Mb/s a lane at 19.2 MHz): %s\n", c->iop_mpy,
 				    192u * c->iop_mpy / 30u, bb_write16(0x030e, c->iop_mpy, 2) ?: "taken");
 			}
+			/*
+			 * (Test 402) The tables are made for a 24 MHz MCLK; ours is the 19.2 MHz crystal. The pixel/ADC PLL
+			 * multiplier raised by 24/19.2 puts its VCO back where the tables meant it, and EXCK_FREQ (0x0136, MHz
+			 * and 256ths) says the clock really given.
+			 */
+			if (c->vt_mpy != 0) {
+				SLOG("pixel PLL multiplier %u, EXCK %u.%02u MHz: %s\n", c->vt_mpy, c->exck >> 8,
+				    (c->exck & 0xff) * 100u / 256u, bb_write16(0x0306, c->vt_mpy, 2) ?:
+				    bb_write16(0x0136, c->exck, 2) ?: "taken");
+			}
+			/*
+			 * (Test 403) The output PLL's VCO at multiplier 160 is 19.2 / 3 x 160 = 1024 MHz, 41% of the tables'
+			 * 2496: the output system clock divider (0x030b) 2 with multiplier 390 puts the VCO back at 2496 MHz
+			 * with ~1.25 Gb/s a lane (the IMX616 is clean at ~1.28).
+			 */
+			if (c->op_div != 0) {
+				SLOG("output system clock divider %u (VCO %u MHz, ~%u Mb/s a lane): %s\n", c->op_div,
+				    192u * c->iop_mpy / 30u, 192u * c->iop_mpy / 30u / c->op_div,
+				    bb_write16(0x030b, c->op_div, 1) ?: "taken");
+			}
 			if (front_level == 5) {
 				const uint16_t *c = crops[s];
 
@@ -3391,7 +3413,7 @@ pins_back:
  * custom3 #1 LDO5 2.8 V. Its module file's power-up order: vana, custom1, vdig, vaf, vio, custom2, the OIS line,
  * custom3, MCLK, reset (10 ms). main_level: 1 its ID; 2-7 as sony_stream's.
  */
-static const struct sony_cam imx586_cam = {
+static struct sony_cam imx586_cam = {
 	/* res5: 2000x1500 (binned) at 120 a second; its middle 1028x772 at 486,364; line length doubled (10752) and frame
 	 * length 5356: ~30 a second at 24 MHz (~24 at our 19.2); the output PLL at 160 (~1 Gb/s a lane: res5's 312 is
 	 * ~2.5) */
@@ -3412,9 +3434,15 @@ static const struct sony_cam imx586_cam = {
  */
 static struct sony_cam imx586_full = {
 	.name = "main camera", .tab = "camera-imx586.tab", .mode = "res5", .crop_x = 0, .crop_y = 0, .width = 2000,
-	.height = 1500, .frame_lines = 5356, .line_length = 10752, .phy = 0, .settle = 28, .iop_mpy = 160, .line_num = 919,
-	.line_den = 778, .frame_num = 5356, .frame_den = 3268, .margin = 48,
+	.height = 1500, .frame_lines = 7199, .line_length = 8000, .phy = 0, .settle = 28, .iop_mpy = 160, .line_num = 919,
+	.line_den = 578, .frame_num = 7199, .frame_den = 3268, .margin = 48,
 };
+/*
+ * (Test 404) Line length 8000, frame 7199 (the same ~30 a second): with both PLLs right (Tests 402-403) the ramp and
+ * column stripes, still there at 4x-8x with 10752, are gone at 8000 even at 16x (`+cam586_ll=8000` on kernel t403).
+ * The line, 4.63 us at the pixel PLL's design rate, still carries a 2000-pixel line (~4.0 us at ~1.25 Gb/s a lane).
+ * The values above are at the tables' pixel PLL (360); imx586_full_tune scales line_den for 450 (to 462).
+ */
 
 /*
  * (Test 397) Boot-arg cam586_ll=N: the full frame's line length N instead of 16128, the frame length and iOS's line
@@ -3424,11 +3452,17 @@ static struct sony_cam imx586_full = {
  * wifi/camraw.py). iOS is told black 0, so that offset was the Camera's flat purple streaks.
  */
 static void rxlog(const char *format, ...) __printflike(1, 2);
+uint32_t redwood_r5q_cam586_black;      /* (Test 404) the IMX586's black level for iOS (redwood_camera.c): 0 or 64 */
 static void
 imx586_full_tune(void)
 {
-	uint32_t ll = 0;
+	uint32_t ll = 0, vt = 450;
+	static bool done;
 
+	if (done) {
+		return;
+	}
+	done = true;
 	if (PE_parse_boot_argn("cam586_ll", &ll, sizeof(ll)) && ll >= 8000 && ll <= 32000) {
 		imx586_full.line_length = (uint16_t)ll;
 		imx586_full.frame_lines = (uint16_t)(3571u * 16128u / ll);      /* (the same ~30 a second as 3571 at 16128) */
@@ -3437,6 +3471,39 @@ imx586_full_tune(void)
 		rxlog("main camera: full frame with line length %u, frame %u lines, line ratio %u/%u\n", ll,
 		    imx586_full.frame_lines, imx586_full.line_num, imx586_full.line_den);
 	}
+	/*
+	 * (Test 402) The lit-scene look (2026-11-20): the back camera's frames carried a large offset -- a ramp from the
+	 * top rows to the bottom, column stripes, growing faster than the gain and hardly with the exposure -- that buried
+	 * a dim room (the scene showed only with the torch on). Its pixel/ADC PLL ran at 80% of its design: the tables'
+	 * multiplier 360 is for a 24 MHz MCLK, ours is 19.2. Boot-arg cam586_vt=N: the multiplier (default 450, the
+	 * design's VCO again; 0 or 360: the tables', as before). A line then takes 19.2/24 the time, so iOS's line ratio's
+	 * denominator shrinks the same; the frame length stays (5356 lines: 30 a second now, ~24 before).
+	 */
+	(void)PE_parse_boot_argn("cam586_vt", &vt, sizeof(vt));
+	redwood_r5q_cam586_black = 0;
+	if (vt >= 300 && vt <= 500 && vt != 360) {
+		redwood_r5q_cam586_black = 64;                                  /* (Test 402: a pedestal of 64 from then on) */
+		imx586_cam.vt_mpy = imx586_full.vt_mpy = vt;
+		imx586_cam.exck = imx586_full.exck = 0x1333;                  /* 19.2 MHz: 19 and 0x33/256 */
+		imx586_cam.line_den = imx586_cam.line_den * 360u / vt;
+		imx586_full.line_den = imx586_full.line_den * 360u / vt;
+	}
+	rxlog("main camera: pixel PLL multiplier %u (%s), line ratio %u/%u\n", imx586_full.vt_mpy ?: 360u,
+	    imx586_full.vt_mpy ? "for the 19.2 MHz clock" : "the tables'", imx586_full.line_num, imx586_full.line_den);
+	/*
+	 * (Test 403) Kernel t402: at 1x and 2x the frame is exactly 64 everywhere (no noise, no dim scene); from 4x the
+	 * ramp and column stripes are back: the black-level clamp takes off a large offset. The output PLL's VCO was at
+	 * 41% of its design. Boot-args cam586_opdiv=D (1 = as before, multiplier 160) and cam586_iop=N (the multiplier with
+	 * D 2; default 390: VCO 2496 MHz, ~1.25 Gb/s a lane).
+	 */
+	uint32_t opdiv = 2, iop = 390;
+	(void)PE_parse_boot_argn("cam586_opdiv", &opdiv, sizeof(opdiv));
+	(void)PE_parse_boot_argn("cam586_iop", &iop, sizeof(iop));
+	if (opdiv == 2 && iop >= 250 && iop <= 420) {
+		imx586_cam.op_div = imx586_full.op_div = 2;
+		imx586_cam.iop_mpy = imx586_full.iop_mpy = iop;
+	}
+	rxlog("main camera: output PLL multiplier %u, divider %u\n", imx586_full.iop_mpy, imx586_full.op_div ?: 1u);
 }
 
 static void

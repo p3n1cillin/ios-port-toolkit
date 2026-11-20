@@ -163,3 +163,26 @@ microphone it changes nothing heard (the input is silence); it matters once the 
   each callback afterwards.
 - Left: catching the first callback's host time against the node's start values. That needs the fill on again, with
   its 39 MB per callback, so it waits until the microphone works and A/V sync matters.
+
+### The 468.7 s, narrowed to the first callback (2026-11-20)
+
+- The render handler (CMCapture+0xa89c, iOS 16.5; `dsc_dis.py`), per callback, with `ts` the AudioTimeStamp:
+  - sample = CMTimeMake(ts->mSampleTime, the format's rate);
+  - if `_nextExpectedHostTime` (+296) is not 0 and `_nextExpectedSampleTime` (+304) is valid:
+    host gap = HostTimeToNanos(ts->mHostTime − _nextExpectedHostTime), and sample gap = sample −
+    _nextExpectedSampleTime;
+  - if the host gap is past `_ioprocTimeStampDeltaLimit` (+328), the sample gap is not, and
+    `_silenceFramesFillingDisabled` (+584) is clear, the host gap becomes frames (at the clock's rate against the
+    host's, `_clock` +224) in the buffer's `[+0x38]`: the silence padding.
+- **Measured** (libr5q-audiodump2, Camera open; filling turned ON from 1.1 s to 1.7 s after `-start:`):
+  - Twice, no silence was made: `_silenceFramesGeneratedSinceLastAURenderProc` stayed 0, and mediaserverd stayed small.
+  - `_nextExpectedHostTime` tracked the clock (307.977 s against 307.993 s now).
+  - `_prevPTS` is host time at 44.1 kHz (13,580,827 / 44100 = 307.955 s), and the sample time counts from the
+    stream's start (45,253 = 1.03 s).
+  - So in steady state the clocks agree. The 468.7 s comes only from the first callback(s): the starting
+    `_nextExpectedHostTime` against the first `mHostTime`. With filling on, the padding feeds the next expectations,
+    so the gap stays.
+- The audio stream is 44.1 kHz with 941-frame callbacks (21.3 ms), ~47 a second.
+- **Caution:** the 4 s dump of the first build read a node already freed (the session had restarted): garbage, no
+  crash. libr5q-audiodump3 (the same file, rewritten) retains the node. It samples just the clock fields at `-start:`
+  (before and after the original) and every ~2 ms for ~0.6 s, to catch the first callback.

@@ -537,7 +537,19 @@ def cycle(image, follow, new_args=None):
         follow_run(out, follow)
         return
     print('3/5 flashing BOOT and reading it back', flush=True)
-    print(fb('flash', 'boot', str(image)))
+    for attempt in range(3):
+        out_flash = fb('flash', 'boot', str(image), check=attempt == 2)
+        # (2026-11-20, Tests 402-403) Every first cycle from a running iOS: the catch in step 2 met iOS's own live-mode
+        # listener before the restart, and the flash was refused. End the run again, wait for the real restart, retry.
+        if 'a kernel is running' not in out_flash:
+            break
+        print('    refused: "a kernel is running" -- ending the run again and catching the restart', flush=True)
+        fb('oem', 'stop', check=False)
+        if not gone(60):
+            fb('reboot', check=False)
+            gone(30)
+        wait_for_phone()
+    print(out_flash)
     back = out / 'boot-readback.bin'
     staged(f'readpart boot 0 {64 << 20:x}', back)
     got = hashlib.sha256(back.read_bytes()).hexdigest()

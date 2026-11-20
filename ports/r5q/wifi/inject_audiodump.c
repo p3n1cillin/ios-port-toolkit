@@ -59,7 +59,8 @@ dump(void *node)
 		case 'f': snprintf(value, sizeof(value), "%f", *(const float *)p); break;
 		case '@': case '^': snprintf(value, sizeof(value), "%p", *(void *const *)p); break;
 		case '{':
-			if (strncmp(type, "{?=qiIq}", 8) == 0 || strncmp(type, "{CMTime=qiIq}", 13) == 0) {
+			if (strncmp(type, "{?=qiIq}", 8) == 0 || strncmp(type, "{CMTime=qiIq}", 13) == 0 ||
+			    strncmp(type, "{?=\"value\"q\"timescale\"i", 23) == 0) {
 				int64_t v = *(const int64_t *)p;
 				int32_t ts = *(const int32_t *)(p + 8);
 				uint32_t fl = *(const uint32_t *)(p + 12);
@@ -81,15 +82,69 @@ later(void *node)
 	dump(node);
 }
 
+static void
+set_fill(void *node, int on)
+{
+	Ivar v = class_getInstanceVariable(objc_getClass("BWAudioSourceNode"), "_silenceFramesFillingDisabled");
+	if (v != NULL) {
+		*((uint8_t *)node + ivar_getOffset(v)) = on ? 0 : 1;
+		say("audiodump: silence filling %s\n", on ? "ON (for the measurement)" : "off again");
+	}
+}
+
+static void
+fill_on(void *node)
+{
+	set_fill(node, 1);
+}
+
+static void
+fill_off(void *node)
+{
+	set_fill(node, 0);
+}
+
+/* (2026-11-20, second run) the clock fields alone, tight: at -start: and every 2 ms after it, through the first
+ * callbacks, to catch the starting _nextExpectedHostTime against the first callback's. */
+id objc_retain(id);
+void objc_release(id);
+
+static ptrdiff_t
+off(const char *name)
+{
+	Ivar v = class_getInstanceVariable(objc_getClass("BWAudioSourceNode"), name);
+	return v != NULL ? ivar_getOffset(v) : -1;
+}
+
+static int snaps;
+
+static void
+snap(void *node)
+{
+	const uint8_t *p = (const uint8_t *)node;
+	ptrdiff_t h = off("_nextExpectedHostTime"), st = off("_nextExpectedSampleTime"), rc = off("_auRenderCount"),
+	    pp = off("_prevPTS"), sf = off("_silenceFramesGeneratedSinceLastAURenderProc");
+
+	say("audiodump: snap %d mach %llu host %llu sample %lld/%d fl %u renders %lld prevPTS %lld/%d silence %lld\n", snaps,
+	    (unsigned long long)mach_absolute_time(), *(const unsigned long long *)(p + h), *(const long long *)(p + st),
+	    *(const int *)(p + st + 8), *(const unsigned *)(p + st + 12), *(const long long *)(p + rc),
+	    *(const long long *)(p + pp), *(const int *)(p + pp + 8), *(const long long *)(p + sf));
+	if (++snaps < 300) {
+		dispatch_after_f(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_MSEC),
+		    dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0), node, snap);
+	} else {
+		objc_release((id)node);
+	}
+}
+
 static BOOL
 my_start(id self, SEL cmd, id *error)
 {
+	snaps = 0;
+	objc_retain(self);
+	snap((void *)self);              /* before the original: the node's values going in */
 	BOOL ok = orig_start(self, cmd, error);
-	void *node = (void *)self;
-	dispatch_queue_t q = dispatch_get_global_queue(QOS_CLASS_UTILITY, 0);
-
-	dispatch_after_f(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), q, node, later);
-	dispatch_after_f(dispatch_time(DISPATCH_TIME_NOW, 4 * NSEC_PER_SEC), q, node, later);
+	snap((void *)self);              /* right after it (this one schedules the 2 ms train) */
 	return ok;
 }
 

@@ -969,3 +969,68 @@ candidate designs).
     cause. It keeps the two in step.
   - Still for the owner: a lit scene, for colour (white balance and tuning). In a dark room iOS's auto-exposure sits
     at ~7 ms and 3-5x gain, and the preview is noise.
+
+## The lit-scene look (owner, 2026-11-20): the back camera flashes white with lines, the front is clear
+
+- **What the owner saw:** the phone stood up so both cameras see the room. The front camera's picture is fairly
+  clear. The back camera's flashes white and is full of lines. Screenshots showed purple noise with horizontal
+  streaks, then fully white: iOS's auto-exposure swinging.
+- **Raw frames (camgrab, Camera closed; local only):**
+  - The front IMX616 at 3000 lines and 4x shows the room: a dim room (at 400 lines and 1x it is black).
+  - The back IMX586 at 50 / 400 / 2000 lines and 1x: means 70 / 80 / 85. A 40x longer exposure gave +15. Every
+    frame has the same shape: a ramp from ~5 at the top rows to ~120 at the bottom, column stripes, no scene. At 8x
+    the mean is ~230 (more than 8x the 1x level), and 3000 lines against 400 still adds only ~10.
+  - The RAW10 packing is right: the fifth byte of each group averages 129, as random low bits do.
+  - **New tool `torchset LEVEL`** (wifi/torchset.c): the back flashlight through /dev/redwood-torch, the device iOS's
+    flashlight uses (the kernel's current cap, 30 s limit and temperature guards). With the torch on, the back
+    camera's raw frame **shows the scene in front sharply** (exposure 400 lines, 1x). So the sensor, lens, link and
+    unpacking work. The fault is a large offset that buries a dim room, and iOS's auto-exposure amplifies it into
+    white. (The raw picture also reads mirror-wise left to right: to be checked against the Camera app once the
+    picture is right; res5's `0x0101` is 0.)
+- **A likely cause:** the IMX586's tables are made for a 24 MHz MCLK (`0x0136 = 0x18`; res5's pixel PLL: pre-divider 4,
+  multiplier 360 = a 2160 MHz VCO). This phone feeds the 19.2 MHz crystal, so that VCO runs at 1728 MHz (80% of the
+  design), and with it the sensor's pixel and ADC timing. Analog timing off its design fits an offset that grows
+  with gain, a row ramp and column stripes. The front IMX616 runs at 19.2 MHz too, but its picture is clean.
+- **Test 402 (kernel t402, root test401):** `struct sony_cam` gets `vt_mpy` / `exck`; `imx586_full_tune()` sets the
+  IMX586's pixel PLL multiplier to **450** (VCO 2160 MHz again) and EXCK_FREQ to 19.2 MHz (`0x0136 = 0x1333`).
+  Boot-arg `cam586_vt=N` picks another multiplier (300-500; 360 = the tables' as before). A line then takes 19.2/24
+  as long: 6.22 us at line length 10752 (the link needs ~4.9). So iOS's line ratio becomes 919/622, and the frame
+  (5356 lines) is 30 a second instead of ~24.
+- **Test 402 result:** booted ("pixel PLL multiplier 450, EXCK 19.19 MHz: taken", line ratio 919/622).
+  - At 1x and 2x (400 and 5300 lines) every pixel is now **exactly 64**: a pedestal like the other two sensors', but
+    with no noise at all and no dim scene either. With the torch the scene stands on a clean 64.
+  - From 4x the ramp and column stripes are back, above 64 (4x/5300 lines: mean 89; 8x: 142-181, values down to 0).
+  - Reading: the sensor's black-level clamp now subtracts a large offset. Whatever is under the dim scene is still
+    there, and below 4x it is clipped to the pedestal with the scene.
+- **Next suspect, Test 403 (kernel t403):** the output (MIPI) PLL. The tables' 0x030d = 3 with multiplier 312 makes a
+  2496 MHz VCO at 24 MHz. Ours (multiplier 160 at 19.2) is 1024 MHz, 41% of that, likely below its range. For the
+  IMX586 now: the output system clock divider `0x030b = 2` with multiplier 390, so the VCO is 2496 MHz again and the
+  lanes run at ~1.25 Gb/s (the IMX616 is clean at ~1.28). Boot-args `cam586_opdiv=1` (as before) and `cam586_iop=N`.
+- **Test 403 result:** booted ("output PLL multiplier 390, divider 2"). The link stays clean (127,504 packets, ECC 0,
+  CRC 0, 2,496,960 bytes a frame). The artifact roughly halved: 4x / 5300 lines mean 73 (was 89), 8x / 3000 lines 103
+  (was 142-181), the same ramp and stripes. 1x and 2x still read exactly 64.
+- **Next:** a shorter line. Test 397 showed the ramp grows with line length (16128 much worse than 10752). With both
+  PLLs at their design VCOs the link needs ~4.0 us a line, the line at 10752 is 6.22 us. `+cam586_ll=8000` on kernel
+  t403 makes it 4.63 us (frame 7199 lines, still ~30 a second).
+- **`+cam586_ll=8000` on kernel t403 (line 4.63 us, frame 7199 lines, iOS's line ratio 919/462):**
+  - **The ramp and column stripes are gone at every gain.** 4x / 8x / 16x: rows and columns flat at 64; the link is clean.
+  - With the torch the scene is clean on 64.
+  - Left: 98.8-99.9% of pixels read exactly 64, even at 16x, so the sensor's black-level clamp still takes off a little
+    too much. A dim room's shadows are clipped to black. A brightly lit scene is needed to judge the colour.
+  - The Camera app: the white flashing is gone. The dim room's preview is black with the hot pixels sparkling at iOS's
+    16x gain. iOS was still told black 0 for the IMX586, though it now sits at 64.
+- **Test 404 (kernel t404, root test401):** line length 8000 and frame 7199 are imx586_full's defaults. iOS is told
+  black 64 for the IMX586 whenever the pixel-PLL fix is on (`redwood_r5q_cam586_black`, set in imx586_full_tune and
+  read in redwood_camera.c); with `cam586_vt=360` it is 0 as before.
+- Tool: `phone.py cycle` retries a flash refused with "a kernel is running". On every first cycle from a running iOS,
+  step 2 had caught iOS's own live-mode listener before the restart. It now ends the run again, waits for the real
+  restart, and flashes again (3 tries; the read-back check still guards).
+- **Test 404 result:** booted. The first flash was refused and phone.py's new retry got it in by itself. Pixel PLL 450,
+  line ratio 919/462; output PLL 390 with divider 2. The raw header says **black 64**.
+  - 8x, 3000 lines (the dim room): mean 66.2 and noise again (min 29); rows 0-1 above black, rising to ~9 at the
+    bottom tenth. That is a small leftover of the ramp, against ~200 on kernel t398.
+  - The Camera app in the dim room: no white flash. iOS sits at its highest gain; the preview is dark on one side and
+    noisy, streaky on the other (the sensor's bottom rows).
+  - **Standard image = r5q-install-boot-404.img** (kernel t404, root test401).
+  - Still to judge with the owner: a brightly lit scene (colour, white balance, whether the leftover streaks matter at
+    normal gain), and whether the picture is mirrored left to right.
