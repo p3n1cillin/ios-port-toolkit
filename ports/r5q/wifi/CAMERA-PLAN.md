@@ -1034,3 +1034,10 @@ candidate designs).
   - **Standard image = r5q-install-boot-404.img** (kernel t404, root test401).
   - Still to judge with the owner: a brightly lit scene (colour, white balance, whether the leftover streaks matter at
     normal gain), and whether the picture is mirrored left to right.
+- **Desk check (2026-11-20):** is res5's `0x0220 = 0x62` an on-sensor HDR merge that crushes the shadows? Probably
+  not. The MIPI CCS register reference (Linux Documentation/driver-api/media/drivers/ccs/ccs-regs.asc) and Linux's
+  imx258.c put the HDR enable in bit 0 of 0x0220 (0x0222: the exposure ratio); 0x62 has bit 0 clear. No public
+  IMX586-specific register map was found, so this is a pointer, not proof.
+- Next for the clipped shadows needs a kernel (USB): a debug path to write single sensor registers at run time
+  (e.g. the pedestal 0x0008/0x0009 and the binning weight 0x0902), then camgrab over Wi-Fi to see what moves the
+  clamp.
