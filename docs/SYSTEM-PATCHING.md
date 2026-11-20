@@ -94,3 +94,20 @@ log, so read them there:
 2. `python3 tools/ios/tracev3.py LOGDIR 'REGEX'` (or `--pid N`, `--sub com.apple.telephony.abm`). It prints the
    entries with their format strings filled in. Private arguments stay `<private>`.
 3. The copy holds private device data (names, addresses, identifiers). Keep it local and never commit it.
+
+## Metal in one process, and wallpapers at a non-native scale (r5q, Tests 399-400)
+
+- **Metal in one process.** If a port has a Metal driver bundle but system-wide discovery is too risky, a library
+  injected into the processes that need it can register the driver there alone:
+  - make the device with `-initWithAcceleratorPort:` on the accelerator service;
+  - hand it to Metal's internal `MTLAddDevice` (its address is found against `MTLCreateSystemDefaultDevice`);
+  - call `MTLCreateSystemDefaultDevice()` once first. Early in a process the device list does not exist yet, and
+    MTLAddDevice asserts.
+
+  CoreAnimation's own shaders (QuartzCore default.metallib) and the poster frameworks' ship as AIR. Maps' VectorKit
+  does not.
+- **Wallpaper variants.** WallpaperKit picks a wallpaper by "logical screen class" (points and `-[UIScreen scale]`).
+  A port at another scale than the model it claims finds "No compatible wallpaper" and shows black. Answering the
+  model's real scale in the poster extensions only (not in SpringBoard) makes the shipped variants match.
+- Tools: `tools/ios/dsc_global_writers.py` (who stores to a static) and `dsc_ivar_users.py` (who reads an ivar).
+

@@ -39,6 +39,13 @@ clang -target arm64-apple-ios16.5 -isysroot $SDK -fuse-ld=lld -O1 -dynamiclib \
 clang -target arm64-apple-ios16.5 -isysroot $SDK -fuse-ld=lld -O1 -dynamiclib -install_name /redwood/lib/libr5q-bbd.dylib -fblocks -lobjc -framework CoreFoundation -framework IOKit -o obj/libr5q-bbd.dylib $W/inject_bbd.c 2>&1 | grep -v 'warning\|^ \|^$\|generated' || true
 # (Test 395) libr5q-media.dylib into mediaserverd: CMCapture's audio silence filling off (wifi/inject_media.c)
 clang -target arm64-apple-ios16.5 -isysroot $SDK -fuse-ld=lld -O1 -dynamiclib -install_name /redwood/lib/libr5q-media.dylib -lobjc -o obj/libr5q-media.dylib $W/inject_media.c 2>&1 | grep -v 'warning\|^ \|^$\|generated' || true
+# (Test 400) libr5q-poster.dylib into PosterBoard and the poster extensions: the port's Metal device in each
+# (MTLAddDevice, per process) and the @3x wallpaper variants found (wifi/inject_poster.m). It needs the Metal driver
+# in the root's /redwood/lib: RedwoodMetal.bundle (Info.plist + the driver as RedwoodMetal), libredwoodmetal.dylib,
+# libredwoodair.dylib -- built from the donor (userland redwoodmetal.m, Mesa with AIR=1; wifi/METAL-FEASIBILITY.md),
+# added after build.sh from port/build/metal (the bundle as RedwoodMetal + RedwoodMetal-Info.plist), see the end.
+clang -target arm64-apple-ios16.5 -isysroot $SDK -fuse-ld=lld -O1 -dynamiclib -fobjc-arc -framework Foundation -framework UIKit -framework Metal -framework IOKit -install_name /redwood/lib/libr5q-poster.dylib -o obj/libr5q-poster.dylib $W/inject_poster.m 2>&1 | grep -v 'warning\|^ \|^$\|generated' || true
+POSTERS="PosterBoard CollectionsPoster PhotosPosterProvider GradientPosterExtension EmojiPosterExtension PridePosterExtension UnityPosterExtension ExtragalacticPoster LegacyPoster WeatherPoster AegirPoster"
 EXTRA_LINE=""
 rm -f obj/libr5q-sbdiag.dylib
 if [ -n "$SBDIAG" ]; then
@@ -76,9 +83,21 @@ if [ -f $IOS_WORK/linux-source/fw-camera-r5q/camera-imx586.isp ]; then
 	cp $IOS_WORK/linux-source/fw-camera-r5q/camera-imx586.isp $IOS_WORK/linux-source/fw-camfake/camera-s5khm2sd.isp
 fi
 grep -q 'fw-camfake' build.sh || sed -i 's|^if \[ -d \.\./fw-gpu \]; then|if [ -d ../fw-camfake ]; then mkdir -p root/fw; cp ../fw-camfake/* root/fw/; fi      # (r5q: synthetic camera table)\n&|' build.sh
-INJECT="$(printf '%s\n' '/redwood/lib/libredwood.dylib backboardd containermanagerd containermanagerd_system' '/redwood/lib/libredwood-sb.dylib SpringBoard' '/redwood/lib/libredwood-media.dylib mediaserverd' '/redwood/lib/libredwood-app.dylib Sileo' '/redwood/lib/libredwood-tweaks.dylib Preferences' "/redwood/lib/libr5q-app.dylib $APPS" "/redwood/lib/libr5q-bbd.dylib backboardd" "/redwood/lib/libr5q-media.dylib mediaserverd" "$EXTRA_LINE")"
+INJECT="$(printf '%s\n' '/redwood/lib/libredwood.dylib backboardd containermanagerd containermanagerd_system' '/redwood/lib/libredwood-sb.dylib SpringBoard' '/redwood/lib/libredwood-media.dylib mediaserverd' '/redwood/lib/libredwood-app.dylib Sileo' '/redwood/lib/libredwood-tweaks.dylib Preferences' "/redwood/lib/libr5q-app.dylib $APPS" "/redwood/lib/libr5q-bbd.dylib backboardd" "/redwood/lib/libr5q-media.dylib mediaserverd" "/redwood/lib/libr5q-poster.dylib $POSTERS" "$EXTRA_LINE")"
 echo "inject: $(echo "$INJECT" | tr '\n' ';' | wc -c) bytes"
 env REST=1 PREBUILT=1 INJECT="$INJECT" ${GL:+GL="$GL"} ${EXTRA:+EXTRA="$EXTRA"} ${EXTRA_SHARE:+EXTRA_SHARE="$EXTRA_SHARE"} ${RC_JOBS:+RC_JOBS="$RC_JOBS"} ${RC:+RC="$RC"} ./build.sh > /tmp/userland-t$N.log 2>&1 || { tail -5 /tmp/userland-t$N.log; exit 1; }
 ls root/lib | grep r5q | tr '\n' ' '; echo
+# (Test 400) the Metal driver into the built tree, then the image made again (build.sh made root/ and root.apfs)
+M=$R5Q_PORT/port/build/metal
+if [ -f $M/libredwoodmetal.dylib ] && [ -f $M/libredwoodair.dylib ] && [ -f $M/RedwoodMetal ] && [ -f $M/RedwoodMetal-Info.plist ]; then
+	mkdir -p root/lib/RedwoodMetal.bundle
+	cp $M/libredwoodmetal.dylib $M/libredwoodair.dylib root/lib/
+	cp $M/RedwoodMetal root/lib/RedwoodMetal.bundle/RedwoodMetal
+	cp $M/RedwoodMetal-Info.plist root/lib/RedwoodMetal.bundle/Info.plist
+	chmod 755 root/lib/libredwoodmetal.dylib root/lib/libredwoodair.dylib root/lib/RedwoodMetal.bundle/RedwoodMetal
+	python3 ../tools/apfs/mkapfs.py -z --plain fw -o root.apfs redwood=root | tail -1
+else
+	echo "build_root_app: no Metal driver added (port/build/metal: libredwoodmetal.dylib, libredwoodair.dylib, RedwoodMetal, RedwoodMetal-Info.plist): the wallpapers will be black"
+fi
 cp root.apfs $R5Q_PORT/port/build/test$N-root.apfs.new
 echo "root test$N built"

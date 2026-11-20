@@ -75,3 +75,37 @@ through the port's OpenGL ES path (redwood-gl in userland, the Adreno 640 in the
   on`, and gone at reboot).
 - What the driver *can* serve: Metal code that ships AIR (`.metallib` with bitcode -- CoreImage's and other system
   libraries, apps built from source); MSL compiled at run time would also need Apple's front end to hand AIR over.
+
+## Tests 399-400 (2026-11-20): THE WALLPAPERS -- lock screen and home screen, through the port's Metal driver
+
+- **Why they were black, in two layers.**
+  1. PosterBoard and the poster extensions draw posters through CoreAnimation's Metal renderer, and there was no
+     Metal device. Unlike Maps (Apple-GPU code only), their shaders ship as AIR bitcode, which the driver compiles:
+     QuartzCore default.metallib (141 functions), PhotosUICore (4), PridePoster (8), CoreImage (58).
+  2. With a device, still black. CollectionsPoster logged "No compatible wallpaper found on disk (wallpaperIdentifier:
+     '7400' ...)" and skipped the iOS 16 collection as empty. WallpaperKit picks a variant by its "logical screen
+     class", built by an internal function (+0x11c60) from `"%.0fw-%.0fh@%@x~%@"` with [UIScreen mainScreen]'s bounds
+     and -scale. This port runs at 2x (`fbscale=2`): 375w-812h@2x~iphone. Apple ships the iPhone X's variants as @3x
+     only. The files were all there (/Library/Wallpaper, 21 MB).
+- **libr5q-poster.dylib** (wifi/inject_poster.m) is injected into PosterBoard and the poster extensions:
+  CollectionsPoster, PhotosPosterProvider, GradientPosterExtension, EmojiPosterExtension, PridePosterExtension,
+  UnityPosterExtension, ExtragalacticPoster, LegacyPoster, WeatherPoster, AegirPoster.
+  - **A Metal device in that process only.** It opens /redwood/lib/RedwoodMetal.bundle, calls
+    `-initWithAcceleratorPort:` on IOAcceleratorES, and hands the device to Metal's `MTLAddDevice` (unslid
+    0x181a1875c), as metal_drv_test does.
+    - Before that it calls `MTLCreateSystemDefaultDevice()` once. That creates Metal's `_deviceArray`; in an extension
+      at load time MTLAddDevice otherwise asserts "_deviceArray != NULL" (SIGABRT; found with libr5q-crash). The
+      global is also checked before adding, so a failure means no device, not an abort.
+    - System-wide discovery stays off. backboardd and SpringBoard keep their GL road.
+  - **@3x for the extensions.** `-[UIScreen scale]` answers 3 for 2 in the extensions; PosterBoard and SpringBoard are
+    excluded. That is the iPhone X's real scale: the shipped variants match, and the layers render at 3x and are
+    scaled for the display. `-[WKDefaultWallpaperManager deviceLogicalScreenClass]` is wrapped too, at WallpaperKit's
+    load (dyld add-image callback), but on its own it did not help: the class is kept in an ivar.
+- **Result (Test 400: kernel t398, root test400 = test395 + the Metal driver files + libr5q-poster; a clean boot):**
+  - the lock screen shows the iOS 16 default wallpaper;
+  - after `phone.py unlock` (a 200 ms swipe: 300-400 ms ones don't unlock) the home screen has it behind the icons;
+  - apps afterwards; 55% memory free; CollectionsPoster 31 MB, PosterBoard 21 MB.
+- build_root_app.sh builds libr5q-poster and injects it. It adds the Metal driver after build.sh from
+  port/build/metal: libredwoodmetal.dylib, libredwoodair.dylib, RedwoodMetal (the bundle's executable, a Mach-O
+  bundle, not the dylib), RedwoodMetal-Info.plist. All local builds, not in the repository.
+- Tools from this: `toolkit/tools/ios/dsc_global_writers.py` (who stores to a library's static).
