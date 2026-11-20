@@ -10746,6 +10746,223 @@ bt_stage4(void)
 	}
 }
 
+/*
+ * (r5q Test 352) Cellular, the first look: iOS's CommCenter speaks QMI to its baseband (libQMIParserDynamic, QMI_NAS /
+ * QMI_DMS / QMI_BSP), and this phone's modem offers the standard QMI services over QRTR (node 0: WDS 0x1, DMS 0x2, NAS
+ * 0x3, WMS 0x5, VOICE 0x9, UIM 0xb ...). Before any bridge: does the modem work here -- a SIM, its state, the modem's
+ * operating mode, network registration, signal. Boot-arg cell=1 reads them; cell=2 also sets the modem online (DMS
+ * SET_OPERATING_MODE, as Android's HLOS does) when it is in low power, then watches registration for ~45 s. Only states
+ * are logged: no IMSI, ICCID, IMEI, phone number or operator code.
+ */
+static struct redwood_qrtr_port *cell_port;
+static uint8_t cell_answer[1024];
+static volatile size_t cell_answer_len;
+static volatile uint16_t cell_answer_msg;
+static uint16_t cell_txn = 1;
+
+static void
+cell_receive(__unused void *context, __unused uint32_t node, __unused uint32_t port, const void *data, size_t length)
+{
+	const uint8_t *m = data;
+
+	if (length < 7 || m[0] != 2) {          /* responses only (indications are left) */
+		return;
+	}
+	if (length > sizeof(cell_answer)) {
+		length = sizeof(cell_answer);
+	}
+	memcpy(cell_answer, data, length);
+	cell_answer_msg = (uint16_t)(m[3] | m[4] << 8);
+	__asm__ volatile ("dmb ish" ::: "memory");
+	cell_answer_len = length;
+}
+
+static bool
+cell_where(uint32_t service, uint32_t *node, uint32_t *port)
+{
+	bool found = false;
+
+	lck_mtx_lock(&qrtr_lock);
+	for (unsigned i = 0; i < sizeof(qrtr_servers) / sizeof(qrtr_servers[0]) && !found; i++) {
+		if (qrtr_servers[i].there && qrtr_servers[i].service == service && qrtr_servers[i].node == 0) {
+			*node = qrtr_servers[i].node;
+			*port = qrtr_servers[i].port;
+			found = true;
+		}
+	}
+	lck_mtx_unlock(&qrtr_lock);
+	return found;
+}
+
+/* a request to `service`; the answer's TLVs (after the 7-byte header) and their length, or NULL; *result the QMI result */
+static const uint8_t *
+cell_ask(uint32_t service, uint16_t msg, const uint8_t *tlvs, size_t tlvs_len, size_t *out_len, uint16_t *result,
+    uint16_t *error)
+{
+	uint8_t out[64];
+	uint32_t node, port;
+	uint16_t txn = cell_txn++;
+	const uint8_t *r;
+	uint16_t rl = 0;
+
+	if (!cell_where(service, &node, &port) || tlvs_len > sizeof(out) - 7) {
+		return NULL;
+	}
+	out[0] = 0;
+	out[1] = (uint8_t)txn;
+	out[2] = (uint8_t)(txn >> 8);
+	out[3] = (uint8_t)msg;
+	out[4] = (uint8_t)(msg >> 8);
+	out[5] = (uint8_t)tlvs_len;
+	out[6] = (uint8_t)(tlvs_len >> 8);
+	if (tlvs_len != 0) {
+		memcpy(out + 7, tlvs, tlvs_len);
+	}
+	cell_answer_len = 0;
+	if (qrtr_send(cell_port, node, port, out, 7 + tlvs_len) != 0) {
+		return NULL;
+	}
+	for (unsigned ms = 0; ms < 3000; ms += 10) {
+		if (cell_answer_len != 0 && cell_answer_msg == msg) {
+			*out_len = cell_answer_len - 7;
+			r = qmi_tlv(cell_answer + 7, *out_len, 0x02, &rl);
+			*result = r != NULL && rl >= 4 ? (uint16_t)(r[0] | r[1] << 8) : 0xffff;
+			*error = r != NULL && rl >= 4 ? (uint16_t)(r[2] | r[3] << 8) : 0xffff;
+			return cell_answer + 7;
+		}
+		sleep_ms(10);
+	}
+	return NULL;
+}
+
+static void
+cell_serving(const char *when)
+{
+	static const char *const reg[] = { "not registered", "REGISTERED", "searching", "registration denied", "unknown" };
+	const uint8_t *a, *v;
+	size_t n = 0;
+	uint16_t res = 0, err = 0, vl = 0;
+	char radios[64] = "";
+
+	a = cell_ask(0x3, 0x24, NULL, 0, &n, &res, &err);
+	if (a == NULL || res != 0 || (v = qmi_tlv(a, n, 0x01, &vl)) == NULL || vl < 5) {
+		printf("cell: %s: NAS serving system: %s (result %u error %u)\n", when, a ? "no answer TLV" : "NO ANSWER", res, err);
+		return;
+	}
+	for (unsigned i = 0, at = 0; i < v[4] && 5u + i < vl && at < sizeof(radios) - 8; i++) {
+		static const char *const rif[] = { "none", "CDMA", "HDR", "AMPS", "GSM", "UMTS", "?6", "?7", "LTE", "TD-SCDMA" };
+
+		at += snprintf(radios + at, sizeof(radios) - at, " %s", v[5 + i] < 10 ? rif[v[5 + i]] : "other");
+	}
+	printf("cell: %s: NAS serving system: %s, CS %s, PS %s, network type %u, radio:%s\n", when, v[0] < 5 ? reg[v[0]] : "?",
+	    v[1] == 1 ? "attached" : "detached", v[2] == 1 ? "attached" : "detached", v[3], radios[0] ? radios : " none");
+	a = cell_ask(0x3, 0x20, NULL, 0, &n, &res, &err);
+	if (a != NULL && res == 0 && (v = qmi_tlv(a, n, 0x01, &vl)) != NULL && vl >= 2) {
+		printf("cell: %s: NAS signal strength %d dBm (radio %u)\n", when, (int8_t)v[0], v[1]);
+	} else {
+		printf("cell: %s: NAS signal strength: none (result %u error %u)\n", when, res, err);
+	}
+}
+
+/*
+ * (Test 353) The SIM slots: UIM GET_CARD_STATUS (0x2f), TLV 0x10 {four u16 session indexes, u8 cards, per card {state,
+ * UPIN state, UPIN retries, UPUK retries, error code, u8 apps, per app {type, state, perso state, perso feature, perso
+ * retries, perso unblock retries, u8 AID length, AID, univ PIN, PIN1 state, PIN1 retries, PUK1 retries, PIN2 state,
+ * PIN2 retries, PUK2 retries}}}. Test 352 read card 1 "ERROR", 0 applications -- before the modem was online.
+ */
+static void
+cell_sim(const char *when)
+{
+	static const char *const card[] = { "ABSENT", "PRESENT", "ERROR" };
+	static const char *const app[] = { "unknown", "detected", "PIN1 or UPIN required", "PUK1 required", "personalisation",
+		                           "PIN1 blocked", "illegal", "READY" };
+	static const char *const cerr[] = { "unknown", "power down", "poll error", "no ATR", "voltage mismatch", "parity",
+		                            "possibly removed", "technical problem", "null bytes", "SAP connected" };
+	const uint8_t *a, *v;
+	size_t n = 0;
+	uint16_t res = 0, err = 0, vl = 0;
+
+	a = cell_ask(0xb, 0x2f, NULL, 0, &n, &res, &err);
+	if (a == NULL || res != 0 || (v = qmi_tlv(a, n, 0x10, &vl)) == NULL || vl < 9) {
+		printf("cell: %s: SIM: UIM card status: %s (result %u error %u)\n", when, a ? "no card TLV" : "NO ANSWER", res, err);
+		return;
+	}
+	for (unsigned c = 0, at = 9; c < v[8] && at + 6 <= vl; c++) {
+		uint8_t state = v[at], ecode = v[at + 4], apps = v[at + 5];
+		const char *first = "";
+
+		at += 6;
+		for (unsigned p = 0; p < apps && at + 7 <= vl; p++) {
+			uint8_t aid = v[at + 6];
+
+			if (p == 0) {
+				first = v[at + 1] < 8 ? app[v[at + 1]] : "?";
+			}
+			at += 7 + aid + 7;
+		}
+		printf("cell: %s: SIM slot %u: %s%s%s, %u application(s)%s%s\n", when, c + 1, state < 3 ? card[state] : "?",
+		    state == 2 ? ", error " : "", state == 2 ? (ecode < 10 ? cerr[ecode] : "?") : "", apps, apps ? ", the first " : "",
+		    first);
+	}
+}
+
+static void
+cell_probe(__unused void *arg, __unused wait_result_t wr_unused)
+{
+	static const char *const modes[] = { "ONLINE", "low power", "factory test", "offline", "resetting", "shutting down",
+		                             "persistent low power", "mode-only low power" };
+	uint32_t level = 0, node, port;
+	const uint8_t *a, *v;
+	size_t n = 0;
+	uint16_t res = 0, err = 0, vl = 0;
+
+	(void)PE_parse_boot_argn("cell", &level, sizeof(level));
+	for (unsigned s = 0; s < 240 && !(cell_where(0x3, &node, &port) && cell_where(0x2, &node, &port) &&
+	    cell_where(0xb, &node, &port)); s++) {
+		sleep_ms(500);
+	}
+	if (!cell_where(0x3, &node, &port) || !cell_where(0x2, &node, &port) || !cell_where(0xb, &node, &port)) {
+		printf("cell: the modem's NAS, DMS and UIM services are not all there: no look\n");
+		return;
+	}
+	cell_port = qrtr_open(cell_receive, NULL, NULL);
+	if (cell_port == NULL) {
+		printf("cell: no QRTR port\n");
+		return;
+	}
+	sleep_ms(5000);                         /* (the modem settles; the SIM is read) */
+	cell_sim("before online");
+	/* the modem: DMS GET_OPERATING_MODE (0x2d), TLV 0x01 */
+	a = cell_ask(0x2, 0x2d, NULL, 0, &n, &res, &err);
+	if (a != NULL && res == 0 && (v = qmi_tlv(a, n, 0x01, &vl)) != NULL && vl >= 1) {
+		printf("cell: modem operating mode: %s (%u)\n", v[0] < 8 ? modes[v[0]] : "?", v[0]);
+		if (level >= 2 && v[0] != 0) {
+			static const uint8_t online[] = { 0x01, 0x01, 0x00, 0x00 };     /* TLV 0x01, length 1: 0 = online */
+
+			a = cell_ask(0x2, 0x2e, online, sizeof(online), &n, &res, &err);
+			printf("cell: modem set ONLINE: %s (result %u error %u)\n", a ? (res == 0 ? "taken" : "refused") : "NO ANSWER",
+			    res, err);
+		}
+	} else {
+		printf("cell: modem operating mode: %s (result %u error %u)\n", a ? "no TLV" : "NO ANSWER", res, err);
+	}
+	cell_serving("now");
+	if (level >= 2) {
+		for (unsigned s = 5; s <= 45; s += 5) {
+			char when[16];
+
+			sleep_ms(5000);
+			snprintf(when, sizeof(when), "+%u s", s);
+			cell_serving(when);
+			if (s == 10 || s == 30 || s == 45) {
+				cell_sim(when);         /* (Test 353) the SIM again, the modem online now */
+			}
+		}
+	}
+	qrtr_close(cell_port);
+	cell_port = NULL;
+}
+
 static void
 bt_stage1(__unused void *arg, __unused wait_result_t wr_unused)
 {
@@ -10949,6 +11166,11 @@ redwood_wifi_init(void)
 		on = 0;
 		if (PE_parse_boot_argn("bt", &on, sizeof(on)) && on != 0 &&
 		    kernel_thread_start(bt_stage1, NULL, &thread) == KERN_SUCCESS) {      /* (Test 244) Bluetooth */
+			thread_deallocate(thread);
+		}
+		on = 0;
+		if (PE_parse_boot_argn("cell", &on, sizeof(on)) && on != 0 &&
+		    kernel_thread_start(cell_probe, NULL, &thread) == KERN_SUCCESS) {     /* (Test 352) cellular, a look */
 			thread_deallocate(thread);
 		}
 		return;

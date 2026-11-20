@@ -27,7 +27,7 @@ binaries, no build outputs and no phone backups are in this repository (see [the
 | `wifi/WIFI-PLAN.md` | everything since Test 111, step by step with what every test showed: Wi-Fi, sound, GPU, apps, sensors, CoreMotion, the compass, the microphone |
 | `SESSION.md` | the test-by-test log of the earlier stages |
 
-## State (Test 351)
+## State (Test 353)
 
 **Works:**
 
@@ -75,7 +75,8 @@ binaries, no build outputs and no phone backups are in this repository (see [the
 
 - **Microphone:** the WCD9340 codec never enumerates on SLIMbus and is silent over SPI too (Tests 265-266). What is ruled out is in WIFI-PLAN, "Tests 237-240" and after.
 - **Metal:** there is no GPU driver for iOS, so the map in Maps and live wallpapers are missing.
-- **Radios:** cellular; Bluetooth audio.
+- **Radios:** cellular: the modem runs, goes online and receives (GSM cells found, Test 352); no SIM in the phone
+  yet, and iOS's CommCenter is not on it yet (wifi/CELLULAR-PLAN.md). Bluetooth audio.
 - **FairPlay:** App Store apps can't run (their code is FairPlay-encrypted). The study (wifi/FAIRPLAY-FEASIBILITY.md)
   found that Apple's FairPlay kext makes the device's keys with the SoC's fused UID and GID AES keys, which only
   Apple silicon has. Apps without FairPlay encryption (Apple's own, ones built from source) are the route.
