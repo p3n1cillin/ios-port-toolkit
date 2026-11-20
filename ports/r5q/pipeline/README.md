@@ -31,9 +31,13 @@ Notes:
 
 `phone-args.txt` is the standard boot-arg set. Change it when a feature's arg becomes part of every boot.
 
-## The standard image (2026-11-20, Test 394)
+## The standard image (2026-11-20, Test 395)
 
-`port/build/r5q-install-boot-standard.img` is now a copy of r5q-install-boot-394.img: kernel t394, root test370.
+`port/build/r5q-install-boot-standard.img` is now a copy of r5q-install-boot-395.img: kernel t394, root test395. The
+root is test370's tree with one change: `libr5q-media.dylib` is injected into mediaserverd and turns off the
+Camera's audio silence filling (wifi/MEMORY-PLAN.md). It was made from the build tree with the Metal test files
+removed and test370's CommCenter job, then compared with test370 file by file; build_root_app.sh now builds the
+library too. Before that, kernel t394 with root test370 (Test 394):
 `phone-args.txt` ends with `md_flash=90`. Ninety seconds after the flash driver is up, md0 (the 2.3 GB iOS system image
 the firmware copies into RAM) is checked against USERDATA and read from the flash from then on, and its RAM goes back to
 the system: about 27% → 65% memory free (wifi/MEMORY-PLAN.md). `kern.redwood.md_flash` reads 1 once it has happened.

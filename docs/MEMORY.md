@@ -43,3 +43,15 @@ holds the same image and the kernel can read it, give the RAM back after boot in
 r5q numbers: 16 KB random reads 405 µs from flash vs 5 µs from RAM, 264 MB/s sequential. Memory free went from 27%
 to 65% (wired 3.7 → 1.3 GB). Apps, a /var save to the same flash, and the Camera all kept working. Measure first:
 `blkbench` compares two devices at the same places and times both.
+
+## The Camera's audio: silence filling (iOS 16.5)
+
+CMCapture's `BWAudioSourceNode` pads incoming audio with silence when **host time elapsed since start − sample time
+elapsed since start** passes a threshold. If the port's audio clock and host clock disagree, every callback gets the
+whole difference as silence. On r5q that was 468.7 s per 941-frame callback, a 39 MB CMBlockBuffer some 40 times a
+second, kept until the Camera's session ends. mediaserverd grew by gigabytes and was killed taking photos. The node
+has its own switch, the ivar `_silenceFramesFillingDisabled`. A library injected into mediaserverd that sets it on
+every node (wrapping `-start:`) fixed it (r5q `wifi/inject_media.c`).
+
+To find code like this: `tools/ios/dsc_ivar_users.py` lists every read of one ivar-offset slot in a range of the
+shared cache. Compiled ObjC reaches an ivar as `base + *slot`, so the users of a queue's slot lead to its producer.

@@ -37,6 +37,8 @@ clang -target arm64-apple-ios16.5 -isysroot $SDK -fuse-ld=lld -O1 -dynamiclib \
 	-o obj/libr5q-app.dylib $W/inject_app.c 2>&1 | grep -v 'warning\|^ \|^$\|generated' || true
 # (Test 168) libr5q-bbd.dylib into backboardd: CoreBrightness's 5 s ALS wait made 0 (wifi/inject_bbd.c)
 clang -target arm64-apple-ios16.5 -isysroot $SDK -fuse-ld=lld -O1 -dynamiclib -install_name /redwood/lib/libr5q-bbd.dylib -fblocks -lobjc -framework CoreFoundation -framework IOKit -o obj/libr5q-bbd.dylib $W/inject_bbd.c 2>&1 | grep -v 'warning\|^ \|^$\|generated' || true
+# (Test 395) libr5q-media.dylib into mediaserverd: CMCapture's audio silence filling off (wifi/inject_media.c)
+clang -target arm64-apple-ios16.5 -isysroot $SDK -fuse-ld=lld -O1 -dynamiclib -install_name /redwood/lib/libr5q-media.dylib -lobjc -o obj/libr5q-media.dylib $W/inject_media.c 2>&1 | grep -v 'warning\|^ \|^$\|generated' || true
 EXTRA_LINE=""
 rm -f obj/libr5q-sbdiag.dylib
 if [ -n "$SBDIAG" ]; then
@@ -74,7 +76,7 @@ if [ -f $IOS_WORK/linux-source/fw-camera-r5q/camera-imx586.isp ]; then
 	cp $IOS_WORK/linux-source/fw-camera-r5q/camera-imx586.isp $IOS_WORK/linux-source/fw-camfake/camera-s5khm2sd.isp
 fi
 grep -q 'fw-camfake' build.sh || sed -i 's|^if \[ -d \.\./fw-gpu \]; then|if [ -d ../fw-camfake ]; then mkdir -p root/fw; cp ../fw-camfake/* root/fw/; fi      # (r5q: synthetic camera table)\n&|' build.sh
-INJECT="$(printf '%s\n' '/redwood/lib/libredwood.dylib backboardd containermanagerd containermanagerd_system' '/redwood/lib/libredwood-sb.dylib SpringBoard' '/redwood/lib/libredwood-media.dylib mediaserverd' '/redwood/lib/libredwood-app.dylib Sileo' '/redwood/lib/libredwood-tweaks.dylib Preferences' "/redwood/lib/libr5q-app.dylib $APPS" "/redwood/lib/libr5q-bbd.dylib backboardd" "$EXTRA_LINE")"
+INJECT="$(printf '%s\n' '/redwood/lib/libredwood.dylib backboardd containermanagerd containermanagerd_system' '/redwood/lib/libredwood-sb.dylib SpringBoard' '/redwood/lib/libredwood-media.dylib mediaserverd' '/redwood/lib/libredwood-app.dylib Sileo' '/redwood/lib/libredwood-tweaks.dylib Preferences' "/redwood/lib/libr5q-app.dylib $APPS" "/redwood/lib/libr5q-bbd.dylib backboardd" "/redwood/lib/libr5q-media.dylib mediaserverd" "$EXTRA_LINE")"
 echo "inject: $(echo "$INJECT" | tr '\n' ';' | wc -c) bytes"
 env REST=1 PREBUILT=1 INJECT="$INJECT" ${GL:+GL="$GL"} ${EXTRA:+EXTRA="$EXTRA"} ${EXTRA_SHARE:+EXTRA_SHARE="$EXTRA_SHARE"} ${RC_JOBS:+RC_JOBS="$RC_JOBS"} ${RC:+RC="$RC"} ./build.sh > /tmp/userland-t$N.log 2>&1 || { tail -5 /tmp/userland-t$N.log; exit 1; }
 ls root/lib | grep r5q | tr '\n' ' '; echo

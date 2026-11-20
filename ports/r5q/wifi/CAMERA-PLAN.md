@@ -943,3 +943,7 @@ candidate designs).
   buffer's bookkeeping. mediaserverd reaches 2.7-3.7 GB until the session ends. Also, the iOS system image now
   leaves RAM after boot (md_flash), so the phone has about 3 GB more to start with. Open: what sets that field.
   Then retry the HEIC shutter and the lit-scene colours.
+- **Fixed (Test 395):** libr5q-media.dylib sets BWAudioSourceNode's `_silenceFramesFillingDisabled`. Camera open:
+  mediaserverd 75 MB. **A HEIC photo saves** (IMG_0004.HEIC, 1.56 MB), and **a video saves** (IMG_0005.MOV). The
+  preview is still the purple, smeared picture (a lit scene still needs the owner).
+

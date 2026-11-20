@@ -85,7 +85,7 @@ The change (`bsd/dev/memdev.c` in the r5q overlay, the donor-patched file plus t
   reads 1.
 - **Now standard:** `md_flash=90` is in `phone-args.txt`; the standard image is Test 394's (pipeline/README.md).
 
-## mediaserverd and the Camera: 39 MB a callback (found 2026-11-20, open)
+## mediaserverd and the Camera: 39 MB a callback (found and fixed 2026-11-20, Tests 394-395)
 
 With the Camera open, mediaserverd grows by one 39 MB block about 40 times a second. It reached 2.7 to 3.7 GB
 resident, and 56 GB of address space, which is why its phys_footprint read 56 GB. Closing or backgrounding the Camera
@@ -117,3 +117,32 @@ Workarounds until then:
 - Keep Camera sessions short.
 
 The earlier HEIC kill and the purple-looking preview should be retried once this is fixed.
+
+### The cause and the fix (Test 395)
+
+The writer of `[+0x38]` is CMCapture+0xab3c, in the audio source node's render handler (`+0xa900..`). It computes
+**(host time elapsed since the node started) − (sample time elapsed since it started)**:
+- the host time comes from the callback's AudioTimeStamp (flags: sample and host time valid);
+- the start values are ivars at slots 0x1dd72abe4 (host) and 0x1dd72abe8 (sample).
+
+If the difference is past a threshold (the ivar at slot 0x1dd72ac60), it is made into frames and the buffer is padded
+with that much silence. That branch is skipped when the ivar `_silenceFramesFillingDisabled` (slot 0x1dd72ac0c) is
+set. One of BWAudioSourceNode's init paths sets it and logs "Audio source node created with silence frame filling
+disbaled". On this port the two clocks are 468.7 s apart from the first callback on, so every callback was padded.
+
+Found with `toolkit/tools/ios/dsc_ivar_users.py` (new): every adrp+ldrsw that reads one ivar-offset slot in a range
+of the cache. The users of the audio queue's slot led to the producer.
+
+**Fix:** `libr5q-media.dylib` (wifi/inject_media.c), injected into mediaserverd. It wraps `-[BWAudioSourceNode
+start:]` and sets `_silenceFramesFillingDisabled` (ivar offset 584 at run time) before the node's audio flows. It is
+in root test395 (`/redwood/lib`, etc/inject.conf) and in build_root_app.sh.
+
+| with the Camera open | before | after |
+|---|---|---|
+| mediaserverd resident | 2.7-3.7 GB within seconds | 75 MB, flat |
+| after a photo | killed (or no photo) | 102 MB, `IMG_0004.HEIC` saved |
+| after a 6 s video | (not tried) | 425 MB, `IMG_0005.MOV` saved; 56 MB once the Camera closes |
+
+Still open: where the 468.7 s between the audio host clock and the sample clock comes from. With no working
+microphone it changes nothing heard (the input is silence); it matters once the microphone works, for A/V sync.
+
