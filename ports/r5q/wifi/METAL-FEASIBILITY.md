@@ -48,3 +48,30 @@ through the port's OpenGL ES path (redwood-gl in userland, the Adreno 640 in the
   and returns working buffers and textures but refuses pipelines cleanly, tried with `metal=1` in a single test
   process (never system-wide); (2) a survey of the AIR in the apps that matter (VectorKit's metallibs: which
   shader features they use) to size the translator.
+
+## Tests 392 (2026-11-20): the donor's Metal driver on this phone, and why Maps cannot use it
+
+- **The donor already built most of a Metal driver**: `userland/src/redwoodmetal.m` (6,300 lines: RedwoodMetalDevice
+  over the kernel's RedwoodGPU service, command queues/buffers, compute and render encoders, textures, samplers,
+  drawables for CAMetalLayer) and an AIR -> NIR -> ir3 shader compiler in Mesa (`tools/mesa/air`, docs/air.md: 321
+  of 456 system shader modules compile; 30 run on the Adreno with checked results). This port had none of it built.
+- **Built here:** Mesa 25.0.7 with `AIR=1 tools/mk-mesa.sh` -> `libredwoodair.dylib` and `air_run`; the driver as
+  `libredwoodmetal.dylib` and the `RedwoodMetal.bundle` executable; `metal_drv_test`, `metal_props`, `metal_caps`.
+  Root test392 = the cellular root's settings + the driver in /redwood/lib (the system's
+  /System/Library/Extensions/RedwoodMetal.bundle symlink points there).
+- **On this phone (kernel t389):** `metal_drv_test`: buffers made and read back; Apple's AV1SW.metallib loaded, **all
+  11 compute functions compiled for the Adreno**; command queue, 16 textures, a sampler, command buffer and compute
+  encoder made (its one dispatch was refused for a texture-format mismatch the test itself chose). With `metal=1` and
+  `metal_props on`: **`MTLCreateSystemDefaultDevice()` returns RedwoodMetalDevice** ("Adreno ... chip 0x6040001")
+  and answers the capability queries (`metal_caps`; it ends on Metal's own assert for a linear depth format, a
+  question the tool asks).
+- **Maps with that device:** Maps runs (no crash) but the map stays black: VectorKit logs "Compiler error for
+  library from bundle 'StandardLibrary': no default library was found" and "Failed to create library for function
+  'GridShader' / 'PolygonFillShader' / ...". **VectorKit's shaders exist on iOS 16.5 only as Apple-GPU machine code:**
+  `iphoneos.pipelinelib/pipelines.g4p .. g15p` (one archive per Apple GPU, `LPPM` containers, no bitcode, no LZFSE)
+  with an empty `functions` file -- no AIR to translate. So **the map in Maps cannot be drawn by any non-Apple GPU
+  from the files Apple ships**, whatever the driver; that would take translating AGX machine code, which is not a
+  realistic project. Metal discovery stays off in the standard boot (it is only on with `metal=1` + `metal_props
+  on`, and gone at reboot).
+- What the driver *can* serve: Metal code that ships AIR (`.metallib` with bitcode -- CoreImage's and other system
+  libraries, apps built from source); MSL compiled at run time would also need Apple's front end to hand AIR over.
