@@ -146,3 +146,20 @@ in root test395 (`/redwood/lib`, etc/inject.conf) and in build_root_app.sh.
 Still open: where the 468.7 s between the audio host clock and the sample clock comes from. With no working
 microphone it changes nothing heard (the input is silence); it matters once the microphone works, for A/V sync.
 
+
+### The 468.7 s, a little further (2026-11-20, after Test 398)
+
+- `clockq` (wifi/clockq.c): mach_continuous_time equals mach_absolute_time (no sleep is ever counted), timebase
+  19.2 MHz. So it is not a continuous-vs-absolute mix-up.
+- `libr5q-audiodump.dylib` (wifi/inject_audiodump.c, debugging only) lists every BWAudioSourceNode ivar 1 s and 4 s
+  after `-start:`. The fields the silence fill uses:
+  - `_nextExpectedHostTime` (Q), `_nextExpectedSampleTime` (CMTime), `_ioprocTimeStampDeltaLimit` (CMTime, the
+    threshold);
+  - `_prevPTS`, `_prevNumFrames` (941), `_latencyOffset`, `_pullDuration` (941), `_useDecoupledIO` (1);
+  - `_audioDeviceID` (121, VirtualAudioDevice_DecoupledInput), `_silenceFramesFillingDisabled` (+584).
+- With the fill off, `_nextExpectedHostTime` tracks the clock (559.313 s against 559.314 s now).
+- The callbacks' own sample times were small (2921, 3862, ...: `[+0x40]` of the queued buffers). So the 468.7 s was
+  on the host-time side at the first callback, and stayed constant because both "next expected" values advance by
+  each callback afterwards.
+- Left: catching the first callback's host time against the node's start values. That needs the fill on again, with
+  its 39 MB per callback, so it waits until the microphone works and A/V sync matters.
