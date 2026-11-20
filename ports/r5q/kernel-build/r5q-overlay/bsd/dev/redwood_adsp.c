@@ -4920,6 +4920,253 @@ qrtr_control(const struct qrtr_header *header, const struct qrtr_control *contro
 	}
 }
 
+/*
+ * (r5q Test 359) DIAG with the audio DSP: its own F3 messages, for the microphone's SLIMbus (the WCD9340 never reports
+ * present; everything readable from the board side matches Android, so what is left is the DSP's own view of its bus).
+ * As with the modem (redwood_wifi.c, Test 103; linux-msm diag): service 4097, the AP publishing the control and data
+ * ends for the peripheral -- LPASS's instance base is 64 (modem 0, WCNSS 128, ...), control +0, data +2 -- the DSP's
+ * feature mask and DIAG-ID answered, then every SSID's message mask at every level, real-time mode, streaming. Its
+ * F3 messages come on the data end as non-HDLC frames (7e 01 len payload 7e). Unlike the modem's they are often not
+ * hashed: the firmware holds ~4,300 format strings ("ERROR enumerate bus invalid param", ...), so an extended message
+ * (0x79: its format string, file and arguments inline) is rendered here; hashed ones are counted. Boot-arg adsp_diag=1.
+ */
+#define R5Q_DIAG_CNTL_PORT      0x4132
+#define R5Q_DIAG_DATA_PORT      0x4133
+static volatile bool adsp_diag_masks_due, adsp_diag_ready;
+static uint32_t adsp_diag_node, adsp_diag_cport, adsp_diag_next_id = 2, adsp_diag_shown, adsp_diag_hashed, adsp_diag_frames;
+
+static void
+adsp_diag_cntl_send(const void *pkt, size_t len)
+{
+	if (qrtr_out_packet(QRTR_DATA, R5Q_DIAG_CNTL_PORT, adsp_diag_node, adsp_diag_cport, pkt, (uint32_t)len) != 0) {
+		tell("adsp: diag: control packet %u NOT SENT\n", *(const uint32_t *)pkt);
+	}
+}
+
+static void
+adsp_diag_cntl(uint32_t node, uint32_t port, const uint8_t *m, uint32_t length)
+{
+	uint32_t at = 0;
+
+	adsp_diag_node = node;
+	adsp_diag_cport = port;
+	while (at + 8 <= length) {
+		uint32_t cmd, len;
+
+		memcpy(&cmd, m + at, 4);
+		memcpy(&len, m + at + 4, 4);
+		if (at + 8 + len > length) {
+			break;
+		}
+		if (cmd == 8 && len >= 5) {             /* feature mask */
+			uint32_t theirs = 0, mask_len;
+			uint8_t reply[18] = { 0 };
+			uint32_t words[4] = { 8, 10, 4, 0 };
+
+			memcpy(&mask_len, m + at + 8, 4);
+			memcpy(&theirs, m + at + 12, mask_len < 4 ? (mask_len < len - 4 ? mask_len : len - 4) : 4);
+			words[3] = theirs & ((1u << 0) | (1u << 1) | (1u << 4) | (1u << 6) | (1u << 11) | (1u << 13) | (1u << 15));
+			memcpy(reply, words, 16);
+			tell("adsp: diag: THE AUDIO DSP SPEAKS DIAG (features %#x); ours %#x\n", theirs, words[3]);
+			adsp_diag_cntl_send(reply, sizeof(reply));
+			adsp_diag_masks_due = true;     /* (also without a DIAG-ID round: some builds send none) */
+		} else if (cmd == 33 && len >= 8) {     /* DIAG-ID: a name, given a number */
+			char name[40] = "";
+			uint8_t reply[64];
+			uint32_t words[4] = { 33, 0, 1, adsp_diag_next_id++ }, version, flen = 0, off = 16;
+			size_t n;
+
+			memcpy(&version, m + at + 8, 4);
+			if (version >= 2 && len >= 12) {
+				memcpy(&flen, m + at + 16, 4);
+				off = 20 + flen;
+			}
+			if (off < 8 + len) {
+				memcpy(name, m + at + off, 8 + len - off < sizeof(name) - 1 ? 8 + len - off : sizeof(name) - 1);
+			}
+			n = strlen(name) + 1;
+			words[1] = (uint32_t)(8 + n);
+			memcpy(reply, words, 16);
+			memcpy(reply + 16, name, n);
+			tell("adsp: diag: id %u for \"%s\"\n", words[3], name);
+			adsp_diag_cntl_send(reply, 16 + n);
+			adsp_diag_masks_due = true;
+		} else {
+			tell("adsp: diag: control %u (%u bytes)\n", cmd, len);
+		}
+		at += 8 + len;
+	}
+}
+
+static void
+adsp_diag_send_masks(void)
+{
+	static const uint16_t first[25] = { 0, 500, 1000, 2000, 3000, 4000, 4500, 4600, 5000, 5500, 6000, 6500, 7000, 7100,
+	    7200, 8000, 8500, 9000, 9500, 10200, 10251, 10300, 10350, 10400, 0xc000 };
+	static const uint16_t last[25] = { 120, 506, 1007, 2008, 3014, 4010, 4573, 4615, 5033, 5516, 6081, 6521, 7003, 7111,
+	    7201, 8000, 8529, 9008, 9510, 10210, 10255, 10300, 10377, 10416, 0xc063 };
+	uint8_t pkt[24 + 4 * 128];
+	struct __attribute__((packed)) {
+		uint32_t cmd, len, version, sleep_vote, real_time, use_nrt, commit, sleep_threshold, sleep_time, drain, stale;
+	} mode = { 3, 36, 1, 1, 1, 0, 0, 0, 0, 0, 0 };
+	struct __attribute__((packed)) {
+		uint32_t cmd, len, version;
+		uint8_t stream_id, tx_mode;
+	} buffering = { 17, 6, 1, 1, 0 };
+
+	for (unsigned r = 0; r < 25; r++) {
+		uint32_t n = (uint32_t)(last[r] - first[r] + 1), len = 19 + 4 * n, word;
+
+		if (n > 128) {
+			continue;
+		}
+		bzero(pkt, sizeof(pkt));
+		word = 11;
+		memcpy(pkt, &word, 4);
+		word = len - 8;
+		memcpy(pkt + 4, &word, 4);
+		pkt[8] = 1;                     /* stream 1 */
+		pkt[9] = 3;                     /* DIAG_CTRL_MASK_VALID */
+		memcpy(pkt + 11, &first[r], 2);
+		memcpy(pkt + 13, &last[r], 2);
+		memcpy(pkt + 15, &n, 4);
+		for (uint32_t i = 0; i < n; i++) {
+			/* every level: LOW, MED, HIGH, ERROR, FATAL; (Test 361) none for 8500, the playback path's
+			 * cdc_apr_if.cpp, which filled Test 360's log */
+			word = first[r] + i == 8500 ? 0 : 0x1f;
+			memcpy(pkt + 19 + 4 * i, &word, 4);
+		}
+		adsp_diag_cntl_send(pkt, len);
+	}
+	adsp_diag_cntl_send(&mode, sizeof(mode));
+	adsp_diag_cntl_send(&buffering, sizeof(buffering));
+	tell("adsp: diag: masks sent (every SSID, every level), real-time, streaming\n");
+}
+
+/* an extended message's format string with its 32-bit arguments, %d %u %x %X %c %p %s (no string: "?") understood */
+static void
+adsp_diag_render(char *out, size_t size, const char *fmt, const uint8_t *args, uint32_t nargs)
+{
+	size_t k = 0;
+	uint32_t a = 0;
+
+	for (const char *f = fmt; *f != '\0' && k + 24 < size; f++) {
+		uint32_t v;
+
+		if (*f != '%') {
+			out[k++] = *f;
+			continue;
+		}
+		f++;
+		while (*f == 'l' || *f == 'h' || *f == '#' || *f == '0' || (*f >= '1' && *f <= '9') || *f == '-' || *f == '.') {
+			f++;
+		}
+		if (*f == '%') {
+			out[k++] = '%';
+			continue;
+		}
+		if (*f == '\0') {
+			break;
+		}
+		v = 0;
+		if (a < nargs) {
+			memcpy(&v, args + 4 * a, 4);
+		}
+		a++;
+		k += (size_t)snprintf(out + k, size - k, *f == 'd' || *f == 'i' ? "%d" : *f == 'u' ? "%u" : *f == 'c' ? "%c" :
+		    *f == 's' ? "?" : "0x%x", *f == 'd' || *f == 'i' ? (int)v : *f == 'c' ? (int)(v & 0x7f) : (int)v);
+	}
+	out[k < size ? k : size - 1] = '\0';
+}
+
+static void
+adsp_diag_data(const uint8_t *m, uint32_t length)
+{
+	uint32_t at = 0;
+
+	while (at + 5 <= length && m[at] == 0x7e && m[at + 1] == 1) {
+		uint16_t n = (uint16_t)(m[at + 2] | m[at + 3] << 8);
+		const uint8_t *p = m + at + 4;
+
+		if (at + 5 + n > length) {
+			break;
+		}
+		adsp_diag_frames++;
+		if (n >= 21 && p[0] == 0x79) {          /* DIAG_EXT_MSG_F: ..., line, ssid, mask, args, format, file */
+			uint32_t nargs = p[2], fo = 20 + 4 * nargs;
+			uint16_t line = (uint16_t)(p[12] | p[13] << 8), ssid = (uint16_t)(p[14] | p[15] << 8);
+
+			if (fo < n) {
+				const char *fmt = (const char *)p + fo;
+				size_t flen = strnlen(fmt, n - fo);
+				const char *file = fo + flen + 1 < n ? fmt + flen + 1 : "";
+				char text[240], fmtcopy[200];
+				bool wanted;
+
+				memcpy(fmtcopy, fmt, flen < sizeof(fmtcopy) - 1 ? flen : sizeof(fmtcopy) - 1);
+				fmtcopy[flen < sizeof(fmtcopy) - 1 ? flen : sizeof(fmtcopy) - 1] = '\0';
+				adsp_diag_render(text, sizeof(text), fmtcopy, p + 20, nargs);
+				wanted = strnstr(text, "slim", sizeof(text)) != NULL || strnstr(text, "Slim", sizeof(text)) != NULL ||
+				    strnstr(text, "SLIM", sizeof(text)) != NULL || strnstr(text, "NGD", sizeof(text)) != NULL ||
+				    strnstr(text, "ngd", sizeof(text)) != NULL || strnstr(text, "enumer", sizeof(text)) != NULL ||
+				    strnstr(text, "codec", sizeof(text)) != NULL || strnstr(file, "slim", 64) != NULL ||
+				    strnstr(file, "sb_", 64) != NULL;
+				if (wanted || adsp_diag_shown < 400) {
+					adsp_diag_shown++;
+					tell("adsp-diag: [%u] %.40s:%u %s\n", ssid, file, line, text);
+				}
+			}
+		} else if (n >= 24 && p[0] == 0x92) {   /* (Test 361) a hashed message: its SSID, line, hash, arguments */
+			uint16_t line = (uint16_t)(p[12] | p[13] << 8), ssid = (uint16_t)(p[14] | p[15] << 8);
+			uint32_t hash, a[4] = { 0 }, nargs = p[2] < 4 ? p[2] : 4;
+
+			adsp_diag_hashed++;
+			memcpy(&hash, p + 20, 4);
+			for (uint32_t k = 0; k < nargs && 24 + 4 * k + 4 <= n; k++) {
+				memcpy(&a[k], p + 24 + 4 * k, 4);
+			}
+			if (ssid != 8500 && adsp_diag_hashed <= 1500) {
+				tell("adsp-diag: [%u] hashed line %u %#010x args %u: %#x %#x %#x %#x\n", ssid, line, hash, p[2], a[0], a[1],
+				    a[2], a[3]);
+			}
+		} else {
+			adsp_diag_hashed++;
+			if (adsp_diag_hashed <= 20 || adsp_diag_hashed % 500 == 0) {
+				tell("adsp-diag: a message of kind %#x (%u bytes), %u such so far\n", n ? p[0] : 0, n, adsp_diag_hashed);
+			}
+		}
+		at += 5 + n;
+	}
+}
+
+static void
+adsp_diag_thread(__unused void *arg, __unused wait_result_t wr_unused)
+{
+	struct qrtr_control announce_it = { .command = QRTR_NEW_SERVER };
+
+	announce_it.words[0] = 4097;
+	announce_it.words[1] = 64;              /* LPASS's control end */
+	announce_it.words[2] = QRTR_US;
+	announce_it.words[3] = R5Q_DIAG_CNTL_PORT;
+	(void)qrtr_out_packet(QRTR_NEW_SERVER, QRTR_CONTROL, qrtr_peer, QRTR_CONTROL, &announce_it, sizeof(announce_it));
+	announce_it.words[1] = 66;              /* its data end */
+	announce_it.words[3] = R5Q_DIAG_DATA_PORT;
+	(void)qrtr_out_packet(QRTR_NEW_SERVER, QRTR_CONTROL, qrtr_peer, QRTR_CONTROL, &announce_it, sizeof(announce_it));
+	tell("adsp: diag: control at port %#x, data at port %#x, announced to node %u (service 4097, instances 64/66)\n",
+	    R5Q_DIAG_CNTL_PORT, R5Q_DIAG_DATA_PORT, qrtr_peer);
+	for (unsigned s = 0; s < 600; s++) {
+		sleep_ms(1000);
+		if (adsp_diag_masks_due) {
+			adsp_diag_masks_due = false;
+			adsp_diag_send_masks();
+			adsp_diag_ready = true;        /* (Test 362: the microphone's sequence waits for this) */
+		}
+		if (s == 30 || s % 120 == 0) {
+			tell("adsp: diag: %u frames, %u shown, %u hashed\n", adsp_diag_frames, adsp_diag_shown, adsp_diag_hashed);
+		}
+	}
+}
+
 static void
 qrtr_input(const uint8_t *data, uint32_t length)
 {
@@ -4971,6 +5218,14 @@ qrtr_input(const uint8_t *data, uint32_t length)
 	}
 	if (header.to_port == R5Q_SLIM_PORT) {
 		r5q_slim_answer(data + at, header.size);
+		return;
+	}
+	if (header.to_port == R5Q_DIAG_CNTL_PORT) {     /* (Test 359) the audio DSP's DIAG */
+		adsp_diag_cntl(header.from_node, header.from_port, data + at, header.size);
+		return;
+	}
+	if (header.to_port == R5Q_DIAG_DATA_PORT) {
+		adsp_diag_data(data + at, header.size);
 		return;
 	}
 	printf("adsp: qrtr: a datagram of %u bytes from node %u port %u to our port %u: nobody here listens there\n", header.size,
@@ -5743,6 +5998,14 @@ whole_thread(__unused void *parameter, __unused wait_result_t result)
 
 			if (kernel_thread_start(r5q_mic_thread, NULL, &mic_thread) == KERN_SUCCESS) {
 				thread_deallocate(mic_thread);
+			}
+			{
+				uint32_t on = 0;        /* (Test 359: boot-arg adsp_diag=1, the DSP's own F3 messages) */
+
+				if (PE_parse_boot_argn("adsp_diag", &on, sizeof(on)) && on != 0 &&
+				    kernel_thread_start(adsp_diag_thread, NULL, &mic_thread) == KERN_SUCCESS) {
+					thread_deallocate(mic_thread);
+				}
 			}
 			r5q_slpi_start();               /* (Test 201: boot-arg slpi=2, the sensors' DSP's link) */
 		}
@@ -6636,6 +6899,18 @@ r5q_mic_start(void)
 		return;
 	}
 	tell("adsp: slim: the DSP's SLIMbus service at node %u port %u (mic=%u)\n", node, port, mic);
+	{
+		/* (Test 362) with adsp_diag, the sequence waits (up to 20 s) for the DSP's DIAG masks: Test 361's came after
+		 * REPORT_SATELLITE, so the DSP's word on the first steps was filtered out */
+		uint32_t d = 0;
+
+		if (PE_parse_boot_argn("adsp_diag", &d, sizeof(d)) && d != 0) {
+			for (unsigned ms = 0; ms < 20000 && !adsp_diag_ready; ms += 100) {
+				sleep_ms(100);
+			}
+			tell("adsp: slim: the DSP's DIAG masks %s; the sequence begins\n", adsp_diag_ready ? "are set" : "are NOT set");
+		}
+	}
 	/* (Test 182: answered 0x5a, "incompatible state", the first time: the power asked for all the same) */
 	(void)r5q_slim_ask("select instance 0, the DSP the master", node, port, 0x20, select, sizeof(select));
 	if (!r5q_slim_ask("power: active", node, port, 0x21, power, sizeof(power))) {

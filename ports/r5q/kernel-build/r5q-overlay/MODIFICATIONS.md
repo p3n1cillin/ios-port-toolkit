@@ -55,6 +55,8 @@ These files replace the donor's files of the same path in its `xnu/files/` tree 
 - `bsd/dev/redwood_wifi.c` (Tests 352-358): `cell=1/2`, a QMI look at the modem over QRTR (SIM, operating mode,
   registration; states only); `bbstub=1` publishing the baseband stubs, and `kern.redwood.bb_answer`, their answers set
   while iOS runs.
+- `bsd/dev/redwood_adsp.c` (Tests 359-362): `adsp_diag=1`, DIAG with the audio DSP over its QRTR link (its own F3
+  messages, readable ones rendered in the kernel), the microphone's sequence waiting for its masks.
 - `bsd/dev/redwood_adsp.c` (Tests 347-349): the motion sensors' rates as boot-args (`see_rate`, `see_mag_rate`) and the
   last 16 samples of each kept with their times (`struct redwood_motion` version 2).
 - `bsd/dev/redwood_sec_ts.c` (Tests 334-351): the front (IMX616) and main (IMX586) cameras through a common Sony

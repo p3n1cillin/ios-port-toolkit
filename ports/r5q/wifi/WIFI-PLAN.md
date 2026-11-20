@@ -1133,3 +1133,39 @@ run ends with the modem shut down through TZ, after asking it to stop over SMP2P
     request); device motion is stable.
   - (The first run sat at "waiting for the phone": iOS up, "USB live mode: no", fastboot calls hanging. `r5q_reboot`
     over r5qd restarted it, the loader came back on USB, and `phone.py cycle` flashed the already-built image.)
+
+## Tests 359-361 (2026-11-20): the audio DSP's own messages (DIAG over QRTR)
+
+- **Why:** the microphone's WCD9340 never reports present on SLIMbus, and everything readable from the board side
+  matches Android. What was left was the DSP's own view of its bus.
+- **Method (redwood_adsp.c, `adsp_diag=1`):** as the modem's DIAG (Test 103), on the audio DSP's QRTR link. The AP
+  publishes service 4097 instances 64 (control) and 66 (data), LPASS's base in msm diag (modem 0). It answers the
+  DSP's feature mask and DIAG-IDs, sends every SSID's mask at every level, real-time mode and streaming, and renders
+  extended messages (0x79: format, file and arguments inline) in the kernel. The firmware holds ~4,300 format
+  strings; there is no ADSP .qdb in the dumps, only the modem's.
+- **Test 359:** **THE AUDIO DSP SPEAKS DIAG.** 3,013 messages by 70 s, about half readable. They were logged through
+  the file's quiet `say` (only the phone's buffer, which a later read showed); Test 360 logs through `tell`.
+- **Test 360:** "THE AUDIO DSP SPEAKS DIAG (features 0x3ae73)", ids for "msm/adsp/root_pd" and "msm/adsp/audio_pd".
+  The readable messages are almost all `cdc_apr_if.cpp:111` (SSID 8500, the playback path's write-done events on
+  port 0x101), plus sysmon_dcvs.c and servreg. No readable SLIMbus line: the bus driver's messages are among the
+  hashed ones (kind 0x92: 20-byte header, a 4-byte hash, arguments). Those need the ADSP's QShrink database, which is
+  not in the firmware.
+- **Test 361:** SSID 8500 masked off; hashed messages printed by SSID, line, hash and arguments, to see which
+  subsystem reacts at each SLIMbus step even without their text.
+- **Test 361:** with SSID 8500 off, the DSP was nearly silent: 209 readable `sysmon_dcvs.c` (SSID 8522, clock
+  scaling) and servreg lines, 2 hashed messages outside 8500. But the masks had reached the DSP only after
+  REPORT_SATELLITE, partway through the 3 s of refused ADDR_QUERYs.
+- **Test 362:** the microphone's sequence now waits for the masks ("the DSP's DIAG masks are set; the sequence
+  begins"). Through select instance, power, REPORT_SATELLITE and 301 refused ADDR_QUERYs, the DSP logged **two hashed
+  messages and nothing else**:
+  - SSID 7 line 1658, arguments 1, 0xc000, 0xc063 (our own mask range echoed back: the DIAG layer taking the masks);
+  - SSID 0 line 283;
+  - servreg's "Client registered" / "QMI Listener added" lines.
+
+  **No word from any SLIMbus or codec code** at any level. The DSP's bus manager acks our satellite and refuses our
+  queries without logging anything. Its log does not explain the codec's silence either.
+- **Where the microphone stands:** board side (supplies, reset, MCLK, pins) matches Android; the SLIMbus QMI sequence
+  matches Samsung's and upstream; the codec is silent on SLIMbus and SPI; the DSP logs nothing about the bus. Left:
+  the codec's power-up as Android's audio HAL drives it (the WCD9340 may need its first register writes through the
+  DSP's codec driver, `cdc_apr_if`, before it enumerates), or a hardware fault on this unit. `adsp_diag=1` stays in
+  the kernel as a tool (not in the standard args).

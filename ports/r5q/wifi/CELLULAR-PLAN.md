@@ -128,3 +128,21 @@ bytes). The log then shows what CommCenter asks, in order, before anything is ma
 - **Seen once (after ~30 min with CommCenter on the stubs): Wi-Fi traffic stalled** (frames sent/received stopped,
   CE4 "wr 0 read 0"), r5qd silent, iOS otherwise up; a restart cleared it. Not yet known whether CommCenter (its
   AppleIPAppender interfaces) caused it. `bbstub` stays out of the standard args until that is understood.
+
+## Where AppleBasebandManager decides (desk work, after Test 358) -- the next layer
+
+- abm-helper (`ABMHelper.framework/Support/abm-helper`, 85 KB) is entitled to the user-client classes
+  `AppleBasebandUserClient`, `AppleBasebandPCIUserClient`, `AppleBasebandPCIControlUserClient`,
+  `AppleBasebandPCITraceUserClient` and Intel's `IOAppleConvergedIPCICEBB(Control)UserClient` (our stubs' class,
+  RedwoodBasebandUserClient, was not refused: the sandbox's user-client class check is not enforced on this port).
+- ABMHelper.framework is the trace/diagnostics side. The boot states are AppleBasebandManager's
+  (`BasebandBootStateIsReady`, `...Booted`, `...WillReset`, `...DidReset`, `...WillShutdown`, `...HasShutdown`,
+  `...Dead`, `...Unknown`; `EventTransportIsReady`); its server starts in `AppleBasebandManager.framework`
+  (`AppleBasebandManagerStartServer`).
+- The image carries the basebands' firmware: `usr/standalone/update/Mav17.Release.bbfw` (Qualcomm, iPhone10,3) and
+  `ICE17.Release.bbfw` (Intel). `libBasebandCapabilities` maps radio types (Mav10..Mav30, ICE17..19, IBIS18) to
+  firmware folders.
+- **Open:** how AppleBasebandManager picks the radio type and when it starts the transport. The likely gate is the
+  device tree's `baseband` node (which launchd already uses to choose CommCenter's variant, and which our loader does
+  not make) or MobileGestalt's baseband answers. That decides between continuing with stubs (an AppleBasebandPCIControl
+  that reports a boot stage and a QMUX transport that answers) and a loader change (a `baseband` node).
