@@ -1041,3 +1041,9 @@ candidate designs).
 - Next for the clipped shadows needs a kernel (USB): a debug path to write single sensor registers at run time
   (e.g. the pedestal 0x0008/0x0009 and the binning weight 0x0902), then camgrab over Wi-Fi to see what moves the
   clamp.
+- **Kernel t405 (built, not yet flashed: the USB cable is out):** `kern.redwood.cam_reg` (address << 16 | value)
+  writes one sensor register between two frames of the running session; `kern.redwood.cam_peek` (address) reads two
+  bytes into `kern.redwood.cam_back`. `camgrab ... LINES GAIN ADDR=VALUE ?ADDR ...` (hex) applies them inside its
+  own session. Registers reset when a session starts its tables, so each try is one camgrab run. The aim: try the
+  pedestal (0x0008/0x0009), the binning weight (0x0902) and others for the clipped shadows over Wi-Fi, without a
+  kernel and a reboot for each. Run as Test 405 once USB is back.

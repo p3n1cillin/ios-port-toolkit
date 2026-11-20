@@ -1,5 +1,5 @@
 /*
- * camgrab [SENSOR] [SKIP] [OUT] [LINES GAIN] (2026-11-20): one raw frame from /dev/redwood-camera into OUT (default
+ * camgrab [SENSOR] [SKIP] [OUT] [LINES GAIN [ADDR=VALUE | ?ADDR]...] (2026-11-20): one raw frame from /dev/redwood-camera into OUT (default
  * /private/var/tmp/camgrab.raw; r5qd relays only 64 KB of output, pull it with wifi/r5q_pull.py), as mediaserverd reads
  * it -- the struct redwood_camera_frame header, then the frame's bytes (RAW10, 4 pixels in 5 bytes). SENSOR (0 macro,
  * 1 wide, 2 front, 3 ultra-wide; default: whatever the kernel has) is asked for first; SKIP frames (default 30, a
@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/sysctl.h>
 #include <unistd.h>
 #include "redwood_camera.h"
 
@@ -47,6 +48,41 @@ main(int argc, char **argv)
 	size_t bytes = h.header_bytes + (size_t)h.stride * h.height;
 	unsigned char *buf = malloc(bytes);
 	ssize_t n = 0;
+	/*
+	 * (2026-11-20, kernel t405+) Arguments after GAIN: ADDR=VALUE writes a sensor register, ?ADDR reads one (hex), in
+	 * this session, between two frames (kern.redwood.cam_reg / cam_peek / cam_back). Each waits a few frames; the
+	 * session's tables are written at its start, so a register only holds for the session that set it.
+	 */
+	for (int k = 6; k < argc; k++) {
+		const char *a = argv[k];
+		int v, back = 0;
+		size_t sz = sizeof(back);
+
+		if (a[0] == '?') {
+			v = (int)strtol(a + 1, NULL, 16);
+			if (sysctlbyname("kern.redwood.cam_peek", NULL, NULL, &v, sizeof(v)) != 0) {
+				fprintf(stderr, "camgrab: cam_peek: %s\n", strerror(errno));
+				continue;
+			}
+			for (int i = 0; i < 10 && back == 0; i++) {
+				(void)read(fd, buf, bytes);
+				sz = sizeof(back);
+				(void)sysctlbyname("kern.redwood.cam_back", &back, &sz, NULL, 0);
+			}
+			fprintf(stderr, "camgrab: register %#06x = %#06x%s\n", v, back & 0xffff, back == -1 ? " (bus error)" :
+			    back == 0 ? " (no answer)" : "");
+		} else if (strchr(a, '=') != NULL) {
+			v = (int)(strtol(a, NULL, 16) << 16 | (strtol(strchr(a, '=') + 1, NULL, 16) & 0xffff));
+			if (sysctlbyname("kern.redwood.cam_reg", NULL, NULL, &v, sizeof(v)) != 0) {
+				fprintf(stderr, "camgrab: cam_reg: %s\n", strerror(errno));
+				continue;
+			}
+			for (int i = 0; i < 3; i++) {
+				(void)read(fd, buf, bytes);
+			}
+			fprintf(stderr, "camgrab: register %s written\n", a);
+		}
+	}
 	for (int i = 0; i <= skip; i++) {
 		n = read(fd, buf, bytes);
 	}

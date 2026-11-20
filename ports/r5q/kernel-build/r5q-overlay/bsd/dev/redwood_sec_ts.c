@@ -2393,6 +2393,84 @@ redwood_r5q_cam_exposure(uint32_t lines, uint32_t gain, uint32_t frame_lines)
 	exp_pending = true;
 }
 
+/*
+ * (Test 405) One sensor register written or read while a camera session streams, between two frames (where iOS's
+ * exposure goes), from user space over r5qd (`r5q_sysctl NAME VALUE`):
+ *   kern.redwood.cam_reg = address << 16 | value   write it: one byte if value <= 0xff, else two (big-endian)
+ *   kern.redwood.cam_peek = address                 read two bytes; the answer in kern.redwood.cam_back
+ * cam_back: (address << 16 | the two bytes) once done; -1 for a bus error; it is 0 while the request waits.
+ * Why: the IMX586 clips a dim scene's shadows to its pedestal (CAMERA-PLAN.md, Tests 402-404), and the registers
+ * that might move its black-level clamp need trying one by one, without a kernel and a reboot for each. Registers of
+ * the sensor in session only (its own CCI bus); the sensor's registers reset when its session ends.
+ */
+#include <sys/sysctl.h>
+static volatile int cam_reg_req = -1, cam_peek_req = -1;
+static int cam_reg_last, cam_peek_last, cam_back;
+static void rxlog(const char *format, ...) __printflike(1, 2);
+
+static void
+cam_reg_apply(void)
+{
+	struct bitbang *was;
+	int w = cam_reg_req, p = cam_peek_req;
+
+	if ((w < 0 && p < 0) || !cam_bus_ok) {
+		return;
+	}
+	was = bb;
+	bb = &cam_bus_keep;
+	if (w >= 0) {
+		uint16_t a = (uint16_t)((uint32_t)w >> 16), v = (uint16_t)w;
+		const char *problem = bb_write16(a, v, v > 0xff ? 2 : 1);
+
+		cam_reg_req = -1;
+		rxlog("camera sensor: register %#06x <- %#x (%u byte%s): %s\n", a, v, v > 0xff ? 2 : 1, v > 0xff ? "s" : "",
+		    problem ? problem : "taken");
+	}
+	if (p >= 0) {
+		uint8_t b[2] = { 0, 0 };
+		const char *problem = bb_read16((uint16_t)p, b, 2);
+
+		cam_peek_req = -1;
+		cam_back = problem ? -1 : (int)((uint32_t)(uint16_t)p << 16 | (uint32_t)b[0] << 8 | b[1]);
+		rxlog("camera sensor: register %#06x reads %02x %02x%s%s\n", (unsigned)(uint16_t)p, b[0], b[1],
+		    problem ? ": " : "", problem ? problem : "");
+	}
+	bb = was;
+}
+
+SYSCTL_DECL(_kern_redwood);
+
+static int
+cam_reg_sysctl(__unused struct sysctl_oid *oidp, void *arg1, __unused int arg2, struct sysctl_req *req)
+{
+	int peek = arg1 != NULL, value = peek ? cam_peek_last : cam_reg_last, error;
+
+	error = sysctl_io_number(req, value, sizeof(value), &value, NULL);
+	if (error != 0 || req->newptr == 0) {
+		return error;
+	}
+	if (value < 0 || (peek && value > 0xffff)) {
+		return EINVAL;
+	}
+	if (peek) {
+		cam_peek_last = value;
+		cam_back = 0;
+		cam_peek_req = value;
+	} else {
+		cam_reg_last = value;
+		cam_reg_req = value;
+	}
+	return 0;
+}
+
+SYSCTL_PROC(_kern_redwood, OID_AUTO, cam_reg, CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_LOCKED, NULL, 0, cam_reg_sysctl, "I",
+    "a camera sensor register written between frames: address << 16 | value");
+SYSCTL_PROC(_kern_redwood, OID_AUTO, cam_peek, CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_LOCKED, (void *)1, 0, cam_reg_sysctl,
+    "I", "a camera sensor register read between frames: address (the answer in cam_back)");
+SYSCTL_INT(_kern_redwood, OID_AUTO, cam_back, CTLFLAG_RD | CTLFLAG_LOCKED, &cam_back, 0,
+    "the last cam_peek: address << 16 | two bytes (-1: a bus error; 0: waiting)");
+
 static void
 cam_exposure_apply(void)
 {
@@ -2400,6 +2478,7 @@ cam_exposure_apply(void)
 	uint32_t fl, ln, g;
 	const char *problem = NULL;
 
+	cam_reg_apply();
 	if (!exp_pending || !cam_bus_ok) {
 		return;
 	}
