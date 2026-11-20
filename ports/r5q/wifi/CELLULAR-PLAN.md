@@ -196,3 +196,16 @@ bytes). The log then shows what CommCenter asks, in order, before anything is ma
   "5dyhCh3dm1vSOaNK+US1Qw"). The manager's own messages ("Failed to find the firmware in "%s"" with the path it
   tried) are info-level or go through CommCenter's logger, and do not reach the forwarded os_log here. Next: get
   those lines (a logging profile or the logger's preference), which would name the path it looks in.
+- **Trying to see the manager's own lines (after Test 366):**
+  - Its os_log subsystem is `com.apple.telephony.abm`. A level preference (`DEFAULT-OPTIONS` Level Enable/Persist
+    Debug) was put in `/Library/Preferences/Logging/Subsystems/com.apple.telephony.abm.plist`. That folder takes
+    files at runtime (`_logd`'s); `r5qfs cp FROM TO` is new for it. Then CommCenter was restarted: nothing more came
+    through.
+  - CommCenter logs through its own `ctu` logger. Its configuration is `com.apple.commcenter.logconfig.ios.plist` in
+    ABMHelper.framework (profiles Default / Extended / Burnin / Disable: BasebandTrace, IPC, KernelPCI, CoreDump,
+    Systemlogs Mode, ...; read by libBasebandManager, whose preference domain is `com.apple.commcenter.logconfig`).
+    Selecting a verbose profile there is the next way to get "Failed to find the firmware in "%s"" and the path it
+    names.
+- **Standing:** CommCenter runs on the stubs. The manager's gate is "Baseband Firmware Path Not Found", with the
+  folder and an iPhone-named package both in place. The radio type it resolves for this phone, and the exact path
+  or file it wants, are what its logs would say.

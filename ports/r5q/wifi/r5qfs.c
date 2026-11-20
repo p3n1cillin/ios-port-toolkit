@@ -6,6 +6,7 @@
  *   r5qfs chown PATH UID GID    one path
  *   r5qfs rm PATH               one file (not a directory)
  *   r5qfs cat PATH              a file's bytes to standard output (2026-11-20: CommCenter's logs and state files)
+ *   r5qfs cp FROM TO            a file copied, TO made 0644 (2026-11-20: a logging preference put in place)
  */
 #include <dirent.h>
 #include <errno.h>
@@ -116,6 +117,23 @@ main(int argc, char **argv)
 			}
 			fclose(f);
 		}
+	} else if (strcmp(argv[1], "cp") == 0 && argc == 4) {
+		FILE *in = fopen(argv[2], "rb"), *out = in ? fopen(argv[3], "wb") : NULL;
+		char buf[4096];
+		size_t n;
+
+		bad = in == NULL || out == NULL;
+		if (!bad) {
+			while ((n = fread(buf, 1, sizeof(buf), in)) > 0) {
+				fwrite(buf, 1, n, out);
+			}
+			fclose(out);
+			(void)chmod(argv[3], 0644);
+		}
+		if (in != NULL) {
+			fclose(in);
+		}
+		printf("cp %s %s: %s\n", argv[2], argv[3], bad ? strerror(errno) : "done");
 	} else if (strcmp(argv[1], "rm") == 0) {
 		bad = unlink(argv[2]) != 0;
 		printf("rm %s: %s\n", argv[2], bad ? strerror(errno) : "done");
