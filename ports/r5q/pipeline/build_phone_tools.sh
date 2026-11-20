@@ -43,4 +43,10 @@ build sym_probe   sym_probe.c
 build klog        klog.c
 build mgq       mgq.c         -framework CoreFoundation
 build dtq       dtq.c         -framework CoreFoundation -framework IOKit
+build heic_test heic_test.m   -fobjc-arc $FW -framework CoreGraphics -framework ImageIO
+build jetsam_limit jetsam_limit.c
+build memq      memq.c
+build wiredq    wiredq.c
+build blkbench  blkbench.c
+build vmq       vmq.c
 echo "phone tools in $OUT"

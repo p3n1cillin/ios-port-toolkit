@@ -937,3 +937,9 @@ candidate designs).
   takes from the loader's `isp` node, made only with `cam=5`. Test 350 (a kernel soak) booted without it, so
   SpringBoard hid the icon. `cam=5 cam_r5q=1` are now in `phone-args.txt`, the standard boot-args; a kernel-only
   camera soak drops them with `-cam -cam_r5q`.
+- **Why mediaserverd was killed taking a HEIC photo (2026-11-20, Test 394; wifi/MEMORY-PLAN.md).** Not the HEIC
+  encoder. With the Camera open, CMCapture's audio path makes a 39 MB CMBlockBuffer about 40 times a second
+  (`CMCapture+0x37b90`). Each callback's 941 frames get 20,670,818 frames (468.7 s) added, from a field of the audio
+  buffer's bookkeeping. mediaserverd reaches 2.7-3.7 GB until the session ends. Also, the iOS system image now
+  leaves RAM after boot (md_flash), so the phone has about 3 GB more to start with. Open: what sets that field.
+  Then retry the HEIC shutter and the lit-scene colours.

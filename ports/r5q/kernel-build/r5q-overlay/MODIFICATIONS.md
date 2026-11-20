@@ -69,6 +69,12 @@ These files replace the donor's files of the same path in its `xnu/files/` tree 
   `iokit/Kernel/RedwoodBaseband.cpp` added to the build.
 - `osfmk/arm/io_map.c` (Test 252): Apple's open-source XNU file (xnu-8796.121.2) with the I/O submap at 64 MB instead of
   8 MB, and its use logged; a full submap made `ml_io_map` wait for ever.
+- `bsd/dev/memdev.c` (Test 394): Apple's open-source XNU file (xnu-8796.121.2) as the donor's patch changes it, plus:
+  md0 can be switched to the phone's flash. Pieces of the flash are compared with md0's memory first; then reads go
+  to `redwood_ufs_read_named("darwin")` and the memory goes back to the VM (`ml_static_mfree`). It runs on boot-arg
+  `md_flash=S` or sysctl `kern.redwood.md_flash`. A rw-lock keeps reads of the memory and the switch apart.
+- `bsd/dev/redwood_ufs.c` (Test 393, the donor's file): root-only sysctl `kern.redwood.wired`, the kernel's wired
+  memory as `mach_memory_info_t` records from `vm_page_diagnose()`.
 
 `bsd/kern/kern_exec.c` is Apple's open-source XNU file (xnu-8796.121.2) as the donor's patch changes it (library
 insertion by program name, `kern.exec_inject`); here its setting holds 2048 bytes instead of 512.

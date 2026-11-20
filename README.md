@@ -355,6 +355,13 @@ inside mediaserverd. Then bring up the real path one step per test, logging afte
 On the S10 Lite the S5K3L6's frames reach iOS this way. The recipe and the lessons that each cost a hang (slow AHB
 on TCXO, never voting a rail to 0 that the boot raised): [docs/CAMERA.md](docs/CAMERA.md).
 
+### 13. Memory: give the RAM disk back
+
+A RAM-disk boot keeps the whole iOS system image wired. Once the phone's own storage can be read, check it against
+the RAM disk, read the disk from storage, and free its RAM. On the S10 Lite that took memory free from 27% to 65%.
+The same page covers seeing who holds memory (wired memory by tag, a process's regions without a task port, a big
+allocation's backtrace): [docs/MEMORY.md](docs/MEMORY.md).
+
 ## What to gather for a new phone, in this order
 
 Everything is read-only until step 7. `validate_profile.py` shows what is still missing for each stage.

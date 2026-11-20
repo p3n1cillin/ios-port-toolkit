@@ -31,7 +31,16 @@ Notes:
 
 `phone-args.txt` is the standard boot-arg set. Change it when a feature's arg becomes part of every boot.
 
-## The standard image (2026-11-20, Test 391)
+## The standard image (2026-11-20, Test 394)
+
+`port/build/r5q-install-boot-standard.img` is now a copy of r5q-install-boot-394.img: kernel t394, root test370.
+`phone-args.txt` ends with `md_flash=90`. Ninety seconds after the flash driver is up, md0 (the 2.3 GB iOS system image
+the firmware copies into RAM) is checked against USERDATA and read from the flash from then on, and its RAM goes back to
+the system: about 27% → 65% memory free (wifi/MEMORY-PLAN.md). `kern.redwood.md_flash` reads 1 once it has happened.
+Kernel t394 also has `kern.redwood.wired` (`wiredq`). The set before: port/build/phone-args.before-t394.txt; the image
+before: port/build/r5q-install-boot-standard.before-t394.img (the Test 391 one below).
+
+## The standard image before (2026-11-20, Test 391)
 
 `port/build/r5q-install-boot-standard.img` (a copy of r5q-install-boot-391.img: kernel t389, root test370 -- CommCenter
 allowed, the baseband firmware tree bound -- and the loader that makes the `baseband` and camera `isp` nodes in test

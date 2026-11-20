@@ -10,6 +10,8 @@
  *   r5qfs peek PATH OFF LEN     up to 256 bytes at OFF in hex, as the kernel serves them (2026-11-20: whether a
  *                               read-time content patch is applied, Tests 371-372)
  *   r5qfs dump PATH OFF LEN     up to 60000 raw bytes at OFF (wifi/r5q_pull.py: whole files and trees to the PC)
+ *   r5qfs du PATH [DEPTH]       megabytes under PATH, directories of 1 MB or more down to DEPTH (default 2)
+ *                               (2026-11-20: /private/var is a RAM filesystem here; what fills it is memory)
  */
 #include <dirent.h>
 #include <errno.h>
@@ -59,6 +61,39 @@ do_ls(const char *path)
 	}
 	closedir(d);
 	return 0;
+}
+
+/* (2026-11-20) bytes under PATH (no symlinks followed), its subdirectories printed down to DEPTH */
+static long long
+du(const char *path, int depth)
+{
+	struct stat st;
+	DIR *d;
+	struct dirent *e;
+	long long total = 0;
+	char full[1024];
+
+	if (lstat(path, &st) != 0) {
+		return 0;
+	}
+	if (!S_ISDIR(st.st_mode)) {
+		return st.st_size;
+	}
+	if ((d = opendir(path)) == NULL) {
+		return 0;
+	}
+	while ((e = readdir(d)) != NULL) {
+		if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0) {
+			continue;
+		}
+		snprintf(full, sizeof(full), "%s/%s", path, e->d_name);
+		total += du(full, depth - 1);
+	}
+	closedir(d);
+	if (depth >= 0 && total >= 1024 * 1024) {
+		printf("%8lld MB  %s\n", total >> 20, path);
+	}
+	return total;
 }
 
 static int
@@ -137,6 +172,8 @@ main(int argc, char **argv)
 			fclose(in);
 		}
 		printf("cp %s %s: %s\n", argv[2], argv[3], bad ? strerror(errno) : "done");
+	} else if (strcmp(argv[1], "du") == 0 && argc >= 3) {
+		du(argv[2], argc > 3 ? atoi(argv[3]) : 2);
 	} else if (strcmp(argv[1], "peek") == 0 && argc == 5) {
 		FILE *f = fopen(argv[2], "rb");
 		long off = strtol(argv[3], NULL, 0), n = strtol(argv[4], NULL, 0);

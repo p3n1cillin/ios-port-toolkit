@@ -47,6 +47,7 @@
 #include <sys/conf.h>
 #include <sys/disk.h>
 #include <sys/errno.h>
+#include <sys/kauth.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
 #include <sys/sysctl.h>
@@ -312,6 +313,48 @@ ufs_sysctl_var_busy(__unused struct sysctl_oid *oidp, __unused void *arg1, __unu
 
 SYSCTL_PROC(_kern_redwood, OID_AUTO, var_busy, CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_LOCKED, NULL, 0,
     ufs_sysctl_var_busy, "I", "the claim a writer of /dev/rufs_darwin must hold: 1 takes it, 0 gives it back");
+
+/*
+ * kern.redwood.wired (2026-11-20, root only): the kernel's own account of its wired memory -- by tag
+ * (VM_KERN_MEMORY_*), by allocation site, by zone, and the totals -- as the array of mach_memory_info_t
+ * that mach_memory_info() gives zprint on a Mac. On iOS that call wants the host's privileged port and
+ * com.apple.private.memoryinfo, which nothing of this port's own has, so the same records are read here.
+ * Why: 3.9 GB of the phone's 6 were wired with only 0.9 GB of it the /var RAM filesystem, and the
+ * system ran at 13% memory free; jetsam killed mediaserverd making a HEIC photo. wifi/wiredq.c reads it.
+ */
+struct mach_memory_info;
+extern uint32_t vm_page_diagnose_estimate(void);
+extern kern_return_t vm_page_diagnose(struct mach_memory_info *info, unsigned int num_info, uint64_t zones_collectable_bytes,
+    bool redact_info);
+#define REDWOOD_MEMINFO_SIZE    176     /* sizeof(mach_memory_info_t), osfmk/mach_debug/zone_info.h */
+
+static int
+redwood_wired_sysctl(__unused struct sysctl_oid *oidp, __unused void *arg1, __unused int arg2, struct sysctl_req *req)
+{
+	uint32_t n;
+	size_t bytes;
+	void *info;
+	int error;
+
+	if (!kauth_cred_issuser(kauth_cred_get())) {
+		return EPERM;
+	}
+	n = vm_page_diagnose_estimate();
+	bytes = (size_t)n * REDWOOD_MEMINFO_SIZE;
+	if (req->oldptr == USER_ADDR_NULL) {
+		return SYSCTL_OUT(req, NULL, bytes + 64 * REDWOOD_MEMINFO_SIZE);
+	}
+	info = kalloc_data(bytes, Z_WAITOK | Z_ZERO);
+	if (info == NULL) {
+		return ENOMEM;
+	}
+	error = vm_page_diagnose(info, n, 0, false) == KERN_SUCCESS ? SYSCTL_OUT(req, info, bytes) : EIO;
+	kfree_data(info, bytes);
+	return error;
+}
+
+SYSCTL_PROC(_kern_redwood, OID_AUTO, wired, CTLTYPE_OPAQUE | CTLFLAG_RD | CTLFLAG_LOCKED, NULL, 0, redwood_wired_sysctl,
+    "S", "the kernel's wired memory by tag, site and zone, as mach_memory_info_t records (root only; wifi/wiredq.c)");
 
 /*
  * Native blocks [lba, lba + count) of partition part, one request of at most the buffer's size:
