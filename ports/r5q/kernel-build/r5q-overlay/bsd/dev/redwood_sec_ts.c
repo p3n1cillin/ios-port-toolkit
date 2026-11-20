@@ -2375,6 +2375,7 @@ static uint32_t exp_applied;
 struct sony_cam {
 	const char *name, *tab, *mode;
 	uint16_t crop_x, crop_y, frame_lines, line_length;        /* line_length 0: the mode's own */
+	uint16_t width, height;                                    /* (Test 350) the frame: the crop's size */
 	uint32_t phy, settle, iop_mpy;
 	uint32_t line_num, line_den, frame_num, frame_den, margin; /* iOS's lines x num / den; its frame lines likewise */
 };
@@ -2436,6 +2437,22 @@ cam_session_frames(uint32_t *misses_out)
 	 */
 	uint32_t frames = 0, misses = 0;
 	static uint32_t half;
+	/*
+	 * (Test 350) The frame's size from the sensor streaming: 1028x772 (1,000,512 bytes) for the S5K3L6 and the crops,
+	 * the Sony sensors' whole binned frames for iOS (IMX586 2000x1500: 3,768,000 bytes; IMX616 1632x1224: 2,506,752).
+	 * Lines at a 16-byte stride as the write master leaves them. Two halves of the 4 MB camera block while a frame fits
+	 * one (1 or 2 MB); a bigger one in one place, rewritten each frame: it is copied out at frame-done, ~1-2 ms, well
+	 * inside the vertical blanking before the next frame's first line.
+	 */
+	uint32_t w = cam_live != NULL ? cam_live->width : 1028, h = cam_live != NULL ? cam_live->height : 772;
+	uint32_t bytes = ((w * 10 / 8 + 15) & ~15u) * h;
+	uint32_t place = bytes <= 0x100000u ? 0x100000u : bytes <= 0x200000u ? 0x200000u : 0;
+
+	if (place == 0) {
+		half = 0;
+		IFE(0x2214) = (uint32_t)rx_buf_pa;
+		IFE(0x04ac) = 0x2;
+	}
 
 	rxlog("camera sensor: SESSION: frames for iOS from the %s%s\n", cam_live != NULL ? cam_live->name : "S5K3L6 (rear)", cam_pipe_up ? " (the pipeline was already up)" : "");
 	while (misses < 50) {
@@ -2450,7 +2467,7 @@ cam_session_frames(uint32_t *misses_out)
 		}
 		IFE(0x2054) = 1;
 		IFE(0x2068) = 1;
-		IFE(0x2214) = (uint32_t)(rx_buf_pa + 0x100000u * (half ^ 1));
+		IFE(0x2214) = (uint32_t)(rx_buf_pa + place * (half ^ 1));
 		IFE(0x04ac) = 0x2;
 		frames++;
 		misses = 0;
@@ -2461,10 +2478,10 @@ cam_session_frames(uint32_t *misses_out)
 			    IFE(0x2064), IFE(0x06c), IFE(0x070), IFE(0x07c), IFE(0x2200), IFE(0x2204), IFE(0x2214), CSID(0x160),
 			    CSID(0x164), CSID(0x168), rx_smmu ? *(volatile uint32_t *)(rx_smmu + 0x48) : 0);
 		}
-		if (!rx_session_cb((const uint8_t *)(rx_buf + 0x100000u * half), 1296 * 772, rx_session_ctx)) {
+		if (!rx_session_cb((const uint8_t *)(rx_buf + place * half), bytes, rx_session_ctx)) {
 			break;
 		}
-		half ^= 1;
+		half = place != 0 ? half ^ 1 : 0;
 		cam_exposure_apply();           /* (Test 328) iOS's exposure, between two frames */
 	}
 	*misses_out = misses;
@@ -2945,10 +2962,10 @@ sony_stream(struct bitbang *cam, uint32_t front_level, const struct sony_cam *c)
 		bool rx;
 
 		(void)bb_write16(0x0104, 1, 1);
-		SLOG("crop 1028x772 at %u,%u, frame %u lines, line %u: %s\n", c->crop_x, c->crop_y, c->frame_lines,
-		    c->line_length, bb_write16(0x0408, c->crop_x, 2) ?: bb_write16(0x040a, c->crop_y, 2) ?:
-		    bb_write16(0x040c, 1028, 2) ?: bb_write16(0x040e, 772, 2) ?: bb_write16(0x034c, 1028, 2) ?:
-		    bb_write16(0x034e, 772, 2) ?: bb_write16(0x0340, c->frame_lines, 2) ?:
+		SLOG("crop %ux%u at %u,%u, frame %u lines, line %u: %s\n", c->width, c->height, c->crop_x, c->crop_y,
+		    c->frame_lines, c->line_length, bb_write16(0x0408, c->crop_x, 2) ?: bb_write16(0x040a, c->crop_y, 2) ?:
+		    bb_write16(0x040c, c->width, 2) ?: bb_write16(0x040e, c->height, 2) ?: bb_write16(0x034c, c->width, 2) ?:
+		    bb_write16(0x034e, c->height, 2) ?: bb_write16(0x0340, c->frame_lines, 2) ?:
 		    (c->line_length ? bb_write16(0x0342, c->line_length, 2) : NULL) ?: "taken");
 		(void)bb_write16(0x0104, 0, 1);
 		/*
@@ -3181,10 +3198,30 @@ sony_stream(struct bitbang *cam, uint32_t front_level, const struct sony_cam *c)
 
 /* (Test 342) the front camera's: Tests 334-341 */
 static const struct sony_cam imx616_cam = {
-	.name = "front camera", .tab = "camera-imx616.tab", .mode = "res3", .crop_x = 306, .crop_y = 226, .frame_lines = 5160,
+	.name = "front camera", .tab = "camera-imx616.tab", .mode = "res3", .crop_x = 306, .crop_y = 226, .width = 1028,
+	.height = 772, .frame_lines = 5160,
 	.line_length = 0, .phy = 3, .settle = 28, .iop_mpy = 160, .line_num = 919, .line_den = 729, .frame_num = 5160,
 	.frame_den = 3268, .margin = 48,
 };
+/*
+ * (Test 350) iOS's sessions take the sensors' whole binned frames, not the 1028x772 crop: the field of view of the
+ * sensor's mode and ~2.5-3.7x the pixels for photographs (mediaserverd renders its outputs from any frame size).
+ * The IMX616: res3 as it is (1632x1224, digital crop at 4,0), frame length 5160. cam_full=0: the crops again.
+ */
+static const struct sony_cam imx616_full = {
+	.name = "front camera", .tab = "camera-imx616.tab", .mode = "res3", .crop_x = 4, .crop_y = 0, .width = 1632,
+	.height = 1224, .frame_lines = 5160, .line_length = 0, .phy = 3, .settle = 28, .iop_mpy = 160, .line_num = 919,
+	.line_den = 729, .frame_num = 5160, .frame_den = 3268, .margin = 48,
+};
+
+static bool
+cam_full_frames(void)
+{
+	uint32_t full = 1;
+
+	(void)PE_parse_boot_argn("cam_full", &full, sizeof(full));
+	return full != 0;
+}
 
 /*
  * (Test 333, camfront=1) The FRONT camera, the IMX616 (live DT qcom,cam-sensor@1 on CCI0 master 1; Samsung's
@@ -3305,7 +3342,7 @@ frontsensor_probe(uint32_t front_level)
 		rxlog("front camera: 7-bit 0x1a: ID %s %02x%02x%s\n", problem ? problem : "", id[0], id[1],
 		    problem == NULL && id[0] == 0x06 && id[1] == 0x16 ? ": THE IMX616 ANSWERS" : "");
 		if (problem == NULL && id[0] == 0x06 && id[1] == 0x16 && front_level >= 2) {
-			sony_stream(&cam, front_level, &imx616_cam);
+			sony_stream(&cam, front_level, front_level == 7 && cam_full_frames() ? &imx616_full : &imx616_cam);
 		}
 	}
 	wr(BB_CFG(19), was19);
@@ -3349,9 +3386,19 @@ static const struct sony_cam imx586_cam = {
 	/* res5: 2000x1500 (binned) at 120 a second; its middle 1028x772 at 486,364; line length doubled (10752) and frame
 	 * length 5356: ~30 a second at 24 MHz (~24 at our 19.2); the output PLL at 160 (~1 Gb/s a lane: res5's 312 is
 	 * ~2.5) */
-	.name = "main camera", .tab = "camera-imx586.tab", .mode = "res5", .crop_x = 486, .crop_y = 364, .frame_lines = 5356,
+	.name = "main camera", .tab = "camera-imx586.tab", .mode = "res5", .crop_x = 486, .crop_y = 364, .width = 1028,
+	.height = 772, .frame_lines = 5356,
 	.line_length = 10752, .phy = 0, .settle = 28, .iop_mpy = 160, .line_num = 919, .line_den = 778, .frame_num = 5356,
 	.frame_den = 3268, .margin = 48,
+};
+/*
+ * (Test 350) The IMX586's whole res5 frame (2000x1500) for iOS: its line takes ~4.9 us on four lanes at ~1 Gb/s, so the
+ * line length tripled (16128, ~11.7 us a line at 19.2 MHz) and frame length 3571 (~30 a second at 24 MHz).
+ */
+static const struct sony_cam imx586_full = {
+	.name = "main camera", .tab = "camera-imx586.tab", .mode = "res5", .crop_x = 0, .crop_y = 0, .width = 2000,
+	.height = 1500, .frame_lines = 3571, .line_length = 16128, .phy = 0, .settle = 28, .iop_mpy = 160, .line_num = 919,
+	.line_den = 1167, .frame_num = 3571, .frame_den = 3268, .margin = 48,
 };
 
 static void
@@ -3518,7 +3565,7 @@ mainsensor_probe(uint32_t main_level)
 		rxlog("main camera: 7-bit 0x1a: ID %s %02x%02x%s\n", problem ? problem : "", id[0], id[1],
 		    problem == NULL && id[0] == 0x05 && id[1] == 0x86 ? ": THE IMX586 ANSWERS" : "");
 		if (problem == NULL && id[0] == 0x05 && id[1] == 0x86 && main_level >= 2) {
-			sony_stream(&cam, main_level, &imx586_cam);
+			sony_stream(&cam, main_level, main_level == 7 && cam_full_frames() ? &imx586_full : &imx586_cam);
 		}
 	}
 	wr(BB_CFG(17), was17);
@@ -3583,11 +3630,13 @@ soak_frame(const uint8_t *frame, uint32_t bytes, __unused void *ctx)
 		redwood_r5q_cam_exposure(1500, 64, 3268);      /* (Test 340) the exposure path too: ~13.8 ms, 2x */
 	}
 	if (soak_frames % 30 == 0 && bytes >= 1296u * 400u) {
-		uint32_t sum = 0;
+		/* (Test 350) the live frame's shape: 1028x772, or a Sony sensor's whole frame */
+		uint32_t w = cam_live != NULL ? cam_live->width : 1028, h = cam_live != NULL ? cam_live->height : 772;
+		uint32_t stride = (w * 10 / 8 + 15) & ~15u, sum = 0;
 
 		for (uint32_t i = 0; i < 1280; i++) {
 			if (i % 5 != 4) {
-				sum += frame[1296u * 386u + i];         /* RAW10: four high bytes, then a byte of low bits */
+				sum += frame[stride * (h / 2) + i];     /* RAW10: four high bytes, then a byte of low bits */
 			}
 		}
 		rxlog("camera soak: %u frames (%u s); middle line mean %u of 255\n", soak_frames, soak_frames / 30, sum / 1024u);

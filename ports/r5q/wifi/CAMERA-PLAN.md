@@ -913,3 +913,27 @@ candidate designs).
   off (noise clipped at 0), where the S5K3L6 and the IMX616 sit at 64; its tables write no pedestal register. So
   the iOS side is told black 0 for the IMX586 (`f.black`, redwood_camera.c), 64 for the others; otherwise its
   shadows would be crushed.
+- **Test 350 (kernel t350; the three-camera soak): THE SONY SENSORS' WHOLE BINNED FRAMES.** iOS's sessions no longer
+  get the 1028x772 crop of the IMX586 and the IMX616 but their modes' whole frames: **IMX586 res5 2000x1500** (crop
+  0,0, line length tripled to 16128 so a 2500-byte line, ~4.9 µs on four lanes at ~1 Gb/s, fits its line time;
+  frame length 3571, ~30 a second at 24 MHz) and **IMX616 res3 1632x1224** (its own crop 4,0, frame 5160): the
+  sensors' full field of view and 2.5-3.7x the pixels for photographs. (`struct sony_cam` has the frame's
+  width/height; `imx586_full` / `imx616_full` for level 7; `cam_full=0` keeps the crops.)
+  - The camera block keeps 4 MB: a frame up to 1 or 2 MB alternates between two places as before. A bigger one
+    (3,768,000 or 2,506,752 bytes at 16-byte strides 2512/2048) is written to one place every frame: it is copied
+    out at frame-done (~1-2 ms) inside the vertical blanking.
+  - redwood_camera.c: for the Sony sensors the session's mode is a copy of the S5K3L6's with their width and height
+    (the header, the ring of 3, the copy). The exposure stays in the S5K3L6's terms; the kernel converts (IMX586
+    line ratio now 919/1167).
+  - mediaserverd needs no change: it offers iOS fixed formats (4032x3024 ...), renders them from any raw frame, and
+    sizes its read from each frame's header.
+  - **Result:** six short sessions front (1632x1224) → main (2000x1500) → ultra-wide (1028x772), twice, each "30
+    frames handed over, 0 misses"; then **20 s from the main camera: 600 frames, 902,400 packets (1,504 a frame),
+    ECC 0, CRC 0**, WM0 at one address (0xd8200000), SMMU gfsr 0; iOS running.
+- **Test 351 (the t350 kernel; the standard image): iOS gets the whole frames.** mediaserverd: "frames of 2000x1500
+  from the kernel (the Back Camera)", "frames of 1632x1224 from the kernel (the Front Camera)", auto-exposure and
+  white balance on them, each session closed cleanly; Camera.app opened remotely (`openurl app:com.apple.camera`).
+- **The missing Camera icon (owner, 2026-11-20):** Camera.app's `SBAppTags` is `still-camera`, which MobileGestalt
+  takes from the loader's `isp` node, made only with `cam=5`. Test 350 (a kernel soak) booted without it, so
+  SpringBoard hid the icon. `cam=5 cam_r5q=1` are now in `phone-args.txt`, the standard boot-args; a kernel-only
+  camera soak drops them with `-cam -cam_r5q`.

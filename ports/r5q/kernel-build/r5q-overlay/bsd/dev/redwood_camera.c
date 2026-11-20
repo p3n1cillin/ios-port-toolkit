@@ -3891,6 +3891,28 @@ r5q_session(void)
 	r5q_front = front_on != 0 && hw_index == 2;
 	r5q_sensor = r5q_front ? 1 : hw_index != 2 && main_on != 0 ? 2 : 0;
 	redwood_r5q_cam_sensor(r5q_sensor);
+	{
+		/*
+		 * (r5q Test 350) The Sony sensors' sessions bring their whole binned frames (redwood_sec_ts.c, cam_full=1, the
+		 * default): IMX586 2000x1500, IMX616 1632x1224, not the 1028x772 of the S5K3L6's mode. The frames' header, the
+		 * ring and the copy take that size; the exposure stays in the S5K3L6's terms (the kernel converts).
+		 */
+		static struct ctab_mode r5q_mode;
+		static const struct ctab_mode *r5q_base;
+		uint32_t full = 1;
+
+		(void)PE_parse_boot_argn("cam_full", &full, sizeof(full));
+		if (ios_mode == &r5q_mode) {
+			ios_mode = r5q_base;
+		}
+		if (r5q_sensor != 0 && full != 0) {
+			r5q_base = ios_mode;
+			r5q_mode = *ios_mode;
+			r5q_mode.width = r5q_sensor == 2 ? 2000 : 1632;
+			r5q_mode.height = r5q_sensor == 2 ? 1500 : 1224;
+			ios_mode = &r5q_mode;
+		}
+	}
 	ios_frames_done = ios_given = ios_writes_late = 0;
 	if (!ring_alloc(RAW10_STRIDE(ios_mode->width) * ios_mode->height)) {
 		return;
