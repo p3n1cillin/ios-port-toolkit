@@ -37,3 +37,32 @@ A kernel probe (redwood_wifi.c `cell_probe`, QMI over QRTR; it logs states only,
   2. A kernel service that answers those, carrying QMI to the modem's QRTR services (client IDs emulated).
   3. First milestone: iOS's status bar says "No SIM" from the real modem; then, with a SIM, registration.
 - `cell=1` / `cell=2` stay in the kernel for checks (not in the standard args).
+
+## The iOS side's transport (desk work, the 20F66 shared cache; tools/ios)
+
+- `dsc_whose.py`: "qmux_control" is in `/usr/lib/libATCommandStudioDynamic.dylib`; "AppleBasebandPCIControl" in
+  **`/usr/lib/libIOABP.dylib`** (base 0x1e92df000), the IOKit transport.
+- **libIOABP's two classes** (`dsc_strings.py ... libIOABP.dylib`):
+  - **`IOABPClass`**: matches services of class **`AppleBasebandPCIInterface`** by the property
+    **`ABPInterfaceProtocol`** ("IOABPClass::start for %s": one service per channel; the channel names in the cache
+    are `qmux_control`, `qmux_loc`, `qmux_extra`, `qmux_logchannel`, `qmux_test`), with first-match and terminate
+    notifications. Methods: `open`, `close`, `read`, `readAsync`, `write`, `writeAsync`, `sendImage`,
+    `sendImageAsync` (firmware), `readRegister`, `startChannelAsync`, `abortChannelAsync`, `timeSyncAsync`.
+  - **`IOABPControlClass`**: opens **`AppleBasebandPCIControl`**: `open`/`close`, notification and event ports,
+    `readLogsAsync`, `logSnapshotBufferSize`, `loggerTune`, `bootstage`.
+- **The frames on a QMUX channel are classic QMUX** (another library's log: "queueing qmux pdu for svc=%d client=%d
+  (txid=%d msgid=0x%x)"): service, client ID, transaction, message, as Linux's qmi_wwan/QMUX. This modem over QRTR has
+  no QMUX: each QRTR port is a client, and the control service (0, client IDs) has to be answered by the bridge.
+- **The bridge, concretely:** (1) kernel IOKit services `AppleBasebandPCIInterface` (one per QMUX channel, with
+  `ABPInterfaceProtocol`) and `AppleBasebandPCIControl`; (2) their user clients answering libIOABP's selectors
+  (numbers and argument layouts from its code: next); (3) QMUX -> QRTR: strip the QMUX header, one QRTR port per
+  (service, client), answer CTL (get/release client ID, version info) here, and wrap the modem's answers and
+  indications back in QMUX; (4) AppleBasebandManager's boot (it would load firmware with `sendImage` and watch
+  `bootstage`): answered as "booted", the modem being already up.
+- **libIOABP's selectors on an `AppleBasebandPCIInterface` connection** (`dsc_sel.py`, the `mov w1, #N` before each
+  IOConnectCallMethod / IOConnectCallAsyncMethod; `w3` the scalar input count):
+  0 open (1 scalar); 1 close; 2 write / writeAsync (2 scalars, input struct = the bytes); 3 read / readAsync (2
+  scalars, output struct = the buffer, its size in/out); 4 sendImage(Async) (2 scalars, firmware); 5 readRegister (1);
+  6 abortChannelAsync, 7 startChannelAsync, 8 timeSyncAsync (1 each); 9 mapMemoryAsync; 10-12 unmapMemoryAsync. The
+  control connection (`AppleBasebandPCIControl`): 0 readLogsAsync, 1 flushTraceBuffers / start, 2 dumpRegistry, 3
+  event notification / loggerTune / getRegistryInfo, 4 and 5 trace and log buffers, 6 demo, 9 connect.
