@@ -1,4 +1,4 @@
-"""tracev3.py LOGDIR [REGEX] [--pid N] [--sub SUBSYSTEM]: an iOS unified log (tracev3) read without Apple's tools.
+"""tracev3.py LOGDIR [REGEX] [--pid N] [--sub SUBSYSTEM] [--fmt]: an iOS unified log (tracev3) read without Apple's tools.
 LOGDIR holds diagnostics/ (Persist, Special, HighVolume, Signpost) and uuidtext/ as pulled from the phone
 (/private/var/db/diagnostics and /private/var/db/uuidtext, e.g. with work/ios-r5q/wifi/r5q_pull.py).
 Prints "time pid level subsystem: message" for every log entry whose message (format string filled in) matches REGEX.
@@ -194,6 +194,7 @@ def render(fmt, args):
 # ---------- the log ----------
 
 
+SHOW_FMT = False      # --fmt: each message's format string too (what a <private> argument stood for)
 LEVEL = {0: 'Default', 1: 'Info', 2: 'Debug', 0x10: 'Error', 0x11: 'Fault'}
 
 
@@ -292,7 +293,7 @@ class Reader:
             data = d[p + 24:p + 24 + dsize]
             t = base_time + (dlo | dhi << 32)
             if rtype == 0x4:
-                yield self.log(proc, (pid1, pid2), ltype, flags, loc, tid, t, data)
+                yield self.log(proc, (pid1, pid2), ltype, flags, loc, tid, t, data, d)
             if rtype == 0:
                 break
             p = (p + 24 + dsize + 7) & ~7
@@ -301,14 +302,19 @@ class Reader:
     # 0x100] [caller pc 4] [large offset u16, 0x20 | uuid 16, formatter 0xa | u16, formatter 0x8 or 0xc]
     # [subsystem u16, 0x200] [ttl u8, 0x400] [oversize data ref u16, 0x800] then the items: u8 flags, u8 count,
     # each (u8 type, u8 size, value), then the strings they point into ((u16 offset, u16 size) values).
-    def log(self, proc, key, ltype, flags, loc, tid, t, data):
+    def log(self, proc, key, ltype, flags, loc, tid, t, data, chunk=b''):
         q = 0
+        private = b''
         img = ''
         sub = None
         try:
             if flags & 0x1:
                 q += 8
             if flags & 0x100:
+                # private strings (logged only with Enable-Private-Data): the chunk's last (0x1000 - offset) bytes
+                poff, psize = struct.unpack_from('<HH', data, q)
+                start = len(chunk) - (0x1000 - poff)
+                private = chunk[start:start + psize]
                 q += 4
             q += 4
             ftype = flags & 0xe
@@ -365,12 +371,17 @@ class Reader:
                     kind = itype & 0xf0
                     if kind in (0x20, 0x30, 0x40, 0x50, 0xf0) and isize == 4:
                         o, n = struct.unpack('<HH', val)
-                        args.append(('private', None) if (itype & 0x1 and n == 0) else ('bytes', backing[o:o + n]))
+                        if itype & 0x1:
+                            args.append(('bytes', private[o:o + n]) if n and private else ('private', None))
+                        else:
+                            args.append(('bytes', backing[o:o + n]))
                     elif kind in (0x00, 0x10) and isize in (1, 2, 4, 8):
                         args.append(('private', None) if itype & 0x1 else ('int', int.from_bytes(val, 'little'), isize))
                     else:
                         args.append(('bytes', val))
             msg = render(fmt, args) if fmt is not None else '<format %s 0x%x not found>' % (hex(flags), offset)
+            if SHOW_FMT and fmt is not None:
+                msg += '   {fmt: %r}' % fmt
         except (struct.error, IndexError, ValueError) as e:
             msg = '<unreadable: %s>' % e
         subsystem = proc.get('subs', {}).get(sub, '') if sub is not None else ''
@@ -380,7 +391,11 @@ class Reader:
 
 def main():
     args = sys.argv[1:]
+    global SHOW_FMT
     pid = sub = None
+    if '--fmt' in args:
+        args.remove('--fmt')
+        SHOW_FMT = True
     if '--pid' in args:
         i = args.index('--pid')
         pid = int(args[i + 1])

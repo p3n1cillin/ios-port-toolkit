@@ -301,3 +301,47 @@ bytes). The log then shows what CommCenter asks, in order, before anything is ma
 
 - `AppleBasebandPCIPDPManagerBase` published beside the other stubs (RedwoodBaseband.cpp), so the PCI event listener
   can be made.
+- **Test 374 result:** `#I Listening for PCI events` (the listener is made; no more "Could not create PCI event
+  listener!"). Everything else as in Test 373: the router stays `kDisengaged`.
+- libIOABP's control events, for later: IOGeneralInterest messages of type **0xe3ff8100** on
+  AppleBasebandPCIControl, whose argument points to `{u32 event; u64 arg1; u64 arg2}` (libIOABP+0x1cbc). The
+  manager's PCI-event handler (+0x77de4) treats them as transport errors (link down, then a baseband reset), so they
+  are not what engages the router.
+
+## Test 375 (the t374 image again; logging preferences with private data)
+
+- `/Library/Preferences/Logging/Subsystems/{com.apple.telephony.abm, com.apple.CommCenter, com.apple.telephony.bb}.plist`
+  with `DEFAULT-OPTIONS` = `Enable-Private-Data` true, Level Enable/Persist Debug (local files in
+  port/build/logprefs), put in with `r5qfs cp`, then CommCenter restarted (`r5qd kill CommCenter`, a test-only job in
+  this image). **Private arguments are now logged**; tracev3.py reads them from the end of each firehose chunk (the
+  last 0x1000 - offset bytes) and `--fmt` shows each message's format string.
+- What the manager says, unredacted: profile `Telephony`; router channels: services `qmux1` -> `MAV_ROUTER_QMI_0`,
+  `qmux2` -> `MAV_ROUTER_QMI_1`, `qmux_control` -> `MAV_ROUTER_QMI_0`; `Power assertion ...
+  RadioNotReady.Bootup`; radio.drv `Getting baseband firmware version` (a QMI DMS request) waiting.
+- **The exact blocker:** CommCenter's QMI clients (`registration.1`, `EURSimCommandDriver`, `QMIDMSCommandDriver.1`,
+  `CallModule.*`, `QMI.WirelessRadioManager`, `QMIBasebandSettingsDriver::*`, `QMI-PDS`, ...) each send QMI CTL
+  **GET_CLIENT_ID (svc 0, msg 0x22)** and the log says `qmux: message stalled for svc=0 client=0 (txid=N msgid=0x22)
+  [qmux1::QMIControl]`: queued because the router is not engaged. Once engaged, these go out over
+  AppleBasebandPCIInterface, where the kernel would have to answer QMI CTL itself and carry each service's QMI to the
+  modem's own services over QRTR (the modem already answers NAS/DMS/UIM there: Tests 352-353).
+- Where engagement is made (desk work): QMITransportService's vtable slot 6 (libBasebandManager +0x1865e8,
+  vtable 0x1d90facb8) logs `----------------- Engaging -----------------`, dispatches the router's engage
+  (RouterIPCController +0xd3864: only from kDisengaged) and waits up to 27 s. Nothing calls it in these runs; what
+  normally does (a boot-module "transport ready" step that the fake boot skips?) is the next question.
+
+## Test 376 (same image, live): the baseband state answer swept again, now with the manager's log
+
+- AppleBaseband selector 3 (the baseband state) answered 1..6 through `kern.redwood.bb_answer`, CommCenter restarted
+  for each, the unified log pulled each time (port/build/oslog-376-N, local). **Every value: `IPC state kOffline ->
+  kDisengaged`, `qmux: message stalled ... msgid=0x22 [qmux1::QMIControl]`.** The state answer does not engage the
+  router (as Test 358 found for the boot itself). Answer reset to 0 afterwards.
+- With private data and Debug level on, the manager's XPC traffic is readable: CommCenter asks for events
+  `EventBasebandBootStateChange`, `EventBasebandOperatingModeChange`, `EventServerStateChange`, ...; Powerlog for
+  `EventBasebandBootStateChange`, `EventBasebandWakeReason`. "Wait for Ready on Fake Boot" is a reset.detect key; it
+  is satisfied at once ("Recovery detected").
+- PCI events (0xe3ff8100 messages) all lead to stats and a baseband reset in the manager's handler (+0x77de4): not a
+  way to engage either.
+- **Open question for the next session:** who calls QMITransportService's TransportService-interface slot 0 (the
+  engage: vtable 0x1d90fad68, thunk +0x186a28 -> +0x1865e8). Candidates: TransportModule (+0x170000..+0x173000,
+  `fTransportService`) on a boot-state or operating-mode event. Then the kernel side: answer QMI CTL GET_CLIENT_ID on
+  the `qmux1` channel and bridge each client's QMI to the modem over QRTR.
