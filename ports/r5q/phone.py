@@ -33,6 +33,8 @@ keeps it in maintenance mode instead of starting iOS (a volume key held at the s
   python phone.py stop              end the iOS run now (it returns to the loader as at its time limit)
   python phone.py alive             (2026-11-19) iOS running, maintenance mode, or nothing (exit 0/1/2). Not `raw
                                     devices`: the loader's USB answers "xnuloader fastboot" while iOS runs too
+  python phone.py unstick           (2026-11-20) the loader's USB present but silent while iOS runs: restart the phone
+                                    from iOS over Wi-Fi (r5q_reboot) so the loader's USB comes back; no replug
   python phone.py wlog [FILE [SECS]] (2026-11-19) the kernel log over Wi-Fi (wifi/klog.c via r5qd) every second into
                                     FILE, independent of USB; stops 60 s after the phone goes silent
   python phone.py screenshot [PNG]  the phone's screen
@@ -42,6 +44,7 @@ keeps it in maintenance mode instead of starting iOS (a volume key held at the s
 
 Writes on the phone are only what flash-boot (BOOT) and the loader's own allowlist (boot, userdata) permit.
 """
+import os
 import pathlib
 import shutil
 import struct
@@ -313,9 +316,51 @@ def args(rest):
     print('starting iOS with them: ' + fb('oem', 'continue', check=False).splitlines()[0])
 
 
+def usb_present():
+    """(2026-11-20) True when Windows lists the loader's USB device (VID 18D1 / PID D00D) as present, whether or not it
+    answers fastboot. Present but silent = the loader's USB link is stuck, NOT an unplugged cable: a hung `phone.py
+    screenshot`, stopped midway, left the loader's USB wedged for hours while it was misreported as 'unplugged'."""
+    try:
+        r = subprocess.run(['powershell', '-NoProfile', '-Command',
+                            "@(Get-PnpDevice -PresentOnly | Where-Object InstanceId -match 'VID_18D1&PID_D00D').Count"],
+                           capture_output=True, text=True, timeout=20)
+        return r.stdout.strip() not in ('', '0')
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def r5qd(*args, timeout=30):
+    """a wifi/r5qd_client.py command; '' when the phone does not answer over Wi-Fi"""
+    try:
+        r = subprocess.run([sys.executable, str(pathlib.Path(__file__).resolve().parent / 'wifi/r5qd_client.py'), *args],
+                           capture_output=True, text=True, timeout=timeout, env={**os.environ, 'MSYS_NO_PATHCONV': '1'})
+        return r.stdout if r.returncode == 0 else ''
+    except subprocess.TimeoutExpired:
+        return ''
+
+
+def unstick_usb():
+    """(2026-11-20) The loader's USB is present but silent while iOS answers over Wi-Fi: restart the phone from iOS
+    (/var/r5q/bin/r5q_reboot, reboot(2) over r5qd; the firmware restarts the phone and the loader brings its USB up
+    again). No replugging. True when a restart was sent."""
+    if not usb_present() or 'pong' not in r5qd('ping', timeout=15):
+        return False
+    print('    USB cable connected but the loader does not answer (stuck link): restarting the phone from iOS over Wi-Fi',
+          flush=True)
+    r5qd('run', '/var/r5q/bin/r5q_reboot', timeout=20)     # (the connection drops as the phone restarts)
+    return True
+
+
 def wait_for_phone(seconds=3600):
     """fastboot keeps asking until the phone shows up; its first command, the moment the loader listens (the first
     15 s of every start with the cable in a PC), puts the phone into maintenance mode."""
+    try:
+        quick = subprocess.run([FASTBOOT, 'getvar', 'product'], capture_output=True, text=True, timeout=10)
+        if 'xnuloader' in quick.stdout + quick.stderr:
+            print('phone in maintenance mode')
+            return
+    except subprocess.TimeoutExpired:
+        unstick_usb()                                       # (2026-11-20: a stuck link, not a missing cable)
     print('waiting for the phone: start it (or plug it in) now ...', flush=True)
     r = subprocess.run([FASTBOOT, 'getvar', 'product'], capture_output=True, text=True, timeout=seconds)
     if 'xnuloader' not in r.stdout + r.stderr:
@@ -364,6 +409,8 @@ def main():
     cmd, rest = sys.argv[1], sys.argv[2:]
     if cmd == 'alive':
         alive()
+    if cmd == 'unstick':
+        sys.exit(0 if unstick_usb() else 1)
     if cmd == 'wlog':
         wlog(rest[0] if rest else time.strftime('wlog-%Y%m%d-%H%M%S.txt'), float(rest[1]) if len(rest) > 1 else 600)
         return
@@ -786,7 +833,10 @@ def alive():
     except subprocess.TimeoutExpired:
         pass
     if live_ios or wifi:
-        print(f'iOS RUNNING (USB live mode: {"yes" if live_ios else "no"}; r5qd over Wi-Fi: {"answers" if wifi else "silent"})')
+        link = 'yes' if live_ios else ('STUCK: the cable is connected but the loader does not answer; run '
+                                       '`phone.py unstick` (restart over Wi-Fi), do not ask for a replug'
+                                       if usb_present() else 'no USB device: the cable may be out')
+        print(f'iOS RUNNING (USB live mode: {link}; r5qd over Wi-Fi: {"answers" if wifi else "silent"})')
         sys.exit(0)
     if usb:
         print('MAINTENANCE MODE: the loader answers, iOS is not running')
