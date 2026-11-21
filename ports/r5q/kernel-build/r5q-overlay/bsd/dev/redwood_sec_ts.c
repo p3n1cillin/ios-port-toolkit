@@ -2447,6 +2447,7 @@ redwood_r5q_cam_keep(bool keep)
  * copy of the probe's (whose own lives on the probe's stack), valid while the sensor is powered.
  */
 static struct bitbang cam_bus_keep;
+#define REDWOOD_R5Q_NO_FOCUS    0xffffffffu     /* (Test 429) as REDWOOD_CAMERA_NO_FOCUS */
 static bool cam_bus_ok;
 static volatile bool exp_pending;
 static volatile uint32_t exp_lines, exp_gain, exp_frame;
@@ -2558,6 +2559,127 @@ SYSCTL_PROC(_kern_redwood, OID_AUTO, cam_peek, CTLTYPE_INT | CTLFLAG_RW | CTLFLA
 SYSCTL_INT(_kern_redwood, OID_AUTO, cam_back, CTLFLAG_RD | CTLFLAG_LOCKED, &cam_back, 0,
     "the last cam_peek: address << 16 | two bytes (-1: a bus error; 0: waiting)");
 
+/*
+ * (Test 429) The main camera's lens motor for iOS's focus. Samsung's module file (actuatorDriver, "dw9823"): slave
+ * 0x18 (7-bit 0x0c) on CCI 1 master 1 = GPIO33/34 (Test 428 found it there with the EEPROM and the OIS controller),
+ * byte addresses, word data, data shift 6; its init writes the position (code 300) to register 0x00 and 0x00 to
+ * register 0x02. Test 428 read 0x02 = 0x40 at reset: the AK737x-style control register (0x00 active, 0x40 standby),
+ * position bits 9-2 in 0x00 and 1-0 in 0x01's top bits. A position is one write: 0x00, code << 6 (two bytes).
+ * Boot-arg cam_af=0 leaves it alone (the frames then say "no focus motor", as before).
+ */
+static struct bitbang af_bus;
+static uint32_t af_was33, af_was34, af_code = REDWOOD_R5Q_NO_FOCUS;
+static volatile uint32_t af_req = REDWOOD_R5Q_NO_FOCUS;
+static bool af_on;
+
+static const char *
+af_write_code(uint32_t code)
+{
+	uint16_t w = (uint16_t)((code > 1023 ? 1023 : code) << 6);
+
+	return bb_write16((uint16_t)(0x0000 | (w >> 8)), (uint16_t)(w & 0xff), 1);  /* 0x00, w >> 8, w & 0xff */
+}
+
+static void
+main_af_up(vm_offset_t north)
+{
+	uint32_t want = 1;
+	struct bitbang *was = bb;
+	const char *problem;
+
+	af_on = false;
+	af_code = REDWOOD_R5Q_NO_FOCUS;
+	if (PE_parse_boot_argn("cam_af", &want, sizeof(want)) && want == 0) {
+		return;
+	}
+	af_bus = (struct bitbang){ .tlmm = north, .sda = 33, .scl = 34, .address = 0x0c, .cfg_sda = 3, .cfg_scl = 3 };
+	bb = &af_bus;
+	af_was33 = rd(BB_CFG(33));
+	af_was34 = rd(BB_CFG(34));
+	wr(BB_CFG(33), 3);
+	wr(BB_CFG(34), 3);
+	spin_us(50);
+	if (!bb_recover("the lens motor's bus") || (problem = af_write_code(300)) != NULL ||
+	    (spin_us(1000), (problem = bb_write(0x02, 0x00))) != NULL) {
+		rxlog("main camera: the lens motor (0x0c on GPIO33/34) did not start: no focus this session\n");
+		wr(BB_CFG(33), af_was33);
+		wr(BB_CFG(34), af_was34);
+		bb = was;
+		return;
+	}
+	bb = was;
+	af_code = 300;
+	af_req = REDWOOD_R5Q_NO_FOCUS;
+	af_on = true;
+	rxlog("main camera: the lens motor is up, the lens at 300\n");
+}
+
+static void
+main_af_down(void)
+{
+	struct bitbang *was = bb;
+
+	if (!af_on) {
+		return;
+	}
+	bb = &af_bus;
+	/* (down in steps, not to knock the lens against its stop; then standby) */
+	for (int32_t c = (int32_t)af_code; c > 0; c -= 60) {
+		(void)af_write_code((uint32_t)c);
+		spin_us(3000);
+	}
+	(void)af_write_code(0);
+	(void)bb_write(0x02, 0x40);
+	wr(BB_CFG(33), af_was33);
+	wr(BB_CFG(34), af_was34);
+	bb = was;
+	af_on = false;
+	af_code = REDWOOD_R5Q_NO_FOCUS;
+	rxlog("main camera: the lens motor parked and in standby\n");
+}
+
+/* between two frames: the position iOS asked for */
+static void
+af_apply(void)
+{
+	struct bitbang *was;
+	uint32_t want = af_req;
+	static uint32_t moves;
+
+	if (!af_on || want == REDWOOD_R5Q_NO_FOCUS) {
+		return;
+	}
+	af_req = REDWOOD_R5Q_NO_FOCUS;
+	want = want > 1023 ? 1023 : want;
+	if (want == af_code) {
+		return;
+	}
+	was = bb;
+	bb = &af_bus;
+	if (af_write_code(want) == NULL) {
+		if (moves++ < 20 || moves % 50 == 0) {
+			rxlog("main camera: the lens from %u to %u\n", af_code, want);
+		}
+		af_code = want;
+	}
+	bb = was;
+}
+
+void redwood_r5q_cam_focus(uint32_t position);
+uint32_t redwood_r5q_cam_af_position(void);
+
+void
+redwood_r5q_cam_focus(uint32_t position)
+{
+	af_req = position;
+}
+
+uint32_t
+redwood_r5q_cam_af_position(void)
+{
+	return af_on ? af_code : REDWOOD_R5Q_NO_FOCUS;
+}
+
 static void
 cam_exposure_apply(void)
 {
@@ -2566,6 +2688,7 @@ cam_exposure_apply(void)
 	const char *problem = NULL;
 
 	cam_reg_apply();
+	af_apply();
 	if (!exp_pending || !cam_bus_ok) {
 		return;
 	}
@@ -3687,6 +3810,68 @@ cam_pll2_on(void)
 	rxlog("main camera: camcc PLL2 locked at 960 MHz after %u us (mode %#x, user %#x)\n", us, r[0], r[0x0c / 4]);
 	return true;
 }
+/*
+ * (Test 428) Boot-arg cam_af=1: the main camera's lens motor, a look. Samsung's device tree (sm8150-camera-sensor-
+ * r5q-r01.dtsi): actuator_rear0 (DW9823, slave-addr 0x18: 7-bit 0x0c), the module's EEPROM (0x50) and its OIS
+ * controller (RUMBA S4, 0x24) are all on CCI 1 master 1 -- GPIO33/34 (NORTH), not the sensor's GPIO17/18, which is why
+ * Test 342's scan found only the sensor. Supplies: vaf (#1 LDO7 2.8 V, on with the sensor) and L14. With the main
+ * camera powered: what answers on GPIO33/34, then the motor's registers 0x00-0x0f (one-byte addresses), the EEPROM's
+ * first 8 bytes and the OIS controller's 0x0000-0x0003 (two-byte addresses). Reads only; the pins put back.
+ */
+static void
+main_af_probe(vm_offset_t north)
+{
+	uint32_t level = 0, was33, was34;
+	struct bitbang afb = { .tlmm = north, .sda = 33, .scl = 34, .address = 0x0c };
+	struct bitbang *was_bb = bb;
+
+	if (!PE_parse_boot_argn("cam_af", &level, sizeof(level)) || level == 0) {
+		return;
+	}
+	bb = &afb;
+	was33 = rd(BB_CFG(33));
+	was34 = rd(BB_CFG(34));
+	afb.cfg_sda = 3;                                                /* GPIO, pull-up, 2 mA, input */
+	afb.cfg_scl = 3;
+	wr(BB_CFG(33), 3);
+	wr(BB_CFG(34), 3);
+	spin_us(50);
+	if (!bb_recover("the lens motor's bus")) {
+		rxlog("main camera: lens bus GPIO33/34: the bus stays low (was %#x %#x)\n", was33, was34);
+	} else {
+		char seen[160], regs[200];
+		int at = 0, rat = 0;
+		uint8_t b[8] = { 0 };
+
+		for (unsigned a = 0x08; a < 0x78 && at < (int)sizeof(seen) - 6; a++) {
+			afb.address = (uint8_t)a;
+			if (bb_read(0x00, b, 1) == NULL) {
+				at += snprintf(seen + at, sizeof(seen) - at, " %#04x", a);
+			}
+		}
+		rxlog("main camera: lens bus GPIO33/34 answers at:%s\n", at ? seen : " nothing");
+		afb.address = 0x0c;
+		for (unsigned r = 0; r < 16 && rat < (int)sizeof(regs) - 8; r++) {
+			const char *problem = bb_read((uint8_t)r, b, 1);
+
+			rat += snprintf(regs + rat, sizeof(regs) - rat, " %02x=%s%02x", r, problem ? "?" : "", b[0]);
+		}
+		rxlog("main camera: lens motor 0x0c:%s\n", regs);
+		afb.address = 0x50;
+		if (bb_read16(0x0000, b, 8) == NULL) {
+			rxlog("main camera: EEPROM 0x50: %02x %02x %02x %02x %02x %02x %02x %02x\n", b[0], b[1], b[2], b[3], b[4],
+			    b[5], b[6], b[7]);
+		}
+		afb.address = 0x24;
+		if (bb_read16(0x0000, b, 4) == NULL) {
+			rxlog("main camera: OIS 0x24: 0000-0003 %02x %02x %02x %02x\n", b[0], b[1], b[2], b[3]);
+		}
+	}
+	wr(BB_CFG(33), was33);
+	wr(BB_CFG(34), was34);
+	bb = was_bb;
+}
+
 static void
 imx586_full_tune(void)
 {
@@ -3932,9 +4117,16 @@ mainsensor_probe(uint32_t main_level)
 		problem = bb_read16(0x0016, id, 2);
 		rxlog("main camera: 7-bit 0x1a: ID %s %02x%02x%s\n", problem ? problem : "", id[0], id[1],
 		    problem == NULL && id[0] == 0x05 && id[1] == 0x86 ? ": THE IMX586 ANSWERS" : "");
+		if (problem == NULL && id[0] == 0x05 && id[1] == 0x86) {
+			main_af_probe(north);
+		}
 		if (problem == NULL && id[0] == 0x05 && id[1] == 0x86 && main_level >= 2) {
 			imx586_full_tune();
+			main_af_up(north);                                      /* (Test 429) */
+			bb = &cam;
 			sony_stream(&cam, main_level, main_level == 7 && cam_full_frames() ? &imx586_full : &imx586_cam);
+			main_af_down();
+			bb = &cam;
 		}
 	}
 	wr(BB_CFG(17), was17);

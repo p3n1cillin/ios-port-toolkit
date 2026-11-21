@@ -1270,3 +1270,22 @@ every frame below has **0.00%**, warm or cold, which is the gate.
 - **The Camera app after the fix (2026-11-21, Test 427, screenshot port/build/cam427.png, local):** the back camera's preview
   shows the room (ceiling, wall, a poster, the light) with a natural exposure and colour, where it was streaky noise
   at maximum exposure before. Open: focus (no autofocus yet), the macro sensor, the full-resolution modes.
+
+## The main camera's autofocus (2026-11-21, Tests 428-429)
+
+- **Where the motor is:** Samsung's `sm8150-camera-sensor-r5q-r01.dtsi`: `actuator_rear0` (slave-addr 0x18), the
+  module EEPROM (0x50) and the OIS controller (`ois_rear`, RUMBA S4, 0x24) are on **CCI 1 master 1 = GPIO33/34**, not
+  the sensor's GPIO17/18. The module file (`actuatorDriver`): "dw9823", 10-bit, byte addresses, word data, data shift
+  6; init: the position (300) to 0x00, then 0x00 to 0x02. (The same tree names custom1 VDD_RCAM1_AVDD_1P8 -- the
+  sensor's analog 1.8 V that Test 427 fixed -- and custom2/custom3 the OIS's 1.8 / 2.8 V.)
+- **Test 428 (`cam_af=1`, reads only):** GPIO33/34 answers at 0x0c 0x24 0x50 0x58; the motor's 0x00-0x0f:
+  `00 00 40 0c 00 ...` -- 0x02 = 0x40, the AK737x-style control register in standby (0x00 active); the OIS reads
+  0x0000-0x0003 = 00 13 00 00.
+- **Test 429 (kernel t429, standard):** `main_af_up` (session start: GPIO33/34 as the bit-banged bus, position 300 as
+  one write `0x00, code << 6`, then 0x02 = 0x00), `af_apply` between frames (what iOS asked for through
+  REDWOOD_CAMERA_FOCUS, now forwarded by redwood_camera.c on r5q), `main_af_down` (down in steps, 0x02 = 0x40, pins
+  back). The frames report the position, so the media library's contrast autofocus (camera_device.c: hill climb,
+  tap to sweep) runs: in the Camera app the lens went 300 -> 396 (worse), back down to 60, then a fine search
+  108..180 and settled about 132, the far end, for the ceiling. `cam_af=0` turns it off.
+- Open: the OIS (RUMBA S4) is left alone (powered, not started); the lens's code range vs distance (AF_FAR 768 is the
+  POCO's); a close-up test by the owner.

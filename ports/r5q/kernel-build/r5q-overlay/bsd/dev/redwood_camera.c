@@ -3845,6 +3845,13 @@ r5q_frame(const uint8_t *frame, uint32_t bytes, __unused void *ctx)
 		ios_now.frame_lines = frame_lines;
 		ios_ask.pending = false;
 	}
+	if (ios_ask.focus_pending) {
+		/* (r5q Test 429) the main camera's lens motor (redwood_sec_ts.c): applied by the session between two frames */
+		extern void redwood_r5q_cam_focus(uint32_t position);
+
+		redwood_r5q_cam_focus(ios_ask.focus);
+		ios_ask.focus_pending = false;
+	}
 	for (int i = 0; i < RING; i++) {
 		if (place[i].state != PLACE_READING && (p < 0 || place[i].sequence < place[p].sequence)) {
 			p = i;
@@ -4070,7 +4077,13 @@ camdev_read(__unused dev_t dev, struct uio *uio, __unused int ioflag)
 	f.frame_lines_max = FRAME_LINES_MAX;
 	f.margin = EXPOSURE_MARGIN;
 	f.sensor = hw_index;
-	f.focus = af_position;
+	if (r5q_real) {
+		extern uint32_t redwood_r5q_cam_af_position(void);
+
+		f.focus = r5q_sensor == 2 ? redwood_r5q_cam_af_position() : REDWOOD_CAMERA_NO_FOCUS;  /* (r5q Test 429) */
+	} else {
+		f.focus = af_position;
+	}
 	lck_mtx_unlock(&ios_lock);
 
 	error = uiomove((caddr_t)&f, (int)MIN(sizeof(f), (size_t)uio_resid(uio)), uio);

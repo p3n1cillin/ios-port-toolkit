@@ -128,3 +128,6 @@ table grew from 16 to 96).
 - `bsd/dev/redwood_sec_ts.c` (Tests 425-427): the IMX586's custom1/custom2 supplies (S2MPB03 LDO3) at 1.8 V (they were
   written as 0.7 V); boot-args `cam_verify` (the sensor tables read back) and `cam586_mclk=24` (camcc PLL2, a 24 MHz
   MCLK0).
+- `bsd/dev/redwood_sec_ts.c`, `bsd/dev/redwood_camera.c` (Tests 428-429): the main camera's lens motor (0x0c on
+  GPIO33/34) driven for iOS's autofocus: started with each session, positions applied between frames, parked at the
+  end; the frames report its position (boot-arg `cam_af`).

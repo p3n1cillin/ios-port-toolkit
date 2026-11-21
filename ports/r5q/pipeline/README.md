@@ -31,7 +31,13 @@ Notes:
 
 `phone-args.txt` is the standard boot-arg set. Change it when a feature's arg becomes part of every boot.
 
-## The standard image (2026-11-21, Test 427)
+## The standard image (2026-11-21, Test 429)
+
+`port/build/r5q-install-boot-standard.img` = r5q-install-boot-429.img: kernel t429, root test415, `phone-args.txt` unchanged.
+On top of Test 427: **autofocus on the main camera**: its lens motor (on GPIO33/34, CCI 1 master 1) driven by iOS's
+contrast autofocus through the camera device (wifi/CAMERA-PLAN.md, Tests 428-429). `cam_af=0` turns it off.
+
+## The standard image before (2026-11-21, Test 427)
 
 `port/build/r5q-install-boot-standard.img` = r5q-install-boot-427.img: kernel t427, root test415, `phone-args.txt` unchanged.
 On top of Test 424:
