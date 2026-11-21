@@ -1371,3 +1371,7 @@ Code in place, untested (paused for the night):
   (before: port/build/phone-args.before-t424.txt).
 - Open: the owner's Voice Memos check (does speech sound right); the 175.5 Hz detector is the POCO's motor, not this
   phone's (its loudness shows it plainly); A/V sync in camera video (MEMORY-PLAN.md's 468.7 s offset) now matters.
+
+- **Owner check (2026-11-21, Test 424 standard):** a Voice Memos recording played back "sounds good". The microphone is done;
+  open only: A/V sync in camera video (MEMORY-PLAN.md) and the sub/3rd microphones (ADC3/ADC4) for stereo or noise
+  cancellation.
