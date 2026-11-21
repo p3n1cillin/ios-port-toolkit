@@ -4,6 +4,7 @@
  */
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 #include <stdlib.h>
 #include <sys/sysctl.h>
 #include <unistd.h>
@@ -26,10 +27,13 @@ main(int argc, char **argv)
 	uint32_t last = 0, n = 0;
 
 	for (int ticks = 0; ticks < seconds * 50; ticks++) {
+		/* (2026-11-21) the kernel's record is longer since version 2 (Test 349's rings): read it whole, use its start */
+		static uint64_t buf[1024];
 		struct redwood_motion m;
-		size_t size = sizeof(m);
+		size_t size = sizeof(buf);
 
-		if (sysctlbyname("kern.redwood.motion", &m, &size, NULL, 0) == 0 && m.count[2] != last) {
+		if (sysctlbyname("kern.redwood.motion", buf, &size, NULL, 0) == 0 && size >= sizeof(m) &&
+		    (memcpy(&m, buf, sizeof(m)), m.count[2] != last)) {
 			last = m.count[2];
 			printf("%u %d %d %d %d %d %d\n", n++, m.mag[0], m.mag[1], m.mag[2], m.accel[0], m.accel[1], m.accel[2]);
 			fflush(stdout);

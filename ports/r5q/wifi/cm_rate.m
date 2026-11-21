@@ -1,6 +1,8 @@
 /*
  * cm_rate SENSOR INTERVAL SECONDS: how many samples one CoreMotion sensor alone delivers to an app (Test 243: apps got
- * a fraction of what the virtual services send). SENSOR: a (accelerometer), g (gyroscope), m (magnetometer).
+ * a fraction of what the virtual services send). SENSOR: a (accelerometer), g (gyroscope), m (magnetometer);
+ * (2026-11-21) d (device motion), n (device motion in the magnetic-north frame, as the Compass app: its heading and
+ * accuracy printed every 25th sample).
  */
 #import <CoreMotion/CoreMotion.h>
 #import <Foundation/Foundation.h>
@@ -28,6 +30,18 @@ main(int argc, char **argv)
 		} else if (s == 'g') {
 			m.gyroUpdateInterval = interval;
 			[m startGyroUpdatesToQueue:q withHandler:^(CMGyroData *d, NSError *e) { if (d) tick(d.timestamp); }];
+		} else if (s == 'd' || s == 'n') {
+			m.deviceMotionUpdateInterval = interval;
+			[m startDeviceMotionUpdatesUsingReferenceFrame:s == 'n' ? CMAttitudeReferenceFrameXMagneticNorthZVertical :
+			    CMAttitudeReferenceFrameXArbitraryZVertical toQueue:q withHandler:^(CMDeviceMotion *d, NSError *e) {
+				if (d) {
+					if (n % 25 == 0) {
+						printf("cm_rate: %u: heading %.1f, field accuracy %d, yaw %.1f\n", n, d.heading,
+						    (int)d.magneticField.accuracy, d.attitude.yaw * 180 / M_PI);
+					}
+					tick(d.timestamp);
+				}
+			}];
 		} else {
 			m.magnetometerUpdateInterval = interval;
 			[m startMagnetometerUpdatesToQueue:q withHandler:^(CMMagnetometerData *d, NSError *e) { if (d) tick(d.timestamp); }];

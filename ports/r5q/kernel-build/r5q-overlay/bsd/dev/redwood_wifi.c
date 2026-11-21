@@ -8366,6 +8366,16 @@ r5q_join_rx(const uint8_t *f, uint32_t flen)
 			join_error = ECONNREFUSED;
 			join_step = 30;
 		}
+	} else if ((st == 0xc0 || st == 0xa0) && memcmp(f + 4, r5q_mac, 6) != 0 &&
+	    !(f[4] == 0xff && f[5] == 0xff && f[6] == 0xff && f[7] == 0xff && f[8] == 0xff && f[9] == 0xff)) {
+		/*
+		 * (Test 416, 2026-11-21) Only the BSSID was checked, so the access point sending another station away (band
+		 * steering, a client leaving) read as our own refusal: after a Wi-Fi firmware restart every join "ended at
+		 * step 30" with "DISASSOCIATED by the access point, reason 8" right after our authentication, boot after boot.
+		 */
+		printf("wifi: join: %s from the access point for another station (%02x:%02x:%02x:%02x:%02x:%02x), reason %u: "
+		    "not ours\n", st == 0xc0 ? "a deauthentication" : "a disassociation", f[4], f[5], f[6], f[7], f[8], f[9],
+		    flen >= 26 ? (unsigned)(f[24] | f[25] << 8) : 0u);
 	} else if (st == 0xc0 || st == 0xa0) {
 		printf("wifi: join: %s by the access point, reason %u\n", st == 0xc0 ? "DEAUTHENTICATED" : "DISASSOCIATED",
 		    flen >= 26 ? (unsigned)(f[24] | f[25] << 8) : 0u);

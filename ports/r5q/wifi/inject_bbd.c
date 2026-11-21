@@ -162,7 +162,8 @@ motion_new(const struct redwood_motion *m, int kind, uint32_t *last, int32_t v[1
 }
 
 struct sensor_service {
-	CFMutableDictionaryRef properties;
+	CFMutableDictionaryRef properties;      /* (2026-11-21) under lock: the event server's thread sets, clients copy */
+	pthread_mutex_t lock;
 	volatile bool opened;
 	const char *product;                    /* (Test 228) for the log */
 };
@@ -170,9 +171,14 @@ struct sensor_service {
 static CFTypeRef
 sensor_copy_property(__unused void *target, void *refcon, __unused IOHIDServiceClientRef service, CFStringRef key)
 {
-	CFTypeRef value = CFDictionaryGetValue(((struct sensor_service *)refcon)->properties, key);
+	struct sensor_service *s = refcon;
+	CFTypeRef value;
 
-	return value ? CFRetain(value) : NULL;
+	pthread_mutex_lock(&s->lock);
+	value = CFDictionaryGetValue(s->properties, key);
+	value = value ? CFRetain(value) : NULL;
+	pthread_mutex_unlock(&s->lock);
+	return value;
 }
 
 static Boolean
@@ -191,6 +197,20 @@ sensor_set_property(__unused void *target, void *refcon, __unused IOHIDServiceCl
 		snprintf(line, sizeof(line), "r5q-bbd: sensors: the event server sets %s = %d on %s\n", name, n,
 		    ((struct sensor_service *)refcon)->product);
 		say(line);
+	}
+	/*
+	 * (2026-11-21) Kept, so a client that reads a property back finds what it set. CoreMotion's CLIoHidInterface
+	 * (locationd and every app's CoreMotion) sets ReportInterval, BatchInterval and the like on each motion service,
+	 * then reads them back: with nothing kept it logged "Service for device with usage pair {65280, 10} is not ready"
+	 * and "Could not set all properties after too many retries. Giving up." (Fault) -- the compass never started and
+	 * the Compass app's heading stayed "--".
+	 */
+	if (key != NULL && value != NULL) {
+		struct sensor_service *s = refcon;
+
+		pthread_mutex_lock(&s->lock);
+		CFDictionarySetValue(s->properties, key, value);
+		pthread_mutex_unlock(&s->lock);
 	}
 	return true;
 }
@@ -239,6 +259,7 @@ sensor_service(IOHIDEventSystemClientRef client, const char *product, int page, 
 	CFDictionarySetValue(p, CFSTR("VendorID"), zero);
 	CFDictionarySetValue(p, CFSTR("ProductID"), zero);
 	made->properties = p;
+	pthread_mutex_init(&made->lock, NULL);
 	made->product = product;
 	/*
 	 * (Test 234) Kept even when nobody has opened it yet: with CoreMotion fusing device motion itself (Test 233's

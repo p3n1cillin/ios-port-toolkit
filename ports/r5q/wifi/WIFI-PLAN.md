@@ -1198,3 +1198,55 @@ run ends with the modem shut down through TZ, after asking it to stop over SMP2P
   `-[IMDBadgeUtilities isUnexpectedlyLoggedOut]` answer NO. iMessage can never sign in here, so that warning is
   always noise. A real failed message (`_showingFailure`) still shows "!"; iMessage's own setting is untouched.
   After a clean boot of root test401 the Messages icon has no badge. Standard image = Test 401.
+
+## Test 415 (2026-11-21, kernel t414, root test415): the compass's motion services keep their properties
+
+- **Seen first (t414, the unified log pulled over Wi-Fi, read with tracev3.py; local only):** with Compass open,
+  locationd and the app's CoreMotion both log `[CLIoHidInterface] Adding new Device with usage pair {65280, 10}` (the
+  compass), then `Service for device with usage pair {65280, 10} is not ready` over and over, and `Could not set all
+  properties after too many retries. Giving up.` (Fault, 23 times, from locationd, backboardd and the app).
+  - locationd also logs `Legacy compass started`, `#Warning CPAS data response was invaild` / `CPAS data is NULL`
+    (no factory compass calibration) and `[CompassCalibration] no persistent calibration found`.
+  - The app showed the heading as "--".
+- **Cause:** backboardd's virtual motion services (`inject_bbd.c`) answered every property set with "true" but kept
+  none of them, so a client that reads one back (ReportInterval, BatchInterval, ...) never sees it take.
+- **Fix:** `sensor_set_property` stores each value in the service's properties (under a mutex), and
+  `sensor_copy_property` returns it.
+- **Result (Test 415, phone lying still, Compass opened by USB taps):**
+  - The app showed **"0° N" for the first time**, then "--" again a few seconds later.
+  - The services now get the compass's ReportInterval (10000), the accelerometer's and the gyroscope's.
+  - Next: the owner turns the phone through a figure-of-eight with Compass open (calibration needs motion), and
+    the unified log is read again to check the "not ready" / "Giving up" lines are gone.
+- **Wi-Fi, seen on the way:**
+  - The Wi-Fi firmware (wlan_pd) restarted during a large log pull (t414, ~788 s).
+  - Since then the access point answers our open-system authentication with a disassociation (reason 8), on the
+    re-bring-up and on a fresh boot.
+  - The kernel joins once per bring-up and does not try again.
+  - Follow-up: retry the join with a back-off.
+- **Kernel, seen on the way:** the t413 run of 2026-11-20 21:17 panicked after an hour with the I/O submap full
+  (`io_map: 65776 KB of the 64 MB in use`; kmem_alloc 557056). `r5q_io_map_kept` does not cover every mapper yet.
+
+## Tests 415-416 continued (2026-11-21): a heading, but jumpy
+
+- **After the owner's figure-of-eight (Test 415):** the Compass app showed **278° W**, and the dial turned with the
+  phone. The owner: it "doesn't keep up at all" and is "real janky".
+- **Not the display:** `fps_test` while the owner turned the phone showed 33-48 frames a second.
+- **Not the rates:** `cm_rate` (now with `d` device motion and `n` device motion in the magnetic-north frame)
+  showed gyroscope 89.5/s, magnetometer 50.0/s, and device motion 89.5/s in both frames.
+- **The magnetometer's offset has drifted:**
+  - `magrec` (fixed: it read the version-1 record size, so its sysctl failed on the longer version-2 record) at 50/s.
+    r5qd stops it after ~33 s.
+  - **Still:** |B - the Test 243 offset| was 51-56 µT.
+  - **Turning:** 38-75 µT, one spike at 144 µT. The kernel log also had one sample at z = -1154 µT during an earlier turn.
+  - A sphere fit on the turning part: centre (-94, 42, -463) µT against Test 243's (-95, 39, -426), radius ~23 µT,
+    residual median 3.8 µT, 95th percentile 13 µT.
+  - libr5q-bbd's online refit rejected every fit ("not taken": radius 25-70 and residual < 3 required).
+  - At ~17 µT of horizontal field, an offset error of 10-40 µT turns the heading by tens of degrees as the phone
+    turns: the jumps.
+- **Next:** a robust continuous hard-iron estimate (as Android's, which re-fits as the offset drifts with charging
+  current and temperature). It would be accepted on looser limits with outliers rejected and changed gradually, not
+  in steps. Then look at whether locationd's "Legacy compass" (magnetometer only) should be the gyro-fused one.
+- **Test 416 (kernel t416, root test415):** the Wi-Fi join checks a deauthentication or disassociation is addressed
+  to us (or broadcast) before taking it as a refusal. On this boot the scan chose another access point of the same
+  network and the join went through at once, so the refusal case was not seen again. **Standard image =
+  r5q-install-boot-416.img.**

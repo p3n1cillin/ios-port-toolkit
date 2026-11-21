@@ -1140,9 +1140,10 @@ candidate designs).
     alone ~1.1 MB) and never unmapped them. After a few dozen sessions in one run the I/O submap was full.
   - **Fix (kernel t413):** in `redwood_sec_ts.c`, `ml_io_map` / `ml_io_map_unmappable` go through
     `r5q_io_map_kept`, a table that hands back the mapping a range already has.
-- **Finding 5, the wrong colour tuning.** The library loads the **S5KHM2SD's** colour tuning
-  (`/redwood/fw/camera-s5khm2sd.isp`, the donor phone's sensor) for our IMX586 in the wide slot. Its colour matrices
-  and lens shading are not this sensor's; a likely part of the pink cast. Not fixed yet.
+- **Finding 5 (withdrawn 2026-11-21): the colour tuning is the right one.** The library loads
+  `/redwood/fw/camera-s5khm2sd.isp`, but `pipeline/build_root_app.sh` puts the IMX586's own tuning
+  (`camera-imx586.isp`, from `com.samsung.tuned.sony_imx586.bin`, Test 343) under that slot's name. The pink cast
+  is not from a wrong tuning file.
 - **Build change:** `pipeline/build_init.sh` now also builds libredwood-media.dylib from source, and build_root_app.sh
   puts it into the root. Until now the root carried the donor's prebuilt one from 2026-11-15.
 - **The column-gain experiment:** taken out of the source. A copy of that version stays in WSL at
@@ -1156,6 +1157,62 @@ candidate designs).
     kernel panicked after a few dozen.
   - **Still to see:** the preview in a lit room with the new exposure (daylight).
   - **Next:**
-    - the IMX586's own colour tuning, in place of the S5KHM2SD's;
     - the high-gain ramp and stripes (a dark-frame calibration);
     - the soft focus (no autofocus moves this lens yet?).
+
+## The back camera in a lit room: a dead zone, not the exposure (2026-11-21, kernel t413)
+
+- **The Camera app with the room light on:** the exposure still sat at its maximum (3228 lines, 29.7 ms, 16x) and
+  the preview was still mostly streaky noise, with only a faint bright shape.
+- **Raw frames (camgrab, sensor 1; local only), same settings minutes apart:**
+
+  | Frame | Setting | Lit-block green mean | Pixels above 64 | Lowest value above 64 |
+  |---|---|---|---|---|
+  | l8 (first, right after the app) | 8x, 3000 lines | 183 | 15.6% | ~170 (one at 104) |
+  | l16 | 16x, 3228 lines | 185 | 6.8% | 262 |
+  | a8 (after the app again) | 8x, 3000 lines | 114 | 2.4% | 269 |
+  | r8, pk1 | 8x, 3000 lines | 68-69 | 0.1-0.2% | ~356-360 |
+  | r16 | 16x, 3228 lines | 73 | 0.3% | 343 |
+
+  - Every pixel is **either exactly 64 or above a threshold**. There is nothing between them, and the top rows are 64
+    with zero noise. Above the threshold the values are continuous (not quantised), so it is a gate, not an offset
+    subtracted.
+  - The threshold **moved between sessions, ~100-170 up to ~340 counts above black**, with the scene and settings
+    unchanged. So this is the sensor, not the light. It explains the noise preview (only the brightest pixels and
+    the column-offset ones get through, as stripes), the "black first frame" and "1x is black" findings, and why
+    the auto-exposure stays at its maximum.
+  - The registers read back as written: `0x0202` / `0x0224` exposure, `0x0204` / `0x0216` = 0x380 (8x), `0x0340`
+    7199, `0x0220` = 0x62 0x11, `0x0222` = 1.
+- **The sensor's own PLL limits** (CCS limit registers, read with `camgrab ... ?ADDR`): EXCK 6-27 MHz, pre-PLL
+  divider 1-4, **PLL input 6-12 MHz**, **multiplier 105-350**, PLL output 1050-2160 MHz; vt_sys_clk 156.25-2500 MHz,
+  vt_pix_clk 15.625-312.5 MHz.
+  - Since Test 402 the pixel PLL ran at 19.2 / 4 = **4.8 MHz in** (under the limit) with **multiplier 450** (over it).
+    The output PLL ran at 19.2 / 3 = 6.4 MHz with multiplier 390 (over 350). Android gives this sensor
+    (`qcom,cam-sensor@0`) a 24 MHz MCLK (`clock-rates = <24000000>`), where the tables' 4 x 360 and 3 x 312 are
+    near the limits. We give it the 19.2 MHz crystal.
+- **Test 414 (kernel t414, boot-arg `cam586_pre`, default 2):** both PLLs' pre-divider 2 (9.6 MHz in) with the
+  multipliers halved and scaled: pixel 225 (2160 MHz), output 260 (2496 MHz). The same VCOs, so the line, frame and
+  iOS's line ratio stay. `cam586_pre=0` is t413's setting.
+- **Test 414 result (kernel t414, root test413): booted.** The registers read back `0x0304` = 2, `0x0306` = 225,
+  `0x030c` = 2, `0x030e` = 260, and the stream is clean. **The gate is unchanged**: the lowest value above 64 is still
+  ~370-470 on short grabs, with the torch as well. So the PLL limits were not its cause. The setting is kept: it is
+  inside the sensor's limits and changes no timing. t413 stays the standard image.
+- **The gate shrinks as the sensor warms up.** Grabs at 8x and 3000 lines of the same (by then dim) room:
+
+  | Grab | Frames streamed | Pixels above 64 | Lowest value above 64 |
+  |---|---|---|---|
+  | k30 | 30 (~1 s) | 0.01% | ~370 |
+  | k300 | 300 (~10 s) | 2.0% | ~295 |
+  | k900 | 900 (~30 s) | 13.9% | ~160 |
+  | h30, a 1 s grab right after a 30 s one | 30 | 15.5% | ~160 |
+
+  - Each session powers the sensor down, so its registers start over. What carries over from one session to the next
+    is its temperature. So the dead zone is large on a cold sensor and shrinks as it warms. This is also why the
+    first lit-room grab, right after the Camera app had been streaming, was the only good one.
+  - The supplies match Android's (`qcom,cam-sensor@0` `rgltr-min-voltage`): vdig 1.1 V, vana 2.9 V, vaf 2.8 V, vio
+    1.8 V, custom 1.8 / 1.8 / 2.8 V. These are the codes the kernel writes (#1 LDO1 0xa0, LDO6 0xac, LDO5 0xa8).
+  - **Open:** what in the analog chain needs warmth. Candidates:
+    - the black-level clamp's own loop or a bias that settles slowly;
+    - a setting Android's driver writes that the tables do not.
+
+    A workaround is to keep the back sensor powered between sessions, or to warm it up at boot.

@@ -108,3 +108,7 @@ table grew from 16 to 96).
 - `bsd/dev/redwood_sec_ts.c` (Test 413): device mappings are kept and reused (`r5q_io_map_kept` in front of
   `ml_io_map` / `ml_io_map_unmappable`). Each camera session had mapped the same ranges again and leaked the kernel's
   I/O map.
+- `bsd/dev/redwood_sec_ts.c` (Test 414): the IMX586's two PLLs get pre-divider 2 with the multipliers scaled to the
+  same VCOs (pixel 225, output 260), inside the limits the sensor reports (CCS 0x110c-0x1116). Boot-arg `cam586_pre`.
+- `bsd/dev/redwood_wifi.c` (Test 416): a deauthentication or disassociation from the access point counts as a
+  refusal only when it is addressed to us or broadcast.

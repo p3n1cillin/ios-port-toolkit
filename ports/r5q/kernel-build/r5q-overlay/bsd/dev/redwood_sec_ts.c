@@ -2428,6 +2428,7 @@ struct sony_cam {
 	uint32_t line_num, line_den, frame_num, frame_den, margin; /* iOS's lines x num / den; its frame lines likewise */
 	uint32_t vt_mpy, exck;                                     /* (Test 402) 0: the tables' (imx586_full_tune) */
 	uint32_t op_div;                                           /* (Test 403) 0x030b; 0: the tables' */
+	uint32_t pll_pre;                                          /* (Test 414) both PLLs' pre-divider; 0: the tables' */
 };
 static const struct sony_cam *cam_live;
 
@@ -3194,6 +3195,23 @@ sony_stream(struct bitbang *cam, uint32_t front_level, const struct sony_cam *c)
 				    192u * c->iop_mpy / 30u, 192u * c->iop_mpy / 30u / c->op_div,
 				    bb_write16(0x030b, c->op_div, 1) ?: "taken");
 			}
+			/*
+			 * (Test 414) The same two VCOs, inside the sensor's own limits. The IMX586 reports them (CCS 0x110c-0x1116):
+			 * a PLL input of 6-12 MHz and a multiplier of 105-350. With the 24 MHz tables' pre-dividers (pixel 4,
+			 * output 3) our 19.2 MHz clock gave the pixel PLL 4.8 MHz in and multiplier 450, the output PLL 6.4 MHz
+			 * and 390: both multipliers past the limit, the pixel PLL's input under it. Pre-divider 2 (9.6 MHz) with
+			 * the multipliers scaled (450 -> 225, 390 -> 260) makes the same 2160 and 2496 MHz, so the line, frame
+			 * and iOS's line ratio stay. Lit frames on t413 (2026-11-21): every pixel either exactly 64 or above a
+			 * threshold that wandered from ~100 to ~340 counts between sessions -- the back preview's noise.
+			 */
+			if (c->pll_pre != 0 && c->vt_mpy != 0 && c->op_div != 0) {
+				uint32_t vt = c->vt_mpy * c->pll_pre / 4u, op = c->iop_mpy * c->pll_pre / 3u;
+
+				SLOG("PLL pre-divider %u: pixel PLL multiplier %u (VCO %u MHz), output %u (VCO %u MHz): %s\n",
+				    c->pll_pre, vt, 192u * vt / c->pll_pre / 10u, op, 192u * op / c->pll_pre / 10u,
+				    bb_write16(0x0304, (uint16_t)c->pll_pre, 2) ?: bb_write16(0x0306, (uint16_t)vt, 2) ?:
+				    bb_write16(0x030c, (uint16_t)c->pll_pre, 2) ?: bb_write16(0x030e, (uint16_t)op, 2) ?: "taken");
+			}
 			if (front_level == 5) {
 				const uint16_t *c = crops[s];
 
@@ -3631,6 +3649,16 @@ imx586_full_tune(void)
 		imx586_cam.iop_mpy = imx586_full.iop_mpy = iop;
 	}
 	rxlog("main camera: output PLL multiplier %u, divider %u\n", imx586_full.iop_mpy, imx586_full.op_div ?: 1u);
+	/*
+	 * (Test 414) Boot-arg cam586_pre=N: both PLLs' pre-divider, the multipliers scaled to keep the VCOs (only 2 or 0; default 2:
+	 * 9.6 MHz in, inside the sensor's 6-12 MHz; 0: the tables' 4 and 3 with the multipliers above, as t413).
+	 */
+	uint32_t pre = 2;
+	(void)PE_parse_boot_argn("cam586_pre", &pre, sizeof(pre));
+	if (pre == 2) {
+		imx586_cam.pll_pre = imx586_full.pll_pre = pre;
+	}
+	rxlog("main camera: PLL pre-divider %u\n", imx586_full.pll_pre);
 }
 
 static void

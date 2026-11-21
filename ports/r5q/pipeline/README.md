@@ -31,7 +31,19 @@ Notes:
 
 `phone-args.txt` is the standard boot-arg set. Change it when a feature's arg becomes part of every boot.
 
-## The standard image (2026-11-20, Test 413)
+## The standard image (2026-11-21, Test 416)
+
+`port/build/r5q-install-boot-standard.img` = r5q-install-boot-416.img: kernel t416, root test415, `phone-args.txt`
+unchanged. On top of Test 413:
+- **The compass works in the Compass app** (root test415): backboardd's virtual motion services keep the properties
+  iOS sets on them, so locationd and CoreMotion no longer give up on the compass. After a figure-of-eight the
+  app showed a heading (278° W). It is still jumpy: the hard-iron offset has drifted (wifi/WIFI-PLAN.md, Tests 415-416).
+- **The IMX586's PLLs inside its own limits** (kernel t414+, `cam586_pre`, default 2): no visible change to the
+  picture (wifi/CAMERA-PLAN.md).
+- **The Wi-Fi join** ignores a deauthentication or disassociation the access point sends to another station
+  (kernel t416).
+
+## The standard image before (2026-11-20, Test 413)
 
 `port/build/r5q-install-boot-standard.img` = r5q-install-boot-413.img: kernel t413, root test413, `phone-args.txt`
 unchanged. On top of Test 412:
