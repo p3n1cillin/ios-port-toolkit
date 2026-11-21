@@ -7644,6 +7644,18 @@ struct r5q_bss {
 static struct r5q_bss join_bss;
 static bool join_have;
 static uint8_t join_ssid[32], join_ssid_len;
+/*
+ * (Test 417, 2026-11-21) Joining again by ourselves. Before, a join was tried once: at the bring-up (the start, or after
+ * the Wi-Fi domain restarted) or when iOS asked. When the access point refused it -- as after the Wi-Fi firmware
+ * restarted in the middle of a large transfer (Test 414) -- nothing tried again and the phone stayed off the network
+ * until it was restarted. rejoin_wanted: the link is down and nobody asked for that (a join failed, or the access
+ * point sent us away); r5q_rejoin_thread asks the station for the network again, 15 s, 30 s, ... at most 5 min apart.
+ * Cleared when a join comes through, the radio is switched off, or iOS asks to leave. refused_bssid: the access point
+ * that last refused us, passed over for 5 minutes when another of the same network is heard.
+ */
+static volatile bool rejoin_wanted;
+static uint8_t refused_bssid[6];
+static uint64_t refused_us;
 static uint64_t join_t;
 static uint32_t join_tries, join_aid;
 static uint16_t join_seq;
@@ -8386,6 +8398,7 @@ r5q_join_rx(const uint8_t *f, uint32_t flen)
 				redwood_net_link_state(false);
 				if (r5q_sta_attached) {
 					redwood_sta_lost(ECONNRESET);
+					rejoin_wanted = true;   /* (Test 417) */
 				}
 			} else if (join_step >= 20 && (why == 15 || why == 2)) {
 				join_error = EAUTH;             /* the handshake did not come through: most likely the passphrase */
@@ -9257,12 +9270,19 @@ r5q_sta_join(const struct redwood_sta_join *w)
 			break;
 		}
 		lck_mtx_lock(&r5q_net_lock);
-		for (uint32_t i = 0; i < heard_n; i++) {
-			struct redwood_sta_bss *h = &heard_tab[i];
+		for (int skip = 1; skip >= 0 && b == NULL; skip--) {    /* (Test 417) first without the one that refused us */
+			bool fresh = refused_us != 0 && now_us() - refused_us < 300000000ull;
 
-			if (h->ssid_length == w->ssid_length && memcmp(h->ssid, w->ssid, w->ssid_length) == 0 &&
-			    now_us() - heard_us[i] < 120000000ull && (b == NULL || h->rssi > b->rssi)) {
-				b = h;
+			for (uint32_t i = 0; i < heard_n; i++) {
+				struct redwood_sta_bss *h = &heard_tab[i];
+
+				if (skip && (!fresh || memcmp(h->bssid, refused_bssid, 6) == 0)) {
+					continue;
+				}
+				if (h->ssid_length == w->ssid_length && memcmp(h->ssid, w->ssid, w->ssid_length) == 0 &&
+				    now_us() - heard_us[i] < 120000000ull && (b == NULL || h->rssi > b->rssi)) {
+					b = h;
+				}
 			}
 		}
 		if (b != NULL) {
@@ -9302,12 +9322,18 @@ r5q_sta_join(const struct redwood_sta_join *w)
 	}
 	if (join_step == 24) {
 		redwood_net_link_state(true);
+		rejoin_wanted = false;
 		printf("wifi: sta: JOINED (asked by iOS); en0's link is up\n");
 		return 0;
 	}
 	error = join_step == 30 ? (join_error != 0 ? join_error : ECONNREFUSED) : ETIMEDOUT;
 	printf("wifi: sta: the join failed at step %u: error %d\n", join_step, error);
+	memcpy(refused_bssid, join_bss.bssid, 6);
+	refused_us = now_us();
 	r5q_sta_leave();
+	if (error != EAUTH) {
+		rejoin_wanted = true;           /* (Test 417; not after a wrong passphrase: that needs a person) */
+	}
 	return error;
 }
 
@@ -9315,6 +9341,7 @@ static int
 r5q_sta_power(bool on)
 {
 	if (!on) {
+		rejoin_wanted = false;          /* (Test 417) */
 		r5q_sta_leave();
 	}
 	printf("wifi: sta: power %s asked\n", on ? "on" : "off");
@@ -9356,12 +9383,54 @@ r5q_sta_channels(struct redwood_sta_channel *c, unsigned most)
 	return n;
 }
 
+/* (Test 417) iOS asked to leave: no joining again by ourselves */
+static int
+r5q_sta_leave_asked(void)
+{
+	rejoin_wanted = false;
+	return r5q_sta_leave();
+}
+
+static void
+r5q_rejoin_thread(__unused void *parameter, __unused wait_result_t result)
+{
+	static struct redwood_sta_join j;
+	uint32_t wait_s = 15, tries = 0;
+
+	for (;;) {
+		delay_for_interval(wait_s * 1000, NSEC_PER_MSEC);
+		if (!rejoin_wanted || join_step == 24) {
+			if (join_step == 24) {
+				rejoin_wanted = false;
+			}
+			wait_s = 15;
+			tries = 0;
+			continue;
+		}
+		if (!r5q_link_ready || svc_wmi_eid == 0xff || join_ssid_len == 0 || !wpa_have_pmk || !redwood_sta_powered() ||
+		    redwood_sta_busy()) {
+			continue;
+		}
+		bzero(&j, sizeof(j));
+		memcpy(j.ssid, join_ssid, join_ssid_len);
+		j.ssid_length = join_ssid_len;
+		j.security = REDWOOD_STA_WPA2_PSK;
+		memcpy(j.pmk, wpa_pmk, 32);
+		tries++;
+		printf("wifi: rejoin: the link is down (step %u): joining the network again, try %u (next in %u s if it fails)\n",
+		    join_step, tries, wait_s * 2 > 300 ? 300 : wait_s * 2);
+		(void)redwood_sta_ask_join_standing(&j);
+		bzero(&j, sizeof(j));
+		wait_s = wait_s * 2 > 300 ? 300 : wait_s * 2;
+	}
+}
+
 static struct redwood_sta_ops r5q_sta_ops = {
 	.power = r5q_sta_power,
 	.scan = r5q_sta_scan,
 	.heard = r5q_sta_heard,
 	.join = r5q_sta_join,
-	.leave = r5q_sta_leave,
+	.leave = r5q_sta_leave_asked,
 	.state = r5q_sta_state,
 	.channels = r5q_sta_channels,
 };
@@ -9480,6 +9549,16 @@ r5q_sta_start(void)
 	memcpy(r5q_sta_ops.address, r5q_mac, 6);
 	redwood_sta_attach(&r5q_sta_ops);
 	r5q_sta_attached = true;
+	{
+		thread_t th;
+		uint32_t rejoin = 1;
+
+		if ((!PE_parse_boot_argn("wifi_rejoin", &rejoin, sizeof(rejoin)) || rejoin != 0) &&
+		    kernel_thread_start(r5q_rejoin_thread, NULL, &th) == KERN_SUCCESS) {
+			thread_set_thread_name(th, "wifi-rejoin");
+			thread_deallocate(th);
+		}
+	}
 	printf("wifi: sta: the radio is the station for iOS's Wi-Fi (redwood_sta)\n");
 	if (join_step == 24 && wpa_have_pmk) {
 		static struct redwood_sta_join j;
@@ -9585,6 +9664,13 @@ r5q_htc_bringup(void)
 		    "ring index %u, CE4 write %u read %u\n", htt_inord, htt_msdus, htt_lost, htt_other, rxr_alloc, ce4.wr,
 		    rd(wlan_regs + CE_REG(4, CE_CUR_SRRI)));
 		printf("wifi: join: ended at step %u (20 = associated, 30 = refused / no answer)\n", join_step);
+		if (join_step != 24 && join_ssid_len != 0) {
+			if (join_step == 30) {
+				memcpy(refused_bssid, join_bss.bssid, 6);
+				refused_us = now_us();
+			}
+			rejoin_wanted = true;
+		}
 	}
 	FlushPoC_DcacheRegion((vm_offset_t)ce2.ring, 16 * ce2.n);
 	FlushPoC_DcacheRegion((vm_offset_t)ce2.bufs, 2 * CE_BUF);
@@ -11090,6 +11176,44 @@ bb_answer_sysctl(__unused struct sysctl_oid *oidp, __unused void *arg1, __unused
 
 SYSCTL_PROC(_kern_redwood, OID_AUTO, bb_answer, CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_LOCKED, NULL, 0, bb_answer_sysctl, "I",
     "the baseband stubs' answer: selector << 16 | value");
+
+/*
+ * (Test 418) kern.redwood.wifi_drop: the way back onto the network tried without waiting for an access point to send us
+ * away. 1: leave the network as if it had (the link down, rejoin_wanted set); 2: the same, and the access point we were
+ * on counts as one that refused us (another of the same network is tried first). r5q_sysctl kern.redwood.wifi_drop 1.
+ */
+static int wifi_drop_last;
+
+static int
+wifi_drop_sysctl(__unused struct sysctl_oid *oidp, __unused void *arg1, __unused int arg2, struct sysctl_req *req)
+{
+	int value = wifi_drop_last, error;
+
+	error = sysctl_io_number(req, value, sizeof(value), &value, NULL);
+	if (error != 0 || req->newptr == 0) {
+		return error;
+	}
+	if (value != 1 && value != 2) {
+		return EINVAL;
+	}
+	wifi_drop_last = value;
+	if (join_step != 24) {
+		printf("wifi: drop asked (%d), but the link is not up (step %u)\n", value, join_step);
+		return 0;
+	}
+	printf("wifi: drop asked (%d): leaving the network as if the access point had sent us away\n", value);
+	if (value == 2) {
+		memcpy(refused_bssid, join_bss.bssid, 6);
+		refused_us = now_us();
+	}
+	r5q_sta_leave();
+	redwood_sta_lost(ECONNRESET);
+	rejoin_wanted = true;
+	return 0;
+}
+
+SYSCTL_PROC(_kern_redwood, OID_AUTO, wifi_drop, CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_LOCKED, NULL, 0, wifi_drop_sysctl, "I",
+    "1: leave the Wi-Fi network as if sent away (the rejoin is tried); 2: and pass over that access point");
 
 /* (Test 355) bbstub=1: iOS's baseband services as listening stubs (iokit/Kernel/RedwoodBaseband.cpp), 5 s in */
 static void

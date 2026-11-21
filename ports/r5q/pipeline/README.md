@@ -31,7 +31,17 @@ Notes:
 
 `phone-args.txt` is the standard boot-arg set. Change it when a feature's arg becomes part of every boot.
 
-## The standard image (2026-11-21, Test 416)
+## The standard image (2026-11-21, Test 418)
+
+`port/build/r5q-install-boot-standard.img` = r5q-install-boot-418.img: kernel t418, root test415, `phone-args.txt`
+unchanged. On top of Test 416:
+- **Wi-Fi joins again by itself** when a join is refused or the access point sends us away. The tries are 15 s, 30 s,
+  ... at most 5 min apart. An access point that refused us is passed over for 5 minutes when another of the same
+  network is heard. Switching Wi-Fi off, or iOS asking to leave, stops it. Boot-arg `wifi_rejoin=0` turns it off.
+- `kern.redwood.wifi_drop` (1, or 2 to also pass over the current access point) leaves the network to try the rejoin:
+  `r5q_sysctl kern.redwood.wifi_drop 1`.
+
+## The standard image before (2026-11-21, Test 416)
 
 `port/build/r5q-install-boot-standard.img` = r5q-install-boot-416.img: kernel t416, root test415, `phone-args.txt`
 unchanged. On top of Test 413:

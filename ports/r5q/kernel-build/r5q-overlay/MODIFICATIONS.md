@@ -112,3 +112,6 @@ table grew from 16 to 96).
   same VCOs (pixel 225, output 260), inside the limits the sensor reports (CCS 0x110c-0x1116). Boot-arg `cam586_pre`.
 - `bsd/dev/redwood_wifi.c` (Test 416): a deauthentication or disassociation from the access point counts as a
   refusal only when it is addressed to us or broadcast.
+- `bsd/dev/redwood_wifi.c` (Tests 417-418): the station joins again by itself after a refused join or being sent away
+  (a `wifi-rejoin` thread, 15 s to 5 min apart; an access point that refused us is passed over for 5 minutes);
+  `kern.redwood.wifi_drop` to try it.

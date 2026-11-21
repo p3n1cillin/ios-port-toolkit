@@ -1258,3 +1258,32 @@ run ends with the modem shut down through TZ, after asking it to stop over SMP2P
   to us (or broadcast) before taking it as a refusal. On this boot the scan chose another access point of the same
   network and the join went through at once, so the refusal case was not seen again. **Standard image =
   r5q-install-boot-416.img.**
+
+## Tests 417-418 (2026-11-21): Wi-Fi joins again by itself
+
+- **Why:** in the t414 run the Wi-Fi firmware restarted in the middle of a large transfer (servreg "msm/modem/wlan_pd"
+  DOWN then UP at 788 s). The bring-up ran again, and its one join was refused: the access point answered our
+  authentication with a disassociation, reason 8. It was tried once and never again, so the phone stayed off the
+  network until restarted. The station layer (redwood_sta.c) only rejoins its "standing" network when the radio is
+  switched on, and the network became standing only if the first join had come through.
+- **Test 417 (kernel t417):**
+  - `rejoin_wanted` is set when the bring-up's join fails, when a join iOS asked for fails (not for a wrong
+    passphrase), or when the access point sends us away while joined.
+  - It is cleared when a join comes through, the radio is switched off, or iOS asks to leave (the station's
+    `.leave` is now `r5q_sta_leave_asked`).
+  - A `wifi-rejoin` thread asks the station for the network again (`redwood_sta_ask_join_standing`), 15 s, 30 s, ...
+    at most 300 s apart.
+  - The access point that last refused us (`refused_bssid`) is passed over for 5 minutes when `r5q_sta_join` hears
+    another of the same network.
+  - Boot-arg `wifi_rejoin=0`: off.
+- **Stress (t417):** 70 MB of the unified log pulled over Wi-Fi in 108 s (~650 KB/s, one timeout recovered by the
+  tool). The firmware did not restart this time, so the restart is not on every large transfer; its cause is still
+  unknown. The next time, read `phone.py smem` in the same boot for the modem's crash reason.
+- **Test 418 (kernel t418):**
+  - `kern.redwood.wifi_drop` leaves the network as if sent away (1), and with 2 also marks that access point as one
+    that refused us.
+  - **Result: both work.** `wifi_drop 1`: "rejoin: the link is down (step 0): joining the network again, try 1"
+    then "JOINED; en0's link is up" within ~15 s; r5qd answered over Wi-Fi again.
+  - `wifi_drop 2`: the rejoin went to another access point of the same network (5 GHz, channel 40) on the first
+    try.
+  - **Standard image = r5q-install-boot-418.img.**
