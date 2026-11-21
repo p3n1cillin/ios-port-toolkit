@@ -1216,3 +1216,54 @@ candidate designs).
     - a setting Android's driver writes that the tables do not.
 
     A workaround is to keep the back sensor powered between sessions, or to warm it up at boot.
+
+## The IMX586's gate: what it is not (2026-11-21, kernel t425, root test415)
+
+Measured with `wifi/camgate.py` on camgrab frames (8x, 3000 lines; the back camera at the room's ceiling, the
+phone not moved between runs). "Just above black" = pixels 65-100: a working sensor in a dim scene has plenty;
+every frame below has **0.00%**, warm or cold, which is the gate.
+
+| Frame | Setting | Above black | Lowest above black |
+|---|---|---|---|
+| s30 / s900 | 19.2 MHz (standard), 1 s / 30 s streamed | 0.06% / 14.1% | 432 / 87 |
+| m30 / m900 | **24 MHz MCLK** (Android's), the tables unchanged | 0.05% / 6.2% | 412 / 83 |
+| hA | middle exposure (0x3fe0/2/4) = the long one | 0.06% | 400 |
+| hB | in-sensor HDR off (0x0220 = 0) | 0.19% | 367 |
+| d1 | defect corrections off (0x0b05/08/0a/0d = 0) | 0.26% | 386 |
+
+- **Not the clock.** Kernel t425, boot-arg `cam586_mclk=24`: camcc's PLL2 (Regera) at 960 MHz (Samsung's
+  cam_cc_pll2_config; locked in 20 us), MCLK0's RCG from it (cfg 0x2513: source 5, /10, M/N 1/4 = 24 MHz), and the
+  sensor's tables with no corrections (pixel PLL 360, EXCK 24, the tables' pre-dividers). Cold, the gate is the same
+  as on 19.2 MHz.
+- **Not Samsung's sensor library.** `com.samsung.sensor.imx586.so` (15 KB) writes only exposure and gain each frame:
+  0x0202, 0x0204, 0x020e, 0x0224, 0x0216, 0x0218 and the middle exposure 0x3fe0/0x3fe2/0x3fe4 (tables: 500 lines,
+  gain 0x70). Its other constants are float tables (lux / ISO steps). The module file has one init set (519 writes),
+  which the converter keeps whole.
+- **Not the middle exposure, the in-sensor HDR or the defect corrections** (table above, each in one session).
+- Left: what Android writes from the module's EEPROM (calibration; the module's SPCSettings / calibrationInfo), the
+  binning / QBC settings of res5 (0x0900-0x0902 = 1/0x44/8, 0x3140, 0x3246/7 = 0x89), and a full read-back of the
+  sensor's registers against the tables after streaming starts (something the tables write that does not take).
+
+## THE GATE'S CAUSE: two 1.8 V supplies at 0.7 V (2026-11-21, Tests 426-427)
+
+- **Test 426 (kernel t426, boot-arg `cam_verify=1`):** every register of the tables read back right after writing:
+  init 519, res5 98, on/off: **0 differ**. The tables take.
+- **The sensor's test pattern** (`camgrab ... 0601=03`, fade to grey): 1.73% of pixels 65-100, lowest 68. So the
+  receive path (CSI-PHY, CSID, IFE) and the sensor's digital side pass low values: the gate was analog.
+- **The cause:** the S2MPB03 LDO3s. Samsung's `drivers/regulator/s2mpb03.c` / `s2mpb03.h`: LDO1/2/4 = 0.7 V +
+  12.5 mV a code, **LDO3 = 0.7 V + 25 mV**, LDO5/6/7 = 1.8 V + 25 mV. `mainsensor_probe` wrote `0x80 | 0` to #2 LDO3
+  (custom1) and #1 LDO3 (custom2), meant as 1.8 V: **0.7 V**. The chips held 0x2c (1.8 V) before we wrote them, and
+  the log had been printing "LDO3 0x80" since Test 342. The other supplies' codes were right (vdig 0xa0 1.1 V, vana
+  0xac 2.9 V, custom3 / vaf 0xa8 2.8 V).
+- **Test 427 (kernel t427): `0x80 | 44` (1.8 V) for both.** Log: "#1 ... LDO3 0xac ..., #2 LDO3 0xac now". Same scene
+  as Test 425's frames:
+
+  | Frame | Above black | Lowest above black | Just above black (65-100) | Median |
+  |---|---|---|---|---|
+  | s30 (before, cold) | 0.06% | 432 | 0.00% | 64 |
+  | **p30 (after, cold)** | **99.93%** | **65** | **29.6%** | 122 |
+  | p900 (after, 30 s) | 99.93% | 65 | 29.7% | 122 |
+
+  **The gate and the warm-up are gone.** The earlier "fixes" for the dim picture (Tests 402-404: pixel PLL 450, the
+  output divider, line length 8000) were chasing this; they stay (inside the sensor's limits, no harm).
+- Standard image = Test 427. Open: the Camera app's auto-exposure and a lit scene, now that the sensor sees.

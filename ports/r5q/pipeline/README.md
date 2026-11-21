@@ -31,7 +31,17 @@ Notes:
 
 `phone-args.txt` is the standard boot-arg set. Change it when a feature's arg becomes part of every boot.
 
-## The standard image (2026-11-21, Test 424)
+## The standard image (2026-11-21, Test 427)
+
+`port/build/r5q-install-boot-standard.img` = r5q-install-boot-427.img: kernel t427, root test415, `phone-args.txt` unchanged.
+On top of Test 424:
+- **The back camera sees in dim light:** the IMX586's custom1/custom2 supplies (S2MPB03 LDO3s) at 1.8 V; they were at
+  0.7 V (a wrong voltage code since Test 342), which made the sensor clip everything below ~400 counts to black until
+  it warmed (wifi/CAMERA-PLAN.md, Tests 426-427).
+- Tools: `cam_verify=1` reads every sensor table register back; `cam586_mclk=24` runs the IMX586 on a 24 MHz MCLK
+  (camcc PLL2); `wifi/camgate.py` measures raw frames.
+
+## The standard image before (2026-11-21, Test 424)
 
 `port/build/r5q-install-boot-standard.img` = r5q-install-boot-424.img: kernel t424, root test415, and `mic=7
 mic_rec=4` added to `phone-args.txt` (before: port/build/phone-args.before-t424.txt). On top of Test 418:

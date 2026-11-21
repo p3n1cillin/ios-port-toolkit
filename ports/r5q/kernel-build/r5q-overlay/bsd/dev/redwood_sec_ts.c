@@ -1693,6 +1693,7 @@ bb_write16(uint16_t reg, uint16_t value, unsigned data_bytes)
  * bit-banged bus; false at the first write not acknowledged.
  */
 extern const uint8_t *redwood_image_file(const char *dir, const char *name, uint64_t *size, int *disk_out);
+static const char *bb_read16(uint16_t reg, uint8_t *bytes, unsigned count);
 
 static bool
 cam_table(const uint8_t *tab, uint64_t size, const char *want)
@@ -1728,6 +1729,43 @@ cam_table(const uint8_t *tab, uint64_t size, const char *want)
 				}
 			}
 			rxlog("camera sensor: table %s: %u writes taken\n", want, n);
+			{
+				/*
+				 * (Test 426) Boot-arg cam_verify=1: every register of the table read back right after (the
+				 * IMX586's gate, CAMERA-PLAN.md: something the tables write that does not take?). A register
+				 * written more than once is compared with its last value only; mismatches are logged.
+				 */
+				uint32_t verify = 0, differ = 0, checked = 0;
+
+				if (PE_parse_boot_argn("cam_verify", &verify, sizeof(verify)) && verify != 0) {
+					e = at + 12;
+					for (uint32_t i = 0; i < n && e + 12 <= end; i++, e += 12) {
+						uint16_t a = *(const uint16_t *)e, v = *(const uint16_t *)(e + 2);
+						unsigned bytes = e[5] == 2 ? 2 : 1;
+						uint8_t b[2] = { 0, 0 };
+						bool later = false;
+
+						for (const uint8_t *f = e + 12; f + 12 <= at + 12 + 12 * n; f += 12) {
+							later |= *(const uint16_t *)f == a;
+						}
+						if (later) {
+							continue;
+						}
+						checked++;
+						if (bb_read16(a, b, bytes) != NULL) {
+							rxlog("camera sensor: verify %s: %#06x NOT READ\n", want, a);
+							continue;
+						}
+						if ((bytes == 2 ? (uint16_t)(b[0] << 8 | b[1]) : b[0]) != v) {
+							if (++differ <= 120) {
+								rxlog("camera sensor: verify %s: %#06x wrote %#x reads %#x\n", want, a, v,
+								    bytes == 2 ? (unsigned)(b[0] << 8 | b[1]) : (unsigned)b[0]);
+							}
+						}
+					}
+					rxlog("camera sensor: verify %s: %u registers read back, %u differ\n", want, checked, differ);
+				}
+			}
 			return true;
 		}
 		at = e + 12 * n;
@@ -3598,6 +3636,57 @@ static struct sony_cam imx586_full = {
  */
 static void rxlog(const char *format, ...) __printflike(1, 2);
 uint32_t redwood_r5q_cam586_black;      /* (Test 404) the IMX586's black level for iOS (redwood_camera.c): 0 or 64 */
+
+/*
+ * (Test 425) Boot-arg cam586_mclk=24: the IMX586 gets Android's 24 MHz MCLK (qcom,cam-sensor@0 clock-rates 24000000)
+ * instead of the 19.2 MHz crystal, and its tables run unchanged (no PLL, EXCK or pre-divider corrections: cam586_vt
+ * 360, cam586_opdiv 1, cam586_pre 0). Why: the "gate" that clips a dim scene to black shrinks as the sensor warms
+ * (CAMERA-PLAN.md, after Test 414); Android's camera has no such warm-up, and the clock is the largest difference
+ * left. The 24 MHz comes as camcc-sm8150.c makes it: cam_cc_pll2 (Regera, camcc + 0x2000) at L 0x32 = 960 MHz with
+ * Samsung's config values (clk_regera_pll_configure / _enable), and MCLK0's RCG from source 5 (PLL2's early output),
+ * divider 10, M/N 1/4 (ftbl_cam_cc_mclk0_clk_src: F(24000000, P_CAM_CC_PLL2_OUT_EARLY, 10, 1, 4)).
+ */
+static uint32_t cam586_mclk;
+
+static bool
+cam_pll2_on(void)
+{
+	vm_offset_t pll = ml_io_map(0x0ad00000UL + 0x2000, 0x1000);
+	volatile uint32_t *r;
+	uint32_t us;
+
+	if (pll == 0) {
+		return false;
+	}
+	r = (volatile uint32_t *)pll;
+	if (r[0] & (1u << 31)) {
+		return true;                                            /* locked already (an earlier session) */
+	}
+	r[0x04 / 4] = 0x32;                                             /* L: 50 x 19.2 = 960 MHz */
+	r[0x10 / 4] = 0x10000807;                                       /* CONFIG_CTL */
+	r[0x14 / 4] = 0x00000011;                                       /* CONFIG_CTL_U */
+	r[0x18 / 4] = 0x04300142;                                       /* CONFIG_CTL_U1 */
+	r[0x0c / 4] = 0x00000100;                                       /* USER_CTL */
+	r[0x1c / 4] = 0x04000400;                                       /* TEST_CTL */
+	r[0x20 / 4] = 0x00004000;                                       /* TEST_CTL_U */
+	r[0x28 / 4] = 0;                                                /* OPMODE: off */
+	__asm__ volatile ("dsb sy" ::: "memory");
+	r[0] |= 2u;                                                     /* out of bypass */
+	spin_us(2);
+	r[0] |= 4u;                                                     /* out of reset */
+	r[0x28 / 4] = 1;                                                /* OPMODE: run */
+	for (us = 0; us < 2000 && !(r[0] & (1u << 31)); us += 10) {
+		spin_us(10);
+	}
+	if (!(r[0] & (1u << 31))) {
+		rxlog("main camera: camcc PLL2 DID NOT LOCK (mode %#x)\n", r[0]);
+		return false;
+	}
+	r[0x0c / 4] |= 0x9u;                                            /* its outputs */
+	r[0] |= 1u;                                                     /* OUTCTRL */
+	rxlog("main camera: camcc PLL2 locked at 960 MHz after %u us (mode %#x, user %#x)\n", us, r[0], r[0x0c / 4]);
+	return true;
+}
 static void
 imx586_full_tune(void)
 {
@@ -3625,6 +3714,10 @@ imx586_full_tune(void)
 	 * denominator shrinks the same; the frame length stays (5356 lines: 30 a second now, ~24 before).
 	 */
 	(void)PE_parse_boot_argn("cam586_vt", &vt, sizeof(vt));
+	(void)PE_parse_boot_argn("cam586_mclk", &cam586_mclk, sizeof(cam586_mclk));
+	if (cam586_mclk == 24) {
+		vt = 360;                                                       /* (Test 425) the tables', for 24 MHz */
+	}
 	redwood_r5q_cam586_black = 0;
 	if (vt >= 300 && vt <= 500 && vt != 360) {
 		redwood_r5q_cam586_black = 64;                                  /* (Test 402: a pedestal of 64 from then on) */
@@ -3644,6 +3737,9 @@ imx586_full_tune(void)
 	uint32_t opdiv = 2, iop = 390;
 	(void)PE_parse_boot_argn("cam586_opdiv", &opdiv, sizeof(opdiv));
 	(void)PE_parse_boot_argn("cam586_iop", &iop, sizeof(iop));
+	if (cam586_mclk == 24) {
+		opdiv = 1;                                                      /* (Test 425) the output PLL as Test 342's */
+	}
 	if (opdiv == 2 && iop >= 250 && iop <= 420) {
 		imx586_cam.op_div = imx586_full.op_div = 2;
 		imx586_cam.iop_mpy = imx586_full.iop_mpy = iop;
@@ -3655,6 +3751,9 @@ imx586_full_tune(void)
 	 */
 	uint32_t pre = 2;
 	(void)PE_parse_boot_argn("cam586_pre", &pre, sizeof(pre));
+	if (cam586_mclk == 24) {
+		pre = 0;                                                        /* (Test 425) the tables' 4 and 3 */
+	}
 	if (pre == 2) {
 		imx586_cam.pll_pre = imx586_full.pll_pre = pre;
 	}
@@ -3720,7 +3819,7 @@ mainsensor_probe(uint32_t main_level)
 	}
 	spin_us(1000);
 	bb = &pm2;
-	if ((problem = bb_write(0x05, 0x80 | 0)) != NULL) {              /* custom1: #2 LDO3 1.8 V */
+	if ((problem = bb_write(0x05, 0x80 | 44)) != NULL) {             /* custom1: #2 LDO3 1.8 V (Test 427: was 0x80 | 0 = 0.7 V; LDO3 is 0.7 V + 25 mV a step, s2mpb03.h) */
 		goto power_back;
 	}
 	spin_us(1000);
@@ -3735,7 +3834,7 @@ mainsensor_probe(uint32_t main_level)
 	spin_us(1000);
 	rxlog("main camera: L14 vote: %s\n", redwood_r5q_rpmh_enable("ldoa14") ? "done" : "NOT DONE");
 	spin_us(1000);
-	if ((problem = bb_write(0x05, 0x80 | 0)) != NULL) {              /* custom2: #1 LDO3 1.8 V */
+	if ((problem = bb_write(0x05, 0x80 | 44)) != NULL) {             /* custom2: #1 LDO3 1.8 V (Test 427: was 0x80 | 0 = 0.7 V) */
 		goto power_back;
 	}
 	spin_us(1000);
@@ -3772,7 +3871,16 @@ mainsensor_probe(uint32_t main_level)
 	lck_mtx_unlock(&redwood_smmu_lock);
 	rxlog("main camera: titan_top_gdsc %#x -> %#x\n", was_gdscr, *(volatile uint32_t *)(camcc_c + 0x1bc));
 	/* MCLK0 from TCXO on GPIO13, then reset high (10 ms) */
-	*(volatile uint32_t *)(camcc + 0x004 + 4) = 1;                  /* MCLK0 RCG CFG: TCXO, divider 1 */
+	imx586_full_tune();                                             /* (Test 425: reads cam586_mclk) */
+	if (cam586_mclk == 24 && cam_pll2_on()) {
+		/* (Test 425) 24 MHz: source 5 (PLL2 early, 960 MHz), divider 10 (code 19), dual-edge M/N 1/4 */
+		*(volatile uint32_t *)(camcc + 0x00c) = 1;                      /* M */
+		*(volatile uint32_t *)(camcc + 0x010) = ~(4u - 1u) & 0xffu;     /* N: ~(n - m) */
+		*(volatile uint32_t *)(camcc + 0x014) = ~4u & 0xffu;            /* D: ~2d, 50 % */
+		*(volatile uint32_t *)(camcc + 0x004 + 4) = (2u << 12) | (5u << 8) | 19u;
+	} else {
+		*(volatile uint32_t *)(camcc + 0x004 + 4) = 1;          /* MCLK0 RCG CFG: TCXO, divider 1 */
+	}
 	*(volatile uint32_t *)(camcc + 0x004) |= 1;                     /* CMD: update */
 	for (us = 0; us < 10000 && (*(volatile uint32_t *)(camcc + 0x004) & 1); us += 10) {
 		spin_us(10);

@@ -77,7 +77,9 @@ by init (`var_hfs=1`) in place of the 1.6 GB RAM filesystem; iOS reports "3.7 GB
   - switching cameras works, photos are saved as JPEG (HEIC's software encoder runs out of memory), and the camera
     powers off when the app closes;
   - the IMX586 sends black as 0 (Test 345), the others 64: iOS is told each one's;
-  - not yet: the macro S5K5E9, the sensors' full-resolution (unbinned) modes, and a picture of a lit scene.
+  - since Test 427 the main IMX586 sees in dim light from the first frame: two of its 1.8 V supplies had been set to
+    0.7 V, which clipped everything dim to black until the sensor warmed;
+  - not yet: the macro S5K5E9, the sensors' full-resolution (unbinned) modes.
 
   How it was made stable: wifi/CAMERA-PLAN.md, docs/CAMERA.md.
 - **Compass:** the Compass app shows a heading, then freezes. Since Test 349 apps get motion data at ~84 a

@@ -125,3 +125,6 @@ table grew from 16 to 96).
 - `bsd/dev/redwood_mic.c` (new here, from the donor's; Tests 421-424): an r5q mode: the DSP's port SLIMBUS_0_TX
   (0x4001, shared channel 134) instead of the POCO's codec DMA port, the codec through redwood_adsp.c, boot-arg
   `mic_rec` (3 a timed listen, 4 iOS's /dev/redwood-mic).
+- `bsd/dev/redwood_sec_ts.c` (Tests 425-427): the IMX586's custom1/custom2 supplies (S2MPB03 LDO3) at 1.8 V (they were
+  written as 0.7 V); boot-args `cam_verify` (the sensor tables read back) and `cam586_mclk=24` (camcc PLL2, a 24 MHz
+  MCLK0).
