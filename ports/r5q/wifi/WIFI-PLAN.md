@@ -1223,8 +1223,16 @@ run ends with the modem shut down through TZ, after asking it to stop over SMP2P
     re-bring-up and on a fresh boot.
   - The kernel joins once per bring-up and does not try again.
   - Follow-up: retry the join with a back-off.
-- **Kernel, seen on the way:** the t413 run of 2026-11-20 21:17 panicked after an hour with the I/O submap full
-  (`io_map: 65776 KB of the 64 MB in use`; kmem_alloc 557056). `r5q_io_map_kept` does not cover every mapper yet.
+- **Kernel, seen on the way (corrected the same night):**
+  - The panic in the ring (`io_map: 65776 KB of the 64 MB in use`; kmem_alloc 557056 in io_map <- mainsensor_probe)
+    came from the run booted 2026-11-20 21:17. Its kernel was built at 21:15, so it was **t412**, before the
+    leak fix (t413 was built at 22:28). The t413 run then lasted ~2 hours with camera use and did not panic.
+  - The t414 run's "var_store: the run is ending" at 1063 s was `phone.py rescue` restarting the phone to save its
+    log slots, not a crash.
+  - Two traps here:
+    - `phone.py` prints "phone in maintenance mode" whenever the loader answers USB, which it also does while iOS
+      runs.
+    - A black screenshot may only mean the display is asleep.
 
 ## Tests 415-416 continued (2026-11-21): a heading, but jumpy
 

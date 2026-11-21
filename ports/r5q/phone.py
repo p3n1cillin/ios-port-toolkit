@@ -363,7 +363,7 @@ def wait_for_phone(seconds=3600, unstick=False):
             try:
                 quick = subprocess.run([FASTBOOT, 'getvar', 'product'], capture_output=True, text=True, timeout=15)
                 if 'xnuloader' in quick.stdout + quick.stderr:
-                    print('phone in maintenance mode')
+                    print('the loader answers on USB (maintenance mode, or iOS running in live mode: `phone.py alive` tells)')
                     return
             except subprocess.TimeoutExpired:
                 continue
@@ -374,7 +374,7 @@ def wait_for_phone(seconds=3600, unstick=False):
     r = subprocess.run([FASTBOOT, 'getvar', 'product'], capture_output=True, text=True, timeout=seconds)
     if 'xnuloader' not in r.stdout + r.stderr:
         raise SystemExit('no phone in maintenance mode: ' + (r.stdout + r.stderr).strip())
-    print('phone in maintenance mode')
+    print('the loader answers on USB (maintenance mode, or iOS running in live mode: `phone.py alive` tells)')
 
 
 def staged(command, dest):
