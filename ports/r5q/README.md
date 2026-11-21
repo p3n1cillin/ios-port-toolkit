@@ -80,7 +80,8 @@ by init (`var_hfs=1`) in place of the 1.6 GB RAM filesystem; iOS reports "3.7 GB
   - since Test 427 the main IMX586 sees in dim light from the first frame: two of its 1.8 V supplies had been set to
     0.7 V, which clipped everything dim to black until the sensor warmed;
   - since Test 429 the main camera focuses: its lens motor is driven by iOS's contrast autofocus;
-  - not yet: the macro S5K5E9, the optical stabiliser (OIS), the sensors' full-resolution (unbinned) modes.
+  - since Test 430 its optical stabiliser runs (still mode);
+  - not yet: the macro S5K5E9, the sensors' full-resolution (unbinned) modes.
 
   How it was made stable: wifi/CAMERA-PLAN.md, docs/CAMERA.md.
 - **Compass:** the Compass app shows a heading, then freezes. Since Test 349 apps get motion data at ~84 a

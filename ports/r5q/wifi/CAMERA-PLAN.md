@@ -1290,3 +1290,17 @@ every frame below has **0.00%**, warm or cold, which is the gate.
 - Open: the OIS (RUMBA S4) is left alone (powered, not started); the lens's code range vs distance (AF_FAR 768 is the
   POCO's); a close-up test by the owner.
 - **Owner check (2026-11-21, Test 429 standard):** a close-up with tap-to-focus in the Camera app "works pretty well".
+
+## The main camera's optical stabiliser (2026-11-21, Test 430)
+
+- Samsung's `cam_ois_rumba_s4.c` (lineage-19.0): the RUMBA S4 reads its own gyro (the module version's 4th byte
+  names it) and keeps its firmware in its own flash (re-flashed only on a version change), so there is no gyro link
+  for the phone to make. `cam_ois_init`: wait for 0x0001 = 0x01 or 0x13 (idle), 0x0262 = 0x55, 0x0264 = 6f 12 03 3b,
+  0x0039 = 0 (shift calibration), 0x0238 / 0x023a = 1000 (fades; camera_io's word order, high byte first), 0x005e = 0;
+  `cam_ois_set_ois_mode`: 0x0002 = mode, 0x0000 = 1 (servo on). The module file: stillModeSettings 0x0002 = 0,
+  movie 0x0002 = 1, centering 0x0002 = 5.
+- **Test 430 (kernel t430, standard):** `main_ois_up` / `main_ois_down` around each main-camera session, after the
+  lens motor, on the same GPIO33/34 bus (0x24). Before: 0x0001 = 0x13 (idle). After the start: **0000-0003 = 01 02
+  00 00 -- servo on, status 0x02 (running)**; hall centres x 2038, y 2044 (12-bit, mid-range). Servo off at the end.
+  `cam_ois=0` leaves it alone. Not measured: how much it steadies a hand-held picture (owner's eye); video mode
+  (0x0002 = 1) not used yet.

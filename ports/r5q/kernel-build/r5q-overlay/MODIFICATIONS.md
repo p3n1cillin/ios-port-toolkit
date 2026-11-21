@@ -131,3 +131,5 @@ table grew from 16 to 96).
 - `bsd/dev/redwood_sec_ts.c`, `bsd/dev/redwood_camera.c` (Tests 428-429): the main camera's lens motor (0x0c on
   GPIO33/34) driven for iOS's autofocus: started with each session, positions applied between frames, parked at the
   end; the frames report its position (boot-arg `cam_af`).
+- `bsd/dev/redwood_sec_ts.c` (Test 430): the main camera's optical stabiliser (RUMBA S4, 0x24 on GPIO33/34) started in
+  still mode with each session and stopped at the end (boot-arg `cam_ois`).

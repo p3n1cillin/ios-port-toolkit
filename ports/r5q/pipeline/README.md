@@ -31,7 +31,13 @@ Notes:
 
 `phone-args.txt` is the standard boot-arg set. Change it when a feature's arg becomes part of every boot.
 
-## The standard image (2026-11-21, Test 429)
+## The standard image (2026-11-21, Test 430)
+
+`port/build/r5q-install-boot-standard.img` = r5q-install-boot-430.img: kernel t430, root test415, `phone-args.txt` unchanged.
+On top of Test 429: **the main camera's optical stabiliser** (RUMBA S4 on GPIO33/34) started in still mode with each
+session (wifi/CAMERA-PLAN.md, Test 430). `cam_ois=0` turns it off.
+
+## The standard image before (2026-11-21, Test 429)
 
 `port/build/r5q-install-boot-standard.img` = r5q-install-boot-429.img: kernel t429, root test415, `phone-args.txt` unchanged.
 On top of Test 427: **autofocus on the main camera**: its lens motor (on GPIO33/34, CCI 1 master 1) driven by iOS's

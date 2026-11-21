@@ -2614,6 +2614,106 @@ main_af_up(vm_offset_t north)
 	rxlog("main camera: the lens motor is up, the lens at 300\n");
 }
 
+/*
+ * (Test 430) The main camera's optical stabiliser: the module's RUMBA S4 controller (0x24 on the same GPIO33/34 bus,
+ * powered by custom2 1.8 V and custom3 2.8 V, which Test 427 put right, and the OIS line GPIO133). Its firmware is in
+ * its own flash and it reads its own gyro, so starting it is Samsung's cam_ois_init (cam_ois_rumba_s4.c) and the
+ * module file's stillModeSettings: wait for idle (0x0001 = 0x01 or 0x13), 0x0262 = 0x55, 0x0264 = 6f 12 03 3b, shift
+ * calibration on (0x0039 = 0), the fades (0x0238, 0x023a = 1000, written as Samsung's camera_io writes a word: high
+ * byte first), 0x005e = 0; then still mode, 0x0002 = 0x00, and the servo on, 0x0000 = 0x01. At the end the servo off.
+ * Registers are two-byte addresses. Boot-arg cam_ois=0 leaves it alone.
+ */
+static bool ois_on;
+
+static const char *
+ois_write(uint16_t reg, const uint8_t *bytes, unsigned n)
+{
+	const char *problem = NULL;
+
+	bus_start();
+	if (!bus_put(bb->address << 1)) {
+		problem = "no acknowledge of its address";
+	} else if (!bus_put((uint8_t)(reg >> 8)) || !bus_put((uint8_t)reg)) {
+		problem = "no acknowledge of the register number";
+	} else {
+		for (unsigned i = 0; i < n && problem == NULL; i++) {
+			if (!bus_put(bytes[i])) {
+				problem = "no acknowledge of the value";
+			}
+		}
+	}
+	bus_stop();
+	return problem;
+}
+
+static void
+ois_look(const char *when)
+{
+	uint8_t st[4] = { 0 }, hall[4] = { 0 };
+
+	(void)bb_read16(0x0000, st, 4);
+	(void)bb_read16(0x021a, hall, 4);
+	rxlog("main camera: OIS %s: 0000-0003 %02x %02x %02x %02x, hall centre x %u y %u\n", when, st[0], st[1], st[2], st[3],
+	    (unsigned)(hall[0] | hall[1] << 8), (unsigned)(hall[2] | hall[3] << 8));
+}
+
+static void
+main_ois_up(void)
+{
+	static const uint8_t b55[1] = { 0x55 }, b264[4] = { 0x6f, 0x12, 0x03, 0x3b }, b0[1] = { 0x00 }, b1[1] = { 0x01 },
+	    fade[2] = { 0x03, 0xe8 };
+	struct bitbang *was = bb;
+	uint32_t want = 1;
+	uint8_t status = 0;
+	const char *problem = NULL;
+	unsigned tries;
+
+	ois_on = false;
+	if (!af_on || (PE_parse_boot_argn("cam_ois", &want, sizeof(want)) && want == 0)) {
+		return;
+	}
+	bb = &af_bus;
+	af_bus.address = 0x24;
+	for (tries = 0; tries < 20; tries++) {
+		if (bb_read16(0x0001, &status, 1) == NULL && (status == 0x01 || status == 0x13)) {
+			break;
+		}
+		spin_us(5000);
+	}
+	if (status != 0x01 && status != 0x13) {
+		rxlog("main camera: OIS not idle (status %#04x): left off\n", status);
+	} else if ((problem = ois_write(0x0262, b55, 1)) == NULL && (problem = ois_write(0x0264, b264, 4)) == NULL &&
+	    (problem = ois_write(0x0039, b0, 1)) == NULL && (problem = ois_write(0x0238, fade, 2)) == NULL &&
+	    (problem = ois_write(0x023a, fade, 2)) == NULL && (problem = ois_write(0x005e, b0, 1)) == NULL &&
+	    (problem = ois_write(0x0002, b0, 1)) == NULL && (problem = ois_write(0x0000, b1, 1)) == NULL) {
+		ois_on = true;
+		spin_us(20000);
+		ois_look("on (still mode, servo on)");
+	} else {
+		rxlog("main camera: OIS start: %s\n", problem);
+	}
+	af_bus.address = 0x0c;
+	bb = was;
+}
+
+static void
+main_ois_down(void)
+{
+	static const uint8_t b0[1] = { 0x00 };
+	struct bitbang *was = bb;
+
+	if (!ois_on) {
+		return;
+	}
+	bb = &af_bus;
+	af_bus.address = 0x24;
+	ois_look("at the end");
+	(void)ois_write(0x0000, b0, 1);                                 /* the servo off */
+	af_bus.address = 0x0c;
+	bb = was;
+	ois_on = false;
+}
+
 static void
 main_af_down(void)
 {
@@ -4123,8 +4223,10 @@ mainsensor_probe(uint32_t main_level)
 		if (problem == NULL && id[0] == 0x05 && id[1] == 0x86 && main_level >= 2) {
 			imx586_full_tune();
 			main_af_up(north);                                      /* (Test 429) */
+			main_ois_up();                                          /* (Test 430) */
 			bb = &cam;
 			sony_stream(&cam, main_level, main_level == 7 && cam_full_frames() ? &imx586_full : &imx586_cam);
+			main_ois_down();
 			main_af_down();
 			bb = &cam;
 		}
