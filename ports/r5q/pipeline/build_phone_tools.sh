@@ -57,4 +57,10 @@ build hfsplace  hfsplace.c
 build hfsmount  hfsmount.c
 build clockq    clockq.c
 build dnsq      dnsq.c
+# (Test 423) the donor's record_test: records as an app does (AVAudioRecorder) and reports the levels; it needs the
+# microphone's TCC entitlement
+build record_test record_test.c -framework CoreFoundation -framework AVFoundation -lobjc
+LDIDB=$IOS_WORK/theos/toolchain/linux/iphone/bin/ldid
+[ -x "$LDIDB" ] && [ -f "$OUT/record_test" ] && "$LDIDB" -S"$W/record_test.entitlements" "$OUT/record_test" &&
+	echo "  record_test  signed with its entitlements"
 echo "phone tools in $OUT"

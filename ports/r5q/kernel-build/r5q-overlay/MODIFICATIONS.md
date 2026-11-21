@@ -118,3 +118,10 @@ table grew from 16 to 96).
 - `bsd/dev/redwood_adsp.c` (Tests 419-420): the SLIMbus ADDR_QUERY is sent with message type 2 (destination-referred
   user, header 0x4a) as Samsung's slim-msm-ngd.c does; the NGD's rx queue is read as whole messages
   (`r5q_slim_wait`); the WCD9340's logical address, its interface device's, and its chip id read over the bus.
+- `bsd/dev/redwood_adsp.c` (Tests 421-424): the WCD9340's capture path for the main microphone (Samsung's wcd934x.c
+  sequence as tables: bring-up, probe defaults, CPR, MCLK, the "main-mic" route, MIC BIAS1, decimator 6, ADC1),
+  the codec's SLIMbus TX channel 134 (interface registers, CONNECT_SRC, DEF_ACT_CHAN, RECONFIG_NOW), the NGD's
+  queues reused round and round, boot-args `mic_gain` / `mic_dgain`; the link kept for `redwood_mic.c`.
+- `bsd/dev/redwood_mic.c` (new here, from the donor's; Tests 421-424): an r5q mode: the DSP's port SLIMBUS_0_TX
+  (0x4001, shared channel 134) instead of the POCO's codec DMA port, the codec through redwood_adsp.c, boot-arg
+  `mic_rec` (3 a timed listen, 4 iOS's /dev/redwood-mic).

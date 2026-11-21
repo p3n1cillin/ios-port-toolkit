@@ -1322,3 +1322,52 @@ run ends with the modem shut down through TZ, after asking it to stop over SMP2P
   micbias, an ADC and decimator, a SLIMbus TX port), the SLIMbus channel through the DSP (DEFINE_CHAN / CONNECT_SRC
   user messages to the manager), AFE SLIMBUS_0_TX and an ASM record stream into RedwoodAudio. Also: rx descriptors
   re-posted as they are used.
+
+## Test 421 (written 2026-11-21, NOT YET BUILT OR RUN): the microphone's whole capture path
+
+Code in place, untested (paused for the night):
+- `redwood_adsp.c`: the rx queue posted as 2040 words; `struct r5q_slim_link` (codec register read/write with the page
+  register, interface-device writes, user messages waiting for GENERIC_ACK); the codec's SLIMbus TX channel
+  (`r5q_slim_tx_channel_on`: interface regs 0x1f6=0x02, 0x118=0x40, 0x119=0, 0x056=0x05; CONNECT_SRC cf 06 86;
+  DEF_ACT_CHAN 0f 24 20 83 tid 86; RECONFIG_NOW); the WCD9340 sequence as tables from Samsung's wcd934x.c
+  (bring-up, probe/init rows, CPR defaults on v1.1, MCLK on/off, the "main-mic" route + 48 kHz + MIC BIAS1, then
+  decimator 6 and ADC1 after the channel, unmute at 50 ms, HPF/TX hold at 300 ms, read-back snapshots); after
+  mic=7 finds the codec the link is kept and `redwood_mic_dsp_up()` is called.
+- `redwood_mic.c` (new overlay copy of the donor's, r5q mode): boot-arg `mic_rec=3` (listen `mic_secs`, levels in the
+  log) or `4` (iOS's /dev/redwood-mic); AFE port SLIMBUS_0_TX 0x4001 with AFE_PARAM_ID_SLIMBUS_CONFIG (1 channel,
+  shared channel 134, 16 bits, 48 kHz); the DSP's stream/path as the donor's; then redwood_r5q_mic_codec_on().
+- Next: build (`R5Q_PORT` tree, `bash pipeline/test.sh 421 "mic: capture path" +mic=7 +mic_rec=3 +mic_secs=10`),
+  fix compile errors, read the log. Known limit: tx descriptors (1000) and rx words (2040) are not reused, so
+  mic_rec=4's repeated recordings will need the queues to wrap.
+
+## Tests 421-422 (2026-11-21): THE MICROPHONE HEARS (kernel t421/t422, root test415, `+mic=7 +mic_rec=3`)
+
+- **Test 421:** the whole path came up as written: codec init + CPR (WCD9340 v1.1), every snapshot register as
+  Android's (e.g. capturing: 0x60e=a4 0x622=50 0x711=91 0x0a91=34 0x0d22=04 0x0d28=01 0x0d3b=20; settled 0x0a91=24,
+  0x60f=00), interface regs read back 02/40/05, **CONNECT_SRC ack 0x20, DEF_ACT_CHAN ack 0x20, RECONFIG_NOW ack
+  0x2f: channel 134 active**; AFE SLIMBUS_0_TX (0x4001) started; the ASM read stream gives **48000 frames a second,
+  0 empty reads, 0 errors**; teardown acked. 261 codec writes, 0 errors. But the level settled at -90 dBFS (rms 1)
+  with Android's "rec-main-mic" gains (ADC1 4, DEC6 0 dB): our path has no ACDB gain (topology NONE).
+- **Test 422:** boot-args `mic_gain` (ANA_AMIC1 [4:0], default 12) and `mic_dgain` (TX6_TX_VOL_CTL, signed dB,
+  default 12). Floor -61..-63 dBFS (the codec's own noise lifted by the ~28 dB). In a 120 s listen the owner talked
+  and clapped from second 61 on: **-32 to -56 dBFS, peaks to 4410 of 32768, in the talk/quiet pattern; the floor
+  back at -60 in the pauses. The main microphone works under native iOS's kernel.**
+- Next: queues that wrap (tx descriptors and rx words reused) so iOS can start and stop it, then `mic_rec=4`
+  (/dev/redwood-mic for the RedwoodAudio plug-in's "Codec" input) and a Voice Memos recording.
+
+## Tests 423-424 (2026-11-21): iOS records from the microphone (standard since Test 424: `mic=7 mic_rec=4`)
+
+- **Test 423 (kernel t423, `+mic_rec=4`):** the NGD's queues wrap (tx: 2048 descriptors / 1024 16-byte buffers used
+  round and round, one message in flight; rx: each word re-posted as it is taken, descriptor j -> word j mod 2048), so
+  iOS can start and stop the microphone as often as it likes (record_test's one run = 3 starts, all clean).
+  `/dev/redwood-mic` is the donor plug-in's "Codec" device: iOS lists **MicrophoneBuiltIn "iPhone Microphone"**.
+  `record_test 6 vibrate 2` (the donor's tool, now in pipeline/build_phone_tools.sh, signed with the microphone
+  TCC entitlement): AVAudioRecorder, 6.00 s of 48 kHz; -29 dBFS quiet, **-8 dBFS while the motor runs**. iOS's
+  own input chain adds ~32 dB over the kernel's level, so the gains came down (`+mic_gain=8 +mic_dgain=0`: -42 quiet).
+- **Test 424 (kernel t424):** the codec's one-time bring-up (Android's probe, the CPR) runs at boot as soon as the
+  codec is found, not inside iOS's first recording (which had 4.8 s of nothing); defaults `mic_gain` 8, `mic_dgain`
+  0 dB. Right after boot: samples from 0.3 s, **-42 dBFS quiet, -18 dBFS during the motor's second**.
+- Standard image = Test 424 (`port/build/r5q-install-boot-standard.img`), `phone-args.txt` += `mic=7 mic_rec=4`
+  (before: port/build/phone-args.before-t424.txt).
+- Open: the owner's Voice Memos check (does speech sound right); the 175.5 Hz detector is the POCO's motor, not this
+  phone's (its loudness shows it plainly); A/V sync in camera video (MEMORY-PLAN.md's 468.7 s offset) now matters.

@@ -8,6 +8,7 @@
 | `ports/r5q/port/xnuloader/` (the EFI loader) | [Apple Public Source License 2.0](ports/r5q/port/xnuloader/LICENSE), changes in [MODIFICATIONS.md](ports/r5q/port/xnuloader/MODIFICATIONS.md) |
 | `ports/r5q/kernel-build/r5q-overlay/` (the r5q kernel drivers) | [Apple Public Source License 2.0](ports/r5q/kernel-build/r5q-overlay/LICENSE), changes in [MODIFICATIONS.md](ports/r5q/kernel-build/r5q-overlay/MODIFICATIONS.md) |
 | `ports/r5q/kernel-build/r5q-overlay/bsd/dev/redwood_wlfw_ath10k.h`, `redwood_wlfw_ath10k_ce.h` | ISC (generated from Linux's ath10k, Copyright (c) 2018 The Linux Foundation; see their headers) |
+| `ports/r5q/wifi/record_test.c` (and its `.entitlements`) | MIT, Copyright (c) 2026 OOSEX GANG: the donor port's user-space tool, copied unchanged |
 
 ## Where the APSL parts come from
 

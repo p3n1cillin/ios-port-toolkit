@@ -6142,17 +6142,19 @@ static uint32_t
 r5q_slim_send(vm_offset_t bam, vm_offset_t ngd, volatile uint32_t *tx_fifo, volatile uint8_t *tx_buf, uint64_t tx_buf_pa,
     uint32_t *next, const uint8_t *bytes, uint32_t len)
 {
-	uint32_t slot = (*next)++, stat;
-	volatile uint8_t *b = tx_buf + 16 * slot;
+	/* (Test 423) the descriptor FIFO (16 KB: 2048 of 8 bytes) and the 16-byte buffers (1024) used round and round:
+	 * one message is in flight at a time */
+	uint32_t slot = (*next)++, stat, d = slot % 2048u, k = slot % 1024u;
+	volatile uint8_t *b = tx_buf + 16 * k;
 
 	for (uint32_t i = 0; i < 16; i++) {
 		b[i] = i < len ? bytes[i] : 0;
 	}
-	tx_fifo[2 * slot] = (uint32_t)(tx_buf_pa + 16 * slot);
-	tx_fifo[2 * slot + 1] = ((len + 3) & ~3u) | (1u << 14) << 16;
+	tx_fifo[2 * d] = (uint32_t)(tx_buf_pa + 16 * k);
+	tx_fifo[2 * d + 1] = ((len + 3) & ~3u) | (1u << 14) << 16;
 	*(volatile uint32_t *)(ngd + 0x18) = 0xffffffffu;
 	__asm__ volatile ("dsb sy" ::: "memory");
-	*(volatile uint32_t *)(bam + SLIM_PIPE(4) + BAM_P_EVNT_REG) = (*next) * 8;
+	*(volatile uint32_t *)(bam + SLIM_PIPE(4) + BAM_P_EVNT_REG) = ((*next) % 2048u) * 8;
 	for (int us = 0; us < 200000; us += 50) {
 		if (*(volatile uint32_t *)(ngd + 0x14) & 0xbe000000u) {        /* (not RX_MSG_RCVD) */
 			break;
@@ -6441,11 +6443,19 @@ r5q_wcd_spi_probe(void)
  * length in the first byte. Waits up to ms for a message with message code mc (and transaction id tid, unless tid is
  * 0) and copies it to out (48 bytes); every other message is logged. The state lives in r5q_slim_v5.
  */
+/* (Test 421) the rx queue: 2040 four-byte descriptors posted once (its FIFO holds 2048; the words take 8 KB of 16) */
+#define R5Q_SLIM_RX_WORDS       2040u
+
 struct r5q_slim_rx {
 	vm_offset_t bam;
 	volatile uint32_t *words_va;
 	uint32_t words, have, need, nmsg;
 	uint32_t msg[12];
+	/* (Test 423) once the link is kept: every word taken is posted again (descriptor j -> word j, mod 2048) */
+	bool wrap;
+	volatile uint32_t *fifo_va;
+	uint64_t words_pa;
+	uint32_t posted;
 };
 
 static bool
@@ -6453,10 +6463,23 @@ r5q_slim_wait(struct r5q_slim_rx *r, uint8_t mc, uint8_t tid, uint8_t *out, unsi
 {
 	for (unsigned t = 0; t <= ms; t++) {
 		uint32_t at = (*(volatile uint32_t *)(r->bam + SLIM_PIPE(3) + BAM_P_SW_OFSTS) & 0xffff) / 8;
+		uint32_t end = r->wrap ? r->words + ((at - (r->words % 2048u)) & 2047u) :
+		    (at < R5Q_SLIM_RX_WORDS ? at : R5Q_SLIM_RX_WORDS);
 
-		while (r->words < at && r->words < 256) {
-			uint32_t x = r->words_va[r->words++];
+		while (r->words < end) {
+			uint32_t x = r->words_va[r->words % 2048u];
 			const uint8_t *mb = (const uint8_t *)r->msg;
+
+			r->words++;
+			if (r->wrap) {
+				uint32_t j = r->posted % 2048u;
+
+				r->fifo_va[2 * j] = (uint32_t)(r->words_pa + 4 * j);
+				r->fifo_va[2 * j + 1] = 4u;
+				__asm__ volatile ("dsb sy" ::: "memory");
+				r->posted++;
+				*(volatile uint32_t *)(r->bam + SLIM_PIPE(3) + BAM_P_EVNT_REG) = (r->posted % 2048u) * 8;
+			}
 
 			if (r->have == 0) {
 				r->need = ((x & 0x1f) + 3) / 4;      /* the length field counts the message's bytes */
@@ -6484,6 +6507,560 @@ r5q_slim_wait(struct r5q_slim_rx *r, uint8_t mc, uint8_t tid, uint8_t *out, unsi
 		}
 	}
 	return false;
+}
+
+/*
+ * (Test 421) The NGD's link as one context, for the codec's set-up (Samsung's slim-msm-ngd.c / slimbus.c /
+ * wcd9xxx-core.c message formats; the length field counts the message's bytes, the header is 3 bytes for a logical
+ * destination):
+ *   CHANGE_VALUE  06 68 la ec_lo ec_hi value                    (one byte; ec = 8 | (0x800 + offset) << 4)
+ *   REQUEST_VALUE 06 60 la tid ec_lo ec_hi -> REPLY_VALUE xx 64 la tid bytes...
+ *   user messages to the manager (mt 2 "destination referred user", to 0xff), answered by GENERIC_ACK (mc 0x25:
+ *   tid, response; bit 5 = success)
+ * The codec's registers are 16 bits: page (reg >> 8) into register 0, then the offset (reg & 0xff).
+ */
+struct r5q_slim_link {
+	vm_offset_t bam, ngd;
+	volatile uint32_t *tx_fifo;
+	volatile uint8_t *tx_buf;
+	uint64_t tx_buf_pa;
+	uint32_t *next;
+	struct r5q_slim_rx *rx;
+	uint8_t la, ifd_la, tid;
+	int page;                       /* -1: not known */
+	uint32_t errors, writes;
+};
+
+static bool
+r5q_slim_put(struct r5q_slim_link *l, const uint8_t *b, uint32_t len)
+{
+	uint32_t s;
+
+	s = r5q_slim_send(l->bam, l->ngd, l->tx_fifo, l->tx_buf, l->tx_buf_pa, l->next, b, len);
+	if ((s & 0x80000000u) == 0 || (s & 0x08000000u) != 0) {
+		tell("adsp: slim: link: message %02x %02x %02x %02x %02x %02x NOT SENT: %#x\n", b[0], b[1], b[2],
+		    len > 3 ? b[3] : 0, len > 4 ? b[4] : 0, len > 5 ? b[5] : 0, s);
+		l->errors++;
+		return false;
+	}
+	return true;
+}
+
+static uint8_t
+r5q_slim_next_tid(struct r5q_slim_link *l)
+{
+	l->tid = (uint8_t)(l->tid + 1);
+	if (l->tid < 0x80 || l->tid > 0xf0) {
+		l->tid = 0x80;
+	}
+	return l->tid;
+}
+
+static bool
+r5q_slim_wr8(struct r5q_slim_link *l, uint8_t la, uint16_t offset, uint8_t value)
+{
+	uint16_t ec = (uint16_t)(0x8u | ((0x800u + offset) << 4));
+	uint8_t m[6] = { 0x06, 0x68, la, (uint8_t)ec, (uint8_t)(ec >> 8), value };
+
+	l->writes++;
+	return r5q_slim_put(l, m, 6);
+}
+
+static bool
+r5q_slim_rd8(struct r5q_slim_link *l, uint8_t la, uint16_t offset, uint8_t *value)
+{
+	uint16_t ec = (uint16_t)(0x8u | ((0x800u + offset) << 4));
+	uint8_t tid = r5q_slim_next_tid(l), m[48];
+	uint8_t q[6] = { 0x06, 0x60, la, tid, (uint8_t)ec, (uint8_t)(ec >> 8) };
+
+	if (!r5q_slim_put(l, q, 6) || !r5q_slim_wait(l->rx, 0x64, tid, m, 20, "link: read")) {
+		l->errors++;
+		return false;
+	}
+	*value = m[4];
+	return true;
+}
+
+static bool
+r5q_cdc_page(struct r5q_slim_link *l, uint16_t reg)
+{
+	if (l->page == (reg >> 8)) {
+		return true;
+	}
+	if (!r5q_slim_wr8(l, l->la, 0x000, (uint8_t)(reg >> 8))) {
+		l->page = -1;
+		return false;
+	}
+	l->page = reg >> 8;
+	return true;
+}
+
+static bool
+r5q_cdc_wr(struct r5q_slim_link *l, uint16_t reg, uint8_t value)
+{
+	return r5q_cdc_page(l, reg) && r5q_slim_wr8(l, l->la, reg & 0xff, value);
+}
+
+static bool
+r5q_cdc_rd(struct r5q_slim_link *l, uint16_t reg, uint8_t *value)
+{
+	return r5q_cdc_page(l, reg) && r5q_slim_rd8(l, l->la, reg & 0xff, value);
+}
+
+/* read-modify-write, as regmap's update_bits (no write when nothing changes) */
+static bool
+r5q_cdc_upd(struct r5q_slim_link *l, uint16_t reg, uint8_t mask, uint8_t value)
+{
+	uint8_t old = 0, now;
+
+	if (!r5q_cdc_rd(l, reg, &old)) {
+		tell("adsp: slim: codec: %#06x NOT READ\n", reg);
+		return false;
+	}
+	now = (uint8_t)((old & ~mask) | (value & mask));
+	return now == old || r5q_cdc_wr(l, reg, now);
+}
+
+/* a user message to the manager; tid_at = where in the payload its transaction id goes; waits for the GENERIC_ACK */
+static bool
+r5q_slim_user(struct r5q_slim_link *l, const char *what, uint8_t mc, uint8_t *payload, uint32_t n, uint32_t tid_at)
+{
+	uint8_t m[16], a[48], tid = r5q_slim_next_tid(l);
+
+	if (n + 3 > sizeof(m)) {
+		return false;
+	}
+	payload[tid_at] = tid;
+	m[0] = (uint8_t)((n + 3) | (2u << 5));
+	m[1] = mc;
+	m[2] = 0xff;
+	memcpy(m + 3, payload, n);
+	if (!r5q_slim_put(l, m, n + 3)) {
+		return false;
+	}
+	if (!r5q_slim_wait(l->rx, 0x25, tid, a, 100, what)) {
+		tell("adsp: slim: link: %s: NO ACK (tid %#x)\n", what, tid);
+		l->errors++;
+		return false;
+	}
+	tell("adsp: slim: link: %s: ack %#x%s\n", what, a[4], (a[4] & 0x20) ? "" : " -- REFUSED");
+	if ((a[4] & 0x20) == 0) {
+		l->errors++;
+		return false;
+	}
+	return true;
+}
+
+/*
+ * (Test 421) The codec's SLIMbus TX channel, as wcd9xxx_cfg_slim_sch_tx (wcd9xxx-slimslave.c) and slim_connect_src /
+ * slim_control_ch (slimbus.c, through slim-msm-ngd.c's ngd_xfer_msg / ngd_allocbw) do it for "AIF1_CAP Mixer SLIM
+ * TX6": the codec's TX port 6, shared channel 134 (sm8150.c tx_ch[]: 128 + 6), 48 kHz 16-bit one channel.
+ *   the interface device (Tavil: WCD9XXX_SLIM_SLAVE_ADDR_TYPE_1, port_tx_cfg_reg_base 0x050):
+ *     SB_PGD_PORT_TX_OR_UR_CFG(6) 0x1f6 = 0x02 (auto recovery, Tavil only), SB_PGD_TX_PORT_MULTI_CHANNEL_0(6) 0x118 =
+ *     0x40 (bit 6: the port's channel), _1(6) 0x119 = 0, SB_PGD_PORT_CFG_BYTE_ADDR(0x050, 6) 0x056 = WATER_MARK_VAL 0x05
+ *   CONNECT_SRC (user mc 0x2c): la 0xcf, port 6, channel 134, tid
+ *   DEF_ACT_CHAN (0x21): dataf << 5 | (la & 0x1f), (16 >> 2) | coeff 3 << 5 | auxf << 6, rootexp 2 << 4 | prot 0
+ *     (hard isochronous: 48 kHz = 3 * 2^2 * 4 kHz, exact), presence rate 0x83 (slim_calc_prrate), tid, channel 134
+ *   RECONFIG_NOW (0x24): tid, la
+ */
+#define R5Q_MIC_TX_PORT         6
+#define R5Q_MIC_CHANNEL         134
+
+static bool
+r5q_slim_tx_channel_on(struct r5q_slim_link *l)
+{
+	uint8_t c[4] = { l->la, R5Q_MIC_TX_PORT, R5Q_MIC_CHANNEL, 0 };
+	uint8_t d[6] = { (uint8_t)(l->la & 0x1f), 0x24, 0x20, 0x83, 0, R5Q_MIC_CHANNEL };
+	uint8_t r[2] = { 0, l->la };
+	bool ok;
+
+	if (l->ifd_la == 0xff) {
+		tell("adsp: slim: channel: the codec's interface device has no address\n");
+		return false;
+	}
+	ok = r5q_slim_wr8(l, l->ifd_la, 0x1f0 + R5Q_MIC_TX_PORT, 0x02) &&
+	    r5q_slim_wr8(l, l->ifd_la, 0x100 + 4 * R5Q_MIC_TX_PORT, 1u << R5Q_MIC_TX_PORT) &&
+	    r5q_slim_wr8(l, l->ifd_la, 0x101 + 4 * R5Q_MIC_TX_PORT, 0x00) &&
+	    r5q_slim_wr8(l, l->ifd_la, 0x050 + R5Q_MIC_TX_PORT, 0x05);
+	if (ok) {
+		uint8_t v[4] = { 0 };
+
+		(void)r5q_slim_rd8(l, l->ifd_la, 0x1f0 + R5Q_MIC_TX_PORT, &v[0]);
+		(void)r5q_slim_rd8(l, l->ifd_la, 0x100 + 4 * R5Q_MIC_TX_PORT, &v[1]);
+		(void)r5q_slim_rd8(l, l->ifd_la, 0x050 + R5Q_MIC_TX_PORT, &v[2]);
+		tell("adsp: slim: channel: the codec's TX port 6 set (read back: %#x %#x %#x)\n", v[0], v[1], v[2]);
+	}
+	ok = ok && r5q_slim_user(l, "CONNECT_SRC (codec TX port 6 -> channel 134)", 0x2c, c, 4, 3) &&
+	    r5q_slim_user(l, "DEF_ACT_CHAN (channel 134: 48 kHz, 16 bits, hard isochronous)", 0x21, d, 6, 4) &&
+	    r5q_slim_user(l, "RECONFIG_NOW", 0x24, r, 2, 0);
+	tell("adsp: slim: channel 134 %s\n", ok ? "ACTIVE: the codec's TX port 6 on the bus" : "NOT SET UP");
+	return ok;
+}
+
+static void
+r5q_slim_tx_channel_off(struct r5q_slim_link *l)
+{
+	uint8_t x[3] = { l->la, R5Q_MIC_TX_PORT, 0 };
+	uint8_t k[3] = { (uint8_t)(0x80 | (l->la & 0x1f)), 0, R5Q_MIC_CHANNEL };   /* SLIM_CH_REMOVE << 6 */
+	uint8_t r[2] = { 0, l->la };
+
+	(void)r5q_slim_user(l, "CHAN_CTRL remove (channel 134)", 0x23, k, 3, 1);
+	(void)r5q_slim_user(l, "RECONFIG_NOW", 0x24, r, 2, 0);
+	(void)r5q_slim_user(l, "DISCONNECT_PORT (codec TX port 6)", 0x2e, x, 3, 2);
+	(void)r5q_slim_wr8(l, l->ifd_la, 0x050 + R5Q_MIC_TX_PORT, 0x00);
+	(void)r5q_slim_wr8(l, l->ifd_la, 0x100 + 4 * R5Q_MIC_TX_PORT, 0x00);
+}
+
+/* the codec's capture path (the WCD9340's registers: Test 421, below) */
+static bool r5q_cdc_capture_on(struct r5q_slim_link *l);
+static bool r5q_cdc_capture_on2(struct r5q_slim_link *l);
+static void r5q_cdc_capture_unmute(struct r5q_slim_link *l);
+static void r5q_cdc_capture_off(struct r5q_slim_link *l);
+
+/* the link, kept once r5q_slim_v5 has found the codec (mic=7): redwood_mic.c's r5q mode uses it through these */
+static struct r5q_slim_link r5q_link;
+static struct r5q_slim_rx r5q_link_rx;
+static uint32_t r5q_link_next;
+static bool r5q_link_up, r5q_mic_path_on;
+static uint8_t r5q_codec_la = 0xff, r5q_codec_ifd_la = 0xff;
+static LCK_GRP_DECLARE(r5q_link_group, "r5q-slim");
+static LCK_MTX_DECLARE(r5q_link_lock, &r5q_link_group);
+
+bool redwood_r5q_mic_codec_on(void);
+void redwood_r5q_mic_codec_unmute(void);
+void redwood_r5q_mic_codec_off(void);
+
+bool
+redwood_r5q_mic_codec_on(void)
+{
+	bool ok;
+
+	if (!r5q_link_up) {
+		tell("adsp: mic: the codec is not on the bus (mic=7 not run, or it failed)\n");
+		return false;
+	}
+	lck_mtx_lock(&r5q_link_lock);
+	r5q_link.errors = 0;
+	ok = r5q_cdc_capture_on(&r5q_link) && r5q_slim_tx_channel_on(&r5q_link) && r5q_cdc_capture_on2(&r5q_link);
+	r5q_mic_path_on = true;
+	tell("adsp: mic: the codec's capture path %s (%u writes, %u errors, tx %u)\n", ok ? "UP" : "FAILED", r5q_link.writes,
+	    r5q_link.errors, r5q_link_next);
+	lck_mtx_unlock(&r5q_link_lock);
+	return ok;
+}
+
+void
+redwood_r5q_mic_codec_unmute(void)
+{
+	if (!r5q_link_up) {
+		return;
+	}
+	lck_mtx_lock(&r5q_link_lock);
+	r5q_cdc_capture_unmute(&r5q_link);
+	lck_mtx_unlock(&r5q_link_lock);
+}
+
+void
+redwood_r5q_mic_codec_off(void)
+{
+	if (!r5q_link_up || !r5q_mic_path_on) {
+		return;
+	}
+	lck_mtx_lock(&r5q_link_lock);
+	r5q_slim_tx_channel_off(&r5q_link);
+	r5q_cdc_capture_off(&r5q_link);
+	r5q_mic_path_on = false;
+	tell("adsp: mic: the codec's capture path down (tx %u)\n", r5q_link_next);
+	lck_mtx_unlock(&r5q_link_lock);
+}
+
+/*
+ * (Test 421) The WCD9340's capture path for the main microphone, as Samsung's techpack/audio (lineage-19.0) does it
+ * for Android's "main-mic" + "rec-main-mic" (Handset Mic -> MIC BIAS1 -> AMIC1 -> ADC1 -> AMIC MUX6 -> ADC MUX6 ->
+ * DEC6 -> CDC_IF TX6 -> SLIM TX6), without DAPM. Each step names its source (wcd934x.c unless said). A row: register,
+ * mask (0 = the whole register written), value, then a delay in microseconds after it.
+ */
+struct r5q_cdc_op {
+	uint16_t reg;
+	uint8_t mask, value;
+	uint16_t delay_us;
+};
+
+/* once after the codec leaves reset: wcd9xxx-rst.c wcd934x_bring_up (the digital core powered, SIDO's start voltages) */
+static const struct r5q_cdc_op r5q_cdc_bring_up[] = {
+	{ 0x0009, 0, 0x01, 0 },         /* CODEC_RPM_RST_CTL */
+	{ 0x071b, 0, 0x19, 0 },         /* SIDO_NEW_VOUT_A_STARTUP */
+	{ 0x071c, 0, 0x15, 1100 },      /* SIDO_NEW_VOUT_D_STARTUP; VOUT settles */
+	{ 0x0011, 0, 0x05, 0 },         /* CODEC_RPM_PWR_CDC_DIG_HM_CTL */
+	{ 0x0011, 0, 0x07, 0 },
+	{ 0x0009, 0, 0x03, 0 },
+	{ 0x0009, 0, 0x07, 0 },
+	{ 0x0011, 0, 0x03, 0 },
+};
+
+/* once: tavil_probe (MCLK 9.6 MHz; tavil_update_reg_defaults' capture rows) and tavil_soc_codec_probe
+ * (tavil_codec_init_reg's capture rows, tavil_handle_pdata's mic biases at 1.8 V, tavil_vote_svs(false)) */
+static const struct r5q_cdc_op r5q_cdc_init[] = {
+	{ 0x0003, 0x03, 0x01, 0 },      /* CODEC_RPM_CLK_MCLK_CFG: 9.6 MHz */
+	{ 0x5022, 0, 0x7c, 0 },         /* CODEC_CPR_SVS_CX_VDD */
+	{ 0x5023, 0, 0x58, 0 },         /* CODEC_CPR_SVS2_CX_VDD */
+	{ 0x066c, 0x07, 0x01, 0 },      /* MICB1_TEST_CTL_2 */
+	{ 0x0a33, 0x01, 0x00, 0 }, { 0x0a43, 0x01, 0x00, 0 }, { 0x0a53, 0x01, 0x00, 0 },   /* CDC_TXn_TX_PATH_CFG1 */
+	{ 0x0a63, 0x01, 0x00, 0 }, { 0x0a73, 0x01, 0x00, 0 }, { 0x0a83, 0x01, 0x00, 0 },
+	{ 0x0a93, 0x01, 0x00, 0 }, { 0x0aa3, 0x01, 0x00, 0 }, { 0x0ab3, 0x01, 0x00, 0 },
+	{ 0x0003, 0x04, 0x04, 0 },      /* CODEC_RPM_CLK_MCLK_CFG */
+	{ 0x021b, 0x80, 0x00, 0 },      /* CPE_SS_DMIC_CFG */
+	{ 0x0d82, 0x02, 0x02, 0 },      /* CDC_TOP_TOP_CFG1 */
+	{ 0x0d82, 0x01, 0x01, 0 },
+	{ 0x0d42, 0x01, 0x01, 0 },      /* CDC_CLK_RST_CTRL_FS_CNT_CONTROL */
+	{ 0x0002, 0x08, 0x00, 0 },      /* CODEC_RPM_CLK_GATE */
+	{ 0x066b, 0, 0xfa, 0 },         /* MICB1..4_TEST_CTL_1 */
+	{ 0x066e, 0, 0xfa, 0 },
+	{ 0x0671, 0, 0xfa, 0 },
+	{ 0x0674, 0, 0xfa, 0 },
+	{ 0x0622, 0x3f, 0x10, 0 },      /* ANA_MICB1..4: (1800 - 1000) / 50 */
+	{ 0x0623, 0x3f, 0x10, 0 },
+	{ 0x0625, 0x3f, 0x10, 0 },
+	{ 0x0626, 0x3f, 0x10, 0 },
+	{ 0x0202, 0x01, 0x00, 0 },      /* CPE_SS_PWR_SYS_PSTATE_CTL_0: svs released */
+};
+
+/* the codec's clock on: __tavil_cdc_mclk_enable(true) (svs vote, master bias, MCLK, SIDO from RCO/bandgap) */
+static const struct r5q_cdc_op r5q_cdc_mclk_on[] = {
+	{ 0x0202, 0x01, 0x01, 0 },      /* tavil_vote_svs(true) */
+	{ 0x0601, 0x80, 0x80, 0 },      /* ANA_BIAS: wcd_resmgr_enable_master_bias */
+	{ 0x0601, 0x40, 0x40, 1100 },   /* precharge */
+	{ 0x0601, 0x40, 0x00, 0 },
+	{ 0x0601, 0x20, 0x00, 0 },
+	{ 0x0711, 0x80, 0x80, 0 },      /* CLK_SYS_MCLK_PRG: wcd_resmgr_enable_clk_mclk (external clock / 2) */
+	{ 0x0711, 0x30, 0x10, 0 },
+	{ 0x0711, 0x02, 0x00, 0 },
+	{ 0x0711, 0x01, 0x01, 0 },
+	{ 0x0711, 0x02, 0x00, 0 },
+	{ 0x0d42, 0x01, 0x01, 0 },      /* CDC_CLK_RST_CTRL_FS_CNT_CONTROL */
+	{ 0x0d41, 0x01, 0x01, 0 },      /* CDC_CLK_RST_CTRL_MCLK_CONTROL */
+	{ 0x0002, 0x03, 0x00, 15 },     /* CODEC_RPM_CLK_GATE */
+	{ 0x0603, 0x80, 0x80, 100 },    /* ANA_RCO: wcd_resmgr_set_sido_input_src(RCO_BG) */
+	{ 0x0606, 0x02, 0x02, 100 },    /* ANA_BUCK_CTL */
+	{ 0x0606, 0x01, 0x01, 100 },
+	{ 0x0606, 0x04, 0x04, 100 },
+};
+
+static const struct r5q_cdc_op r5q_cdc_mclk_off[] = {
+	{ 0x0711, 0x81, 0x00, 0 },
+	{ 0x0606, 0x04, 0x00, 100 },
+	{ 0x0606, 0x03, 0x00, 100 },
+	{ 0x0603, 0x80, 0x00, 100 },
+	{ 0x0601, 0x80, 0x00, 0 },
+	{ 0x0601, 0x20, 0x00, 0 },
+	{ 0x0202, 0x01, 0x00, 0 },
+};
+
+/* the mixer path's controls (Android writes them when the path is applied) and hw_params, then MIC BIAS1 */
+static const struct r5q_cdc_op r5q_cdc_route[] = {
+	{ 0x0d3b, 0x30, 0x20, 0 },      /* CDC_IF TX6 MUX = DEC6 (CDC_IF_ROUTER_TX_MUX_CFG1) */
+	{ 0x0a92, 0x80, 0x00, 0 },      /* ADC MUX6 = AMIC: TX6_TX_PATH_CFG0 bit 7 (not DMIC), */
+	{ 0x0d22, 0x0c, 0x04, 0 },      /*   CDC_TX_INP_MUX_ADC_MUX2_CFG1 */
+	{ 0x0d28, 0x07, 0x01, 0 },      /* AMIC MUX6 = ADC1 (ADC_MUX6_CFG0) */
+	{ 0x060e, 0x1f, 0x04, 0 },      /* ADC1 Volume 4 (ANA_AMIC1) */
+	{ 0x0a94, 0, 0x00, 0 },         /* DEC6 Volume 84 = 0 dB (TX6_TX_VOL_CTL) */
+	{ 0x0a91, 0x0f, 0x04, 0 },      /* tavil_set_decimator_rate: 48 kHz (TX6_TX_PATH_CTL) */
+	{ 0x0622, 0xc0, 0x40, 1100 },   /* MIC BIAS1 on (tavil_micbias_control MICB_ENABLE) */
+};
+
+/* after the SLIMbus channel (Linux: "AIF1 CAP" POST_PMU comes before the decimator and the ADC) */
+static const struct r5q_cdc_op r5q_cdc_dec_adc[] = {
+	{ 0x0a92, 0x06, 0x00, 0 },      /* tavil_codec_enable_dec PRE_PMU (AMIC1: power mode default) */
+	{ 0x0a91, 0x10, 0x10, 0 },      /*   TX mute */
+	{ 0x0a91, 0x20, 0x20, 0 },      /* the widget: decimator 6's clock */
+	{ 0x0a92, 0x60, 0x40, 0 },      /* POST_PMU: HPF 150 Hz while it settles */
+	{ 0x0a99, 0x02, 0x02, 1010 },   /*   TX6_TX_PATH_SEC2: the HPF's "go" */
+	{ 0x0a99, 0x02, 0x00, 0 },
+	{ 0x0a94, 0, 0x00, 0 },         /*   the gain applied after the decimator is on */
+	{ 0x060f, 0x40, 0x40, 0 },      /* ADC1 PRE_PMU: tavil_codec_set_tx_hold (ANA_AMIC2) */
+	{ 0x060e, 0x80, 0x80, 0 },      /* the widget: ADC1 on */
+};
+
+/* +45 ms: tavil_tx_mute_update_callback */
+static const struct r5q_cdc_op r5q_cdc_unmute[] = {
+	{ 0x0a91, 0x10, 0x00, 0 },
+};
+
+/* +300 ms: tavil_tx_hpf_corner_freq_callback (the TX hold released, the HPF back to 4 Hz) */
+static const struct r5q_cdc_op r5q_cdc_settle[] = {
+	{ 0x060f, 0x40, 0x00, 0 },
+	{ 0x0a92, 0x60, 0x00, 0 },
+	{ 0x0a99, 0x02, 0x02, 1010 },
+	{ 0x0a99, 0x02, 0x00, 0 },
+};
+
+static const struct r5q_cdc_op r5q_cdc_down[] = {
+	{ 0x060e, 0x80, 0x00, 0 },      /* ADC1 off */
+	{ 0x060f, 0x40, 0x00, 0 },
+	{ 0x0a91, 0x10, 0x10, 0 },      /* decimator 6 muted, its clock off */
+	{ 0x0a91, 0x20, 0x00, 0 },
+	{ 0x0622, 0xc0, 0x00, 0 },      /* MIC BIAS1 off */
+};
+
+/* tavil_update_cpr_defaults (v1.1): data then address, 4 bytes little-endian each, to CPR_WR_DATA_0.. / CPR_WR_ADDR_0.. */
+static const uint32_t r5q_cdc_cpr[16][2] = {
+	{ 0x00000820, 0x94 }, { 0x00000fc0, 0x48 }, { 0x0000f000, 0x44 }, { 0x0000bb80, 0xc0000178 },
+	{ 0x00000000, 0x160 }, { 0x10854522, 0x60 }, { 0x10854509, 0x64 }, { 0x108544dd, 0x68 },
+	{ 0x108544ad, 0x6c }, { 0x0000077e, 0x70 }, { 0x000007da, 0x74 }, { 0x00000000, 0x78 },
+	{ 0x00000000, 0x7c }, { 0x00042029, 0x80 }, { 0x4002002a, 0x90 }, { 0x4002002b, 0x90 },
+};
+
+static bool r5q_cdc_inited;
+
+static bool
+r5q_cdc_run(struct r5q_slim_link *l, const char *what, const struct r5q_cdc_op *ops, unsigned n)
+{
+	for (unsigned i = 0; i < n; i++) {
+		bool ok = ops[i].mask == 0 ? r5q_cdc_wr(l, ops[i].reg, ops[i].value) :
+		    r5q_cdc_upd(l, ops[i].reg, ops[i].mask, ops[i].value);
+
+		if (!ok) {
+			tell("adsp: codec: %s: step %u (%#06x) FAILED\n", what, i, ops[i].reg);
+			return false;
+		}
+		if (ops[i].delay_us != 0) {
+			delay_for_interval(ops[i].delay_us, NSEC_PER_USEC);
+		}
+	}
+	return true;
+}
+
+static void
+r5q_cdc_snapshot(struct r5q_slim_link *l, const char *when)
+{
+	static const uint16_t regs[] = { 0x0003, 0x0009, 0x0011, 0x0202, 0x0601, 0x0603, 0x0606, 0x060e, 0x060f, 0x0622,
+		                         0x0711, 0x0a91, 0x0a92, 0x0a93, 0x0a94, 0x0d22, 0x0d28, 0x0d3b, 0x0d41, 0x0d42, 0x0d82 };
+	char line[400];
+	unsigned at = 0;
+
+	for (unsigned i = 0; i < sizeof(regs) / sizeof(regs[0]) && at + 16 < sizeof(line); i++) {
+		uint8_t v = 0;
+		bool ok = r5q_cdc_rd(l, regs[i], &v);
+
+		at += (unsigned)snprintf(line + at, sizeof(line) - at, " %03x=%s%02x", regs[i], ok ? "" : "?", v);
+	}
+	tell("adsp: codec: %s:%s\n", when, line);
+}
+
+/* (Test 424) once, at boot as soon as the codec is found: iOS's first recording no longer waits ~5 s for it */
+static bool
+r5q_cdc_init_once(struct r5q_slim_link *l)
+{
+	uint8_t minor = 0xff;
+
+	if (!r5q_cdc_inited) {
+		if (!r5q_cdc_run(l, "bring-up", r5q_cdc_bring_up, sizeof(r5q_cdc_bring_up) / sizeof(r5q_cdc_bring_up[0])) ||
+		    !r5q_cdc_rd(l, 0x0021, &minor) ||
+		    !r5q_cdc_run(l, "init", r5q_cdc_init, sizeof(r5q_cdc_init) / sizeof(r5q_cdc_init[0]))) {
+			return false;
+		}
+		tell("adsp: codec: brought up and set as Android's probe sets it (WCD9340 v1.%u)\n", minor == 1 ? 1 : 0);
+		/* the slave's port interrupts (tavil_slim_interface_init_reg) */
+		(void)r5q_slim_wr8(l, l->ifd_la, 0x030, 0xff);
+		(void)r5q_slim_wr8(l, l->ifd_la, 0x031, 0xff);
+		(void)r5q_slim_wr8(l, l->ifd_la, 0x032, 0xff);
+		if (minor == 1) {
+			/* the CPR's defaults, with the clock on (tavil_update_cpr_defaults) */
+			if (!r5q_cdc_run(l, "clock (for the CPR)", r5q_cdc_mclk_on, sizeof(r5q_cdc_mclk_on) / sizeof(r5q_cdc_mclk_on[0])) ||
+			    !r5q_cdc_wr(l, 0x5027, 0x2c) || !r5q_cdc_upd(l, 0x0002, 0x10, 0x00)) {
+				return false;
+			}
+			for (unsigned i = 0; i < 16; i++) {
+				for (unsigned b = 0; b < 4; b++) {
+					(void)r5q_cdc_wr(l, (uint16_t)(0x5001 + b), (uint8_t)(r5q_cdc_cpr[i][0] >> (8 * b)));
+				}
+				for (unsigned b = 0; b < 4; b++) {
+					(void)r5q_cdc_wr(l, (uint16_t)(0x5005 + b), (uint8_t)(r5q_cdc_cpr[i][1] >> (8 * b)));
+				}
+			}
+			(void)r5q_cdc_run(l, "clock off", r5q_cdc_mclk_off, sizeof(r5q_cdc_mclk_off) / sizeof(r5q_cdc_mclk_off[0]));
+			tell("adsp: codec: the CPR's defaults written (%u errors so far)\n", l->errors);
+		}
+		r5q_cdc_inited = true;
+		r5q_cdc_snapshot(l, "after the init");
+	}
+	return true;
+}
+
+static bool
+r5q_cdc_capture_on(struct r5q_slim_link *l)
+{
+	if (!r5q_cdc_init_once(l)) {
+		return false;
+	}
+	if (!r5q_cdc_run(l, "clock", r5q_cdc_mclk_on, sizeof(r5q_cdc_mclk_on) / sizeof(r5q_cdc_mclk_on[0])) ||
+	    !r5q_cdc_run(l, "route", r5q_cdc_route, sizeof(r5q_cdc_route) / sizeof(r5q_cdc_route[0]))) {
+		return false;
+	}
+	{
+		/*
+		 * (Test 422) Android's own recording has its tuning's gain in the DSP (ACDB); our path has none (topology
+		 * NONE), so Test 421's room sat at -90 dBFS. Boot-arg mic_gain = ADC1's analog gain code (ANA_AMIC1 [4:0], 0-20;
+		 * Android's mixer default 12, its "rec-main-mic" 4); mic_dgain = decimator 6's gain in dB (-84..40, default 12).
+		 */
+		uint32_t gain = 8;      /* (Test 424: 8, was 12 -- iOS's own input chain adds ~32 dB, Test 423) */
+
+		(void)PE_parse_boot_argn("mic_gain", &gain, sizeof(gain));
+		gain = gain > 20 ? 20 : gain;
+		tell("adsp: codec: ADC1's analog gain code %u\n", gain);
+		return r5q_cdc_upd(l, 0x060e, 0x1f, (uint8_t)gain);
+	}
+}
+
+/* after the channel: the decimator and the ADC */
+static bool
+r5q_cdc_capture_on2(struct r5q_slim_link *l)
+{
+	bool ok = r5q_cdc_run(l, "decimator 6 and ADC1", r5q_cdc_dec_adc, sizeof(r5q_cdc_dec_adc) / sizeof(r5q_cdc_dec_adc[0]));
+	int32_t dgain = 0;      /* (Test 424: 0 dB, was 12) */
+
+	(void)PE_parse_boot_argn("mic_dgain", &dgain, sizeof(dgain));
+	dgain = dgain < -84 ? -84 : dgain > 40 ? 40 : dgain;
+	ok = ok && r5q_cdc_wr(l, 0x0a94, (uint8_t)(int8_t)dgain);      /* TX6_TX_VOL_CTL: signed dB */
+	tell("adsp: codec: decimator 6's gain %d dB\n", (int)dgain);
+
+	r5q_cdc_snapshot(l, "capturing");
+	return ok;
+}
+
+static void
+r5q_cdc_capture_unmute(struct r5q_slim_link *l)
+{
+	(void)r5q_cdc_run(l, "unmute", r5q_cdc_unmute, 1);
+}
+
+static void
+r5q_cdc_capture_settle(struct r5q_slim_link *l)
+{
+	(void)r5q_cdc_run(l, "settle", r5q_cdc_settle, sizeof(r5q_cdc_settle) / sizeof(r5q_cdc_settle[0]));
+	r5q_cdc_snapshot(l, "settled");
+}
+
+static void
+r5q_cdc_capture_off(struct r5q_slim_link *l)
+{
+	(void)r5q_cdc_run(l, "down", r5q_cdc_down, sizeof(r5q_cdc_down) / sizeof(r5q_cdc_down[0]));
+	(void)r5q_cdc_run(l, "clock off", r5q_cdc_mclk_off, sizeof(r5q_cdc_mclk_off) / sizeof(r5q_cdc_mclk_off[0]));
+}
+
+bool
+redwood_r5q_mic_codec_settle(void);
+
+bool
+redwood_r5q_mic_codec_settle(void)
+{
+	if (!r5q_link_up) {
+		return false;
+	}
+	lck_mtx_lock(&r5q_link_lock);
+	r5q_cdc_capture_settle(&r5q_link);
+	lck_mtx_unlock(&r5q_link_lock);
+	return true;
 }
 
 static void
@@ -6539,12 +7116,12 @@ r5q_slim_v5(vm_offset_t slim, uint32_t mic)
 		*(volatile uint32_t *)(pp + BAM_P_IRQ_EN) = 0;
 		*(volatile uint32_t *)(pp + BAM_P_CTRL) = BAM_P_EN | BAM_P_SYS_MODE | (pipe == 3 ? BAM_P_DIRECTION : 0);
 	}
-	for (uint32_t i = 0; i < 256; i++) {
+	for (uint32_t i = 0; i < R5Q_SLIM_RX_WORDS; i++) {
 		rx_fifo[2 * i] = (uint32_t)(rx_words_pa + 4 * i);
 		rx_fifo[2 * i + 1] = 4u;
 	}
 	__asm__ volatile ("dsb sy" ::: "memory");
-	*(volatile uint32_t *)(bam + SLIM_PIPE(3) + BAM_P_EVNT_REG) = 256 * 8;
+	*(volatile uint32_t *)(bam + SLIM_PIPE(3) + BAM_P_EVNT_REG) = R5Q_SLIM_RX_WORDS * 8;
 	*(volatile uint32_t *)(ngd + 0x10) = 0xbe000000u;      /* NACKED_2, BUF_CONTE, TX_INVAL, IE_VE_CHG, DEV_ERR, TX_SENT */
 	*(volatile uint32_t *)(ngd + 0x8) = *(volatile uint32_t *)(ngd + 0x8) | 0x10000;
 	__asm__ volatile ("dsb sy" ::: "memory");
@@ -6553,7 +7130,7 @@ r5q_slim_v5(vm_offset_t slim, uint32_t mic)
 	for (int ms = 0; ms < 5000; ms++) {
 		uint32_t at = (*(volatile uint32_t *)(bam + SLIM_PIPE(3) + BAM_P_SW_OFSTS) & 0xffff) / 8;
 
-		while (words < at && words < 256) {
+		while (words < at && words < R5Q_SLIM_RX_WORDS) {
 			uint32_t w = rx_words[words++];
 
 			if (have == 0) {
@@ -6611,7 +7188,7 @@ r5q_slim_v5(vm_offset_t slim, uint32_t mic)
 						uint8_t la = 0xff, ifd_la = 0xff, m[48];
 						uint32_t replies = 0;
 
-						for (tries = 1; tries <= 100 && rx.words < 200; tries++) {
+						for (tries = 1; tries <= 100 && rx.words < 1800; tries++) {
 							q[3] = (uint8_t)(0x60 + (tries & 0x1f));
 							s = r5q_slim_send(bam, ngd, tx_fifo, (volatile uint8_t *)tx_buf, tx_buf_pa, &next, q, 10);
 							if ((s & 0x08000000u) != 0) {
@@ -6629,6 +7206,7 @@ r5q_slim_v5(vm_offset_t slim, uint32_t mic)
 								}
 								if (memcmp(&m[4], zero, 6) != 0) {
 									la = m[10];
+									r5q_codec_la = la;
 									break;
 								}
 							}
@@ -6646,6 +7224,7 @@ r5q_slim_v5(vm_offset_t slim, uint32_t mic)
 							if ((s & 0x08000000u) == 0 && r5q_slim_wait(&rx, 0x0e, 0x11, m, 50, "v8: interface query") &&
 							    memcmp(&m[4], zero, 6) != 0) {
 								ifd_la = m[10];
+								r5q_codec_ifd_la = ifd_la;
 							}
 							tell("adsp: slim: v8: the interface device: %#x (send %#x)\n", ifd_la, s);
 							s = r5q_slim_send(bam, ngd, tx_fifo, (volatile uint8_t *)tx_buf, tx_buf_pa, &next, rq, 6);
@@ -6700,6 +7279,39 @@ r5q_slim_v5(vm_offset_t slim, uint32_t mic)
 			    *(volatile uint32_t *)(bam + SLIM_PIPE(3) + BAM_P_SW_OFSTS), words);
 		}
 		delay_for_interval(1, NSEC_PER_MSEC);
+	}
+	if (mic >= 7 && r5q_codec_la != 0xff) {
+		/* (Test 421) the link kept for the codec's set-up; redwood_mic.c's r5q mode (mic_rec=N) starts on it */
+		extern void redwood_mic_dsp_up(void);
+
+		r5q_link_rx.bam = bam;
+		r5q_link_rx.words_va = rx_words;
+		r5q_link_rx.fifo_va = rx_fifo;
+		r5q_link_rx.words_pa = rx_words_pa;
+		r5q_link_rx.posted = R5Q_SLIM_RX_WORDS;
+		r5q_link_rx.wrap = true;
+		r5q_link_rx.words = words;
+		r5q_link_rx.have = 0;
+		r5q_link_next = next;
+		r5q_link.bam = bam;
+		r5q_link.ngd = ngd;
+		r5q_link.tx_fifo = tx_fifo;
+		r5q_link.tx_buf = (volatile uint8_t *)tx_buf;
+		r5q_link.tx_buf_pa = tx_buf_pa;
+		r5q_link.next = &r5q_link_next;
+		r5q_link.rx = &r5q_link_rx;
+		r5q_link.la = r5q_codec_la;
+		r5q_link.ifd_la = r5q_codec_ifd_la;
+		r5q_link.page = -1;
+		r5q_link.tid = 0x80;
+		r5q_link_up = true;
+		tell("adsp: slim: the link kept for the microphone (codec %#x, interface %#x)\n", r5q_codec_la, r5q_codec_ifd_la);
+		lck_mtx_lock(&r5q_link_lock);
+		if (!r5q_cdc_init_once(&r5q_link)) {
+			tell("adsp: mic: the codec's one-time bring-up FAILED\n");
+		}
+		lck_mtx_unlock(&r5q_link_lock);
+		redwood_mic_dsp_up();
 	}
 	tell("adsp: slim: v5: done: NGD cfg %#x status %#x int %#x; %u messages; rx words %u, tx %u\n",
 	    *(volatile uint32_t *)(ngd + 0x0), *(volatile uint32_t *)(ngd + 0x4), *(volatile uint32_t *)(ngd + 0x14), nmsg, words,

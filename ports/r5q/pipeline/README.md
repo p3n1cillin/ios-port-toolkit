@@ -31,7 +31,16 @@ Notes:
 
 `phone-args.txt` is the standard boot-arg set. Change it when a feature's arg becomes part of every boot.
 
-## The standard image (2026-11-21, Test 418)
+## The standard image (2026-11-21, Test 424)
+
+`port/build/r5q-install-boot-standard.img` = r5q-install-boot-424.img: kernel t424, root test415, and `mic=7
+mic_rec=4` added to `phone-args.txt` (before: port/build/phone-args.before-t424.txt). On top of Test 418:
+- **The microphone works in iOS** ("iPhone Microphone"): the WCD9340 on SLIMbus, its capture path, channel 134 to the
+  DSP's SLIMBUS_0_TX, /dev/redwood-mic for the audio plug-in (wifi/WIFI-PLAN.md, Tests 419-424). Gains: boot-args
+  `mic_gain` (ADC1, default 8) and `mic_dgain` (dB, default 0). `record_test SECS [vibrate AT]` (phone tools)
+  records as an app does and prints the levels.
+
+## The standard image before (2026-11-21, Test 418)
 
 `port/build/r5q-install-boot-standard.img` = r5q-install-boot-418.img: kernel t418, root test415, `phone-args.txt`
 unchanged. On top of Test 416:

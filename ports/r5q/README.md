@@ -45,6 +45,11 @@ by init (`var_hfs=1`) in place of the 1.6 GB RAM filesystem; iOS reports "3.7 GB
 - **Wi-Fi and the network:** the kernel's own WLAN driver and WPA2. Safari loads pages. Location
   works by Wi-Fi.
 - **Sound and media:** speaker sound, ringtones, video playback.
+- **Microphone** (since Test 424, standard): the main microphone in iOS ("iPhone Microphone", built in). The
+  WCD9340 codec on SLIMbus (it had looked dead because our address query used the wrong message type, Test 419),
+  its capture path set as Android's driver sets it, SLIMbus channel 134 to the DSP's port SLIMBUS_0_TX, a DSP
+  record stream into `/dev/redwood-mic` and the iOS audio plug-in's input. Apps record through AVFoundation at
+  48 kHz. wifi/WIFI-PLAN.md, Tests 419-424.
 - **Hardware:** vibration and the flashlight.
 - **Apps:** apps built here are installed by iOS's own installer.
 - **Sensors:** accelerometer, gyroscope, magnetometer, light and proximity, from the sensors DSP started by the
@@ -81,10 +86,6 @@ by init (`var_hfs=1`) in place of the 1.6 GB RAM filesystem; iOS reports "3.7 GB
 
 **Not yet:**
 
-- **Microphone:** in progress. Since Test 419 the WCD9340 codec is on SLIMbus (logical address 0xcf; the earlier
-  silence was our ADDR_QUERY sent with the wrong message type) and its registers read over the bus (chip id 0x0108,
-  Test 420). Not yet: the codec's capture path, the SLIMbus channel, the DSP's record stream and iOS's input.
-  wifi/WIFI-PLAN.md, Tests 419-420.
 - **Metal:** there is no Metal device for iOS, so the map in Maps and live wallpapers are missing. The plugin entry
   point exists (wifi/METAL-FEASIBILITY.md); a Metal implementation over the GL path is a large project (AIR shaders).
 - **Radios:** cellular: in the standard boot (since Test 391) iOS's CommCenter runs on the phone's own modem: the
