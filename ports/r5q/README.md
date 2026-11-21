@@ -81,7 +81,10 @@ by init (`var_hfs=1`) in place of the 1.6 GB RAM filesystem; iOS reports "3.7 GB
 
 **Not yet:**
 
-- **Microphone:** the WCD9340 codec never enumerates on SLIMbus and is silent over SPI too (Tests 265-266). What is ruled out is in WIFI-PLAN, "Tests 237-240" and after.
+- **Microphone:** in progress. Since Test 419 the WCD9340 codec is on SLIMbus (logical address 0xcf; the earlier
+  silence was our ADDR_QUERY sent with the wrong message type) and its registers read over the bus (chip id 0x0108,
+  Test 420). Not yet: the codec's capture path, the SLIMbus channel, the DSP's record stream and iOS's input.
+  wifi/WIFI-PLAN.md, Tests 419-420.
 - **Metal:** there is no Metal device for iOS, so the map in Maps and live wallpapers are missing. The plugin entry
   point exists (wifi/METAL-FEASIBILITY.md); a Metal implementation over the GL path is a large project (AIR shaders).
 - **Radios:** cellular: in the standard boot (since Test 391) iOS's CommCenter runs on the phone's own modem: the

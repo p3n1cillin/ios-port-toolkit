@@ -115,3 +115,6 @@ table grew from 16 to 96).
 - `bsd/dev/redwood_wifi.c` (Tests 417-418): the station joins again by itself after a refused join or being sent away
   (a `wifi-rejoin` thread, 15 s to 5 min apart; an access point that refused us is passed over for 5 minutes);
   `kern.redwood.wifi_drop` to try it.
+- `bsd/dev/redwood_adsp.c` (Tests 419-420): the SLIMbus ADDR_QUERY is sent with message type 2 (destination-referred
+  user, header 0x4a) as Samsung's slim-msm-ngd.c does; the NGD's rx queue is read as whole messages
+  (`r5q_slim_wait`); the WCD9340's logical address, its interface device's, and its chip id read over the bus.

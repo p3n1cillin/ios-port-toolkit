@@ -1287,3 +1287,38 @@ run ends with the modem shut down through TZ, after asking it to stop over SMP2P
   - `wifi_drop 2`: the rejoin went to another access point of the same network (5 GHz, channel 40) on the first
     try.
   - **Standard image = r5q-install-boot-418.img.**
+
+## Test 419 (2026-11-21, kernel t419, root test415, `+mic=7`): THE MICROPHONE CODEC IS ON THE BUS
+
+- **The cause of Tests 190-362's refused ADDR_QUERY was our own header byte.** We sent `aa 0d ff tid ea...`: 0xaa is
+  rl 10 with **mt 5** (source-referred device class). Samsung's `drivers/slimbus/slim-msm-ngd.c` `ngd_get_laddr` sets
+  `txn.mt = SLIM_MSG_MT_DEST_REFERRED_USER` = **2** (`include/linux/slimbus/slimbus.h`: CORE 0, DEST_REFERRED_CLASS 1,
+  DEST_REFERRED_USER 2, SRC_REFERRED_CLASS 5, SRC_REFERRED_USER 6), so the byte is **0x4a**. The earlier "byte for
+  byte" comparisons had the type wrong: the code's own comment called mt 5 "destination referred user". The REPORT_SATELLITE
+  (0xc7, mt 6) was right all along, which is why the manager acked it.
+- With 0x4a, the manager **takes every query** (NGD status 0x1a40e: acked mc 0xd, nacked 0) and answers ADDR_REPLY:
+  `cb 0e ff 62 | 00 01 50 02 17 02 | cf`: mt 6, mc 0xe, tid, the WCD9340's enumeration address, and **logical address
+  0xcf**, the same as Android's saved boot log ("laddr 0xcf"). So the codec, its supplies, reset, clock and the DSP's
+  bus were fine. Everything after Test 249 that "ruled out" board causes was right, and the codec was never silent:
+  it was never asked properly.
+- The kernel's reply parser missed it (it continued a message left half-read in the outer loop, so every later
+  message was split wrong). Test 420 parses the rx queue as messages (`r5q_slim_wait`).
+- iOS came up normally (SpringBoard), no panic.
+- Next (Test 420): the interface device's address (00 00 50 02 17 02) and the codec's chip id over the bus
+  (REQUEST_VALUE mc 0x60 to 0xcf, element 0x800 + 0x21, 4 bytes: ec 0x821b, as `wcd9xxx_slim_read_device`; the reply is
+  REPLY_VALUE mc 0x64). After that: the codec's register set-up and its TX path (`wcd934x.c`), SLIMbus channels through
+  the DSP (DEFINE_CHAN / CONNECT_SRC user messages), an AFE SLIMBUS_0_TX port and an ASM record stream into iOS's audio.
+
+## Test 420 (2026-11-21, kernel t420, root test415, `+mic=7`): the codec's registers over SLIMbus
+
+- `r5q_slim_wait` reads the NGD's rx queue as whole messages (the length byte counts the message's bytes).
+- **First query answered:** `ADDR_REPLY cb 0e ff 61 | 00 01 50 02 17 02 | cf`: the WCD9340 at logical address 0xcf on
+  the first try, about 40 ms after its reset. **The interface device** (00 00 50 02 17 02) **at 0xce.**
+- **Register read works:** REQUEST_VALUE `06 60 cf 21 1b 82` (rl 6, mt 0, mc 0x60, to 0xcf, tid 0x21, ec 0x821b = 4
+  bytes from element 0x800 + 0x21) -> REPLY_VALUE `08 64 cf 21 | 01 00 08 01`: CHIP_ID_BYTE0-3 = 01 00 08 01, i.e.
+  **chip id 0x0108** (bytes 2-3), as Android's boot log reports for this codec. NGD status 0xc040e: acked mc 0x60.
+- iOS came up normally. The rx queue's 256 words are still posted once (10 used here).
+- Next: the codec's register set-up and capture path (tavil `wcd934x.c`: the page register, power-up, MCLK/RCO,
+  micbias, an ADC and decimator, a SLIMbus TX port), the SLIMbus channel through the DSP (DEFINE_CHAN / CONNECT_SRC
+  user messages to the manager), AFE SLIMBUS_0_TX and an ASM record stream into RedwoodAudio. Also: rx descriptors
+  re-posted as they are used.

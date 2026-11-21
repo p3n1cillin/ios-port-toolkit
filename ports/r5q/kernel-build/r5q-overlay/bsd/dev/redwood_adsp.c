@@ -6436,12 +6436,62 @@ r5q_wcd_spi_probe(void)
 	tell("adsp: wcd-spi: done; SE3 status %#x M_IRQ %#x\n", wspi_rd(0x40), wspi_rd(0x610));
 }
 
+/*
+ * (Test 420) The NGD's rx queue as messages: words are taken from the BAM's rx pipe (3) and put together by the
+ * length in the first byte. Waits up to ms for a message with message code mc (and transaction id tid, unless tid is
+ * 0) and copies it to out (48 bytes); every other message is logged. The state lives in r5q_slim_v5.
+ */
+struct r5q_slim_rx {
+	vm_offset_t bam;
+	volatile uint32_t *words_va;
+	uint32_t words, have, need, nmsg;
+	uint32_t msg[12];
+};
+
+static bool
+r5q_slim_wait(struct r5q_slim_rx *r, uint8_t mc, uint8_t tid, uint8_t *out, unsigned ms, const char *what)
+{
+	for (unsigned t = 0; t <= ms; t++) {
+		uint32_t at = (*(volatile uint32_t *)(r->bam + SLIM_PIPE(3) + BAM_P_SW_OFSTS) & 0xffff) / 8;
+
+		while (r->words < at && r->words < 256) {
+			uint32_t x = r->words_va[r->words++];
+			const uint8_t *mb = (const uint8_t *)r->msg;
+
+			if (r->have == 0) {
+				r->need = ((x & 0x1f) + 3) / 4;      /* the length field counts the message's bytes */
+				if (r->need == 0) {
+					r->need = 1;
+				}
+			}
+			if (r->have < 12) {
+				r->msg[r->have] = x;
+			}
+			if (++r->have < r->need) {
+				continue;
+			}
+			r->have = 0;
+			r->nmsg++;
+			if (mb[1] == mc && (tid == 0 || mb[3] == tid)) {
+				memcpy(out, mb, 48);
+				return true;
+			}
+			tell("adsp: slim: %s: message %u (other): %08x %08x %08x %08x\n", what, r->nmsg, r->msg[0], r->msg[1],
+			    r->msg[2], r->msg[3]);
+		}
+		if (t < ms) {
+			delay_for_interval(1, NSEC_PER_MSEC);
+		}
+	}
+	return false;
+}
+
 static void
 r5q_slim_v5(vm_offset_t slim, uint32_t mic)
 {
 	extern bool redwood_r5q_rpmh_enable(const char *id);
 	static const uint8_t report[] = { 0xc7, 0x01, 0xff, 0xd9, 0xc5, 0x01, 0x01 };
-	static const uint8_t query[] = { 0xaa, 0x0d, 0xff, 0x51, 0x00, 0x01, 0x50, 0x02, 0x17, 0x02, 0x00 };
+	static const uint8_t query[] = { 0x4a, 0x0d, 0xff, 0x51, 0x00, 0x01, 0x50, 0x02, 0x17, 0x02, 0x00 };
 	vm_offset_t bam = ml_io_map_unmappable(0x17184000UL, 0x2c000, VM_WIMG_IO), ngd = slim + 0x1000;
 	volatile uint32_t *rx_fifo, *tx_fifo, *rx_words, *tx_buf, *gpio;
 	uint64_t rx_fifo_pa, tx_fifo_pa, rx_words_pa, tx_buf_pa;
@@ -6544,19 +6594,72 @@ r5q_slim_v5(vm_offset_t slim, uint32_t mic)
 						r5q_wcd_spi_probe();    /* (Test 265) the codec alive? over SPI, not SLIMbus */
 					}
 					memcpy(q, query, sizeof(q));
-					for (tries = 1; tries <= 300; tries++) {
-						q[3] = (uint8_t)(0x60 + tries);
-						s = r5q_slim_send(bam, ngd, tx_fifo, (volatile uint8_t *)tx_buf, tx_buf_pa, &next, q, 10);
-						if ((s & 0x08000000u) == 0) {
-							break;
+					/*
+					 * (Test 419) The query's header was 0xaa (mt 5, source-referred class) until Test 418; Samsung's
+					 * slim-msm-ngd.c ngd_get_laddr sends mt 2 (SLIM_MSG_MT_DEST_REFERRED_USER): 0x4a. With it the
+					 * manager answers ADDR_REPLY (mt 6, mc 0xe): tid, the address (all zero = not known yet), the
+					 * logical address: Test 419 saw "cb 0e ff 62 00 01 50 02 17 02 cf" -- the WCD9340 at 0xcf, as in
+					 * Android's log. Like wcd9xxx_slim_get_laddr, ask again until the codec is known. The rx queue's
+					 * 256 words are posted once, so stop asking before they run out.
+					 * (Test 420) Then the codec's interface device's address, and the codec's chip id read over the
+					 * bus (REQUEST_VALUE to 0x800 + 0x21, 4 bytes, as wcd9xxx_slim_read_device: the reply is
+					 * REPLY_VALUE, mc 0x64, tid, the bytes).
+					 */
+					{
+						static const uint8_t zero[6] = { 0 };
+						struct r5q_slim_rx rx = { .bam = bam, .words_va = rx_words, .words = words };
+						uint8_t la = 0xff, ifd_la = 0xff, m[48];
+						uint32_t replies = 0;
+
+						for (tries = 1; tries <= 100 && rx.words < 200; tries++) {
+							q[3] = (uint8_t)(0x60 + (tries & 0x1f));
+							s = r5q_slim_send(bam, ngd, tx_fifo, (volatile uint8_t *)tx_buf, tx_buf_pa, &next, q, 10);
+							if ((s & 0x08000000u) != 0) {
+								if (tries % 50 == 0) {
+									r5q_slim_status("v7: still refused", ngd);
+								}
+								delay_for_interval(10, NSEC_PER_MSEC);
+								continue;
+							}
+							if (r5q_slim_wait(&rx, 0x0e, q[3], m, 30, "v8: query")) {
+								replies++;
+								if (replies <= 3 || memcmp(&m[4], zero, 6) != 0) {
+									tell("adsp: slim: v8: try %u: ADDR_REPLY %02x %02x %02x %02x | %02x %02x %02x %02x %02x %02x | %02x\n",
+									    tries, m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8], m[9], m[10]);
+								}
+								if (memcmp(&m[4], zero, 6) != 0) {
+									la = m[10];
+									break;
+								}
+							}
+							delay_for_interval(5, NSEC_PER_MSEC);
 						}
-						if (tries % 50 == 0) {
-							r5q_slim_status("v7: still refused", ngd);
+						tell("adsp: slim: v8: ADDR_QUERY (codec) %s after %u tries: %#x; %u replies; logical address %#x%s\n",
+						    (s & 0x08000000u) ? "STILL REFUSED" : "TAKEN", tries, s, replies, la,
+						    la != 0xff ? " -- THE CODEC IS ON THE BUS" : "");
+						if (la != 0xff) {
+							uint8_t rq[6] = { 0x06, 0x60, la, 0x21, 0x1b, 0x82 };   /* REQUEST_VALUE, 4 bytes at 0x821 */
+
+							q[3] = 0x11;
+							q[5] = 0x00;            /* 00 00 50 02 17 02: the codec's interface device */
+							s = r5q_slim_send(bam, ngd, tx_fifo, (volatile uint8_t *)tx_buf, tx_buf_pa, &next, q, 10);
+							if ((s & 0x08000000u) == 0 && r5q_slim_wait(&rx, 0x0e, 0x11, m, 50, "v8: interface query") &&
+							    memcmp(&m[4], zero, 6) != 0) {
+								ifd_la = m[10];
+							}
+							tell("adsp: slim: v8: the interface device: %#x (send %#x)\n", ifd_la, s);
+							s = r5q_slim_send(bam, ngd, tx_fifo, (volatile uint8_t *)tx_buf, tx_buf_pa, &next, rq, 6);
+							if ((s & 0x08000000u) == 0 && r5q_slim_wait(&rx, 0x64, 0x21, m, 50, "v8: chip id")) {
+								tell("adsp: slim: v8: CODEC CHIP ID (0x21-0x24): %02x %02x %02x %02x (reply %02x %02x %02x %02x)\n",
+								    m[4], m[5], m[6], m[7], m[0], m[1], m[2], m[3]);
+							} else {
+								tell("adsp: slim: v8: the chip id read: no reply (send %#x)\n", s);
+								r5q_slim_status("v8: after the read", ngd);
+							}
 						}
-						delay_for_interval(10, NSEC_PER_MSEC);
+						words = rx.words;
+						nmsg += rx.nmsg;
 					}
-					tell("adsp: slim: v7: ADDR_QUERY (codec) %s after %u tries (%u ms): %#x\n",
-					    (s & 0x08000000u) ? "STILL REFUSED" : "TAKEN", tries, tries * 10, s);
 					r5q_slim_status("v7: after the queries", ngd);
 					have = 0;
 					continue;
@@ -6566,7 +6669,7 @@ r5q_slim_v5(vm_offset_t slim, uint32_t mic)
 				tell("adsp: slim: v5: REPORT_SATELLITE: %#x%s; ADDR_QUERY: %#x%s\n", s1, (s1 & 0x08000000u) ? " INVALID" :
 				    (s1 & 0x80000000u) ? " sent" : "", s2, (s2 & 0x08000000u) ? " INVALID" : (s2 & 0x80000000u) ? " sent" : "");
 				if (mic >= 6) {
-					static const uint8_t ifd[] = { 0xaa, 0x0d, 0xff, 0x52, 0x00, 0x00, 0x50, 0x02, 0x17, 0x02, 0x00 };
+					static const uint8_t ifd[] = { 0x4a, 0x0d, 0xff, 0x52, 0x00, 0x00, 0x50, 0x02, 0x17, 0x02, 0x00 };
 					uint32_t cfg = *(volatile uint32_t *)(ngd + 0x0);
 
 					r5q_slim_status("after the queued query", ngd);
@@ -6728,7 +6831,7 @@ r5q_slim_stage2(vm_offset_t slim)
 		 * (Test 191, mic=4) The WCD9340 out of reset, then asked for on the bus. Its 1.8 V supplies are PM8150 S4 (always
 		 * on), its 3.3 V PM8150L BOB (on from the start); its clock LN_BB_CLK2 ("lnbclka2", RPMh VRM: enabled here); its
 		 * reset GPIO143 (south tile 0x03d00000, "cdc_reset_active": gpio, 8 mA, pull down, out high). Then
-		 * ADDR_QUERY (mt 5 "destination referred user", mc 0xd, to the manager) for its two devices -- 00 01 50 02 17 02
+		 * ADDR_QUERY (mt 2 "destination referred user"; Test 419: was sent as mt 5, mc 0xd, to the manager) for its two devices -- 00 01 50 02 17 02
 		 * (the codec) and 00 00 50 02 17 02 (its interface) -- every 200 ms for 4 s, the answers (ADDR_REPLY, mc 0xe:
 		 * the address back and its logical address) in the rx queue.
 		 */
@@ -6762,12 +6865,12 @@ r5q_slim_stage2(vm_offset_t slim)
 					uint8_t bytes[12], len, flags_int;
 					bool irq_en;
 				} v[] = {
-					{ "A query", { 0xaa, 0x0d, 0xff, 0x41, 0x00, 0x01, 0x50, 0x02, 0x17, 0x02 }, 12, 1, false },
-					{ "B query, EOT only", { 0xaa, 0x0d, 0xff, 0x42, 0x00, 0x01, 0x50, 0x02, 0x17, 0x02 }, 12, 0, false },
-					{ "C query, 11 bytes", { 0xaa, 0x0d, 0xff, 0x43, 0x00, 0x01, 0x50, 0x02, 0x17, 0x02 }, 11, 0, false },
+					{ "A query", { 0x4a, 0x0d, 0xff, 0x41, 0x00, 0x01, 0x50, 0x02, 0x17, 0x02 }, 12, 1, false },
+					{ "B query, EOT only", { 0x4a, 0x0d, 0xff, 0x42, 0x00, 0x01, 0x50, 0x02, 0x17, 0x02 }, 12, 0, false },
+					{ "C query, 11 bytes", { 0x4a, 0x0d, 0xff, 0x43, 0x00, 0x01, 0x50, 0x02, 0x17, 0x02 }, 11, 0, false },
 					{ "D satellite report", { 0xc7, 0x01, 0xff, 0xd9, 0xc5, 0x01, 0x01 }, 8, 0, false },
-					{ "E query, interrupts on", { 0xaa, 0x0d, 0xff, 0x44, 0x00, 0x01, 0x50, 0x02, 0x17, 0x02 }, 12, 0, true },
-					{ "F query, interface", { 0xaa, 0x0d, 0xff, 0x45, 0x00, 0x00, 0x50, 0x02, 0x17, 0x02 }, 12, 0, true },
+					{ "E query, interrupts on", { 0x4a, 0x0d, 0xff, 0x44, 0x00, 0x01, 0x50, 0x02, 0x17, 0x02 }, 12, 0, true },
+					{ "F query, interface", { 0x4a, 0x0d, 0xff, 0x45, 0x00, 0x00, 0x50, 0x02, 0x17, 0x02 }, 12, 0, true },
 				};
 
 				for (unsigned k = 0; k < sizeof(v) / sizeof(v[0]); k++) {
@@ -6819,8 +6922,8 @@ r5q_slim_stage2(vm_offset_t slim)
 					if (tx_at + 16 > 0x4000) {
 						break;
 					}
-					/* header: rl 10 (11 less one), mt 5, mc 0xd, logical, to 0xff; then tid, then the address */
-					b[0] = 0xaa;
+					/* header: rl 10 (11 less one), mt 2, mc 0xd, logical, to 0xff; then tid, then the address */
+					b[0] = 0x4a;   /* (Test 419) mt 2: was 0xaa (mt 5) */
 					b[1] = 0x0d;
 					b[2] = 0xff;
 					b[3] = (uint8_t)tid++;
