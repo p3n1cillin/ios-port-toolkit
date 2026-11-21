@@ -1289,3 +1289,4 @@ every frame below has **0.00%**, warm or cold, which is the gate.
   108..180 and settled about 132, the far end, for the ceiling. `cam_af=0` turns it off.
 - Open: the OIS (RUMBA S4) is left alone (powered, not started); the lens's code range vs distance (AF_FAR 768 is the
   POCO's); a close-up test by the owner.
+- **Owner check (2026-11-21, Test 429 standard):** a close-up with tap-to-focus in the Camera app "works pretty well".
