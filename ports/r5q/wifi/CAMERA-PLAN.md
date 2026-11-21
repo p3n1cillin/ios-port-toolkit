@@ -1267,3 +1267,6 @@ every frame below has **0.00%**, warm or cold, which is the gate.
   **The gate and the warm-up are gone.** The earlier "fixes" for the dim picture (Tests 402-404: pixel PLL 450, the
   output divider, line length 8000) were chasing this; they stay (inside the sensor's limits, no harm).
 - Standard image = Test 427. Open: the Camera app's auto-exposure and a lit scene, now that the sensor sees.
+- **The Camera app after the fix (2026-11-21, Test 427, screenshot port/build/cam427.png, local):** the back camera's preview
+  shows the room (ceiling, wall, a poster, the light) with a natural exposure and colour, where it was streaky noise
+  at maximum exposure before. Open: focus (no autofocus yet), the macro sensor, the full-resolution modes.
