@@ -164,7 +164,7 @@ static TUNABLE(uint32_t, gOnTheBeat, "fb_beat", 1);
  * drawRows()). Three by default: a frame is in the panel's memory 3 ms after its turn instead of 9
  * to 10 (the phone, 15 October; fb_threads=1 is how it was).
  */
-static TUNABLE(uint32_t, gThreads, "fb_threads", 3);
+static TUNABLE(uint32_t, gThreads, "fb_threads", 4);
 #define SWAP_QUEUE              2                       /* frames that may wait for the panel at most (fb_queue) */
 static TUNABLE(uint32_t, gQueue, "fb_queue", 2);
 static inline unsigned
@@ -513,9 +513,16 @@ static TUNABLE(uint32_t, gSleepTest, "fb_sleeptest", 0);
 static volatile uint32_t *      gDsi;
 static volatile uint8_t *       gDsiBuf;
 static volatile uint32_t *      gTePin;
-static bool                     gPanelAsleep;
+static volatile bool            gPanelAsleep;
 static uint32_t                 gSavedAutorefresh;
 static IOLock *                 gPowerLock;
+
+extern "C" bool redwood_display_asleep(void);
+extern "C" bool
+redwood_display_asleep(void)
+{
+	return gPanelAsleep;
+}
 
 /*
  * One DSI packet through the command DMA: `bytes' as the firmware lays them out (header bytes 1, 2, 0, flags, then
@@ -595,8 +602,8 @@ panelBrightness(uint32_t fraction, const char * why)
 		fraction = 65536;
 	}
 	level = fraction * 0x3ff / 65536;
-	if (level < 0x3ff / 10) {
-		level = 0x3ff / 10;
+	if (level < 0x18) {
+		level = 0x18;
 	}
 	if (!gBrightArg || gDsi == NULL || gPowerLock == NULL || level == gBrightSent) {
 		return;
@@ -1452,7 +1459,7 @@ AppleARMBacklight::setProperties(OSObject * properties)
 			uint64_t v = 0;
 			bool number = backlightValue(value, &v);
 
-			if (told++ < 300) {
+			if (told++ < 12) {
 				redwood_tl("fb: backlight: %s sets %s = %s%llu\n", who, key->getCStringNoCopy(), number ? "" :
 				    value ? value->getMetaClass()->getClassName() : "null", number ? v : 0);
 			}
@@ -1775,11 +1782,19 @@ IOMobileFramebuffer::drawRows(const RowJob * job, int32_t y0, int32_t y1, uint32
 				uint32_t first = fColumn[cx0], last = fColumn[cx1 - 1] + 1 < (uint32_t) sw ? fColumn[cx1 - 1] + 1 : fColumn[cx1 - 1];
 
 				uint32_t * __restrict mixed = blendRow;
+				uint32_t inv = 256 - weight;
 
 				for (uint32_t c = first; c <= last; c++) {
 					uint32_t a = upper[c], b = lower[c];
 
-					mixed[c] = a == b ? a : blend(a, b, weight);           /* (most of a screen is the same as next to it) */
+					if (a == b) {
+						mixed[c] = a;
+					} else {
+						uint32_t rb = (((a & 0x00ff00ffu) * inv + (b & 0x00ff00ffu) * weight) >> 8) & 0x00ff00ffu;
+						uint32_t ga = (((a >> 8) & 0x00ff00ffu) * inv + ((b >> 8) & 0x00ff00ffu) * weight) & 0xff00ff00u;
+
+						mixed[c] = rb | ga;
+					}
 				}
 				from = blendRow;
 			}
@@ -1803,13 +1818,24 @@ IOMobileFramebuffer::drawRows(const RowJob * job, int32_t y0, int32_t y1, uint32
 		if (filter) {
 			const uint32_t * __restrict column = fColumn + cx0;
 			const uint16_t * __restrict weights = fColumnWeight + cx0;
-			uint32_t * __restrict out = to + cx0;
+			uint32_t * __restrict out = blendRow + sw;
+			uint32_t n = (uint32_t) (cx1 - cx0);
 
-			for (uint32_t i = 0, n = (uint32_t) (cx1 - cx0); i < n; i++) {
-				uint32_t c = column[i], w = weights[i], a = from[c];
+			for (uint32_t i = 0; i < n; i++) {
+				uint32_t c = column[i], w = weights[i];
+				uint32_t a = from[c], b = from[c + (w != 0)];
 
-				out[i] = w == 0 || a == from[c + 1] ? a : blend(a, from[c + 1], w);
+				if (w == 0 || a == b) {
+					out[i] = a;
+				} else {
+					uint32_t inv = 256 - w;
+					uint32_t rb = (((a & 0x00ff00ffu) * inv + (b & 0x00ff00ffu) * w) >> 8) & 0x00ff00ffu;
+					uint32_t ga = (((a >> 8) & 0x00ff00ffu) * inv + ((b >> 8) & 0x00ff00ffu) * w) & 0xff00ff00u;
+
+					out[i] = rb | ga;
+				}
 			}
+			memcpy(to + cx0, out, (size_t) n * 4);
 		} else {
 			for (int32_t x = cx0; x < cx1; x++) {
 				to[x] = from[fColumn[x]];
@@ -1892,8 +1918,9 @@ IOMobileFramebuffer::drawLayer(MiniIOSurface * s, const int32_t * src, const int
 	if (px1 <= px0 || py1 <= py0) {
 		return;
 	}
-	/* (blending, a row of the picture mixed from two: room for it, for every one who draws rows) */
-	if (filter && fBlendRowSize < (uint32_t) sw) {
+	/* (blending: sw pixels for vertical mix + fPanelWidth pixels for cached horizontal row before burst memcpy) */
+	uint32_t needRow = (uint32_t) sw + fPanelWidth;
+	if (filter && fBlendRowSize < needRow) {
 		if (fBlendRow != NULL) {
 			IODelete(fBlendRow, uint32_t, fBlendRowSize);
 		}
@@ -1902,7 +1929,7 @@ IOMobileFramebuffer::drawLayer(MiniIOSurface * s, const int32_t * src, const int
 				IODelete(fHelperBlend[i], uint32_t, fBlendRowSize);
 			}
 		}
-		fBlendRowSize = (uint32_t) sw;
+		fBlendRowSize = needRow;
 		fBlendRow = IONew(uint32_t, fBlendRowSize);
 		for (unsigned i = 0; i + 1 < fThreads; i++) {
 			fHelperBlend[i] = IONew(uint32_t, fBlendRowSize);

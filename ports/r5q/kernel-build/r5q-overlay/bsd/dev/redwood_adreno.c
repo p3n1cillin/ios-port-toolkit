@@ -338,7 +338,7 @@ static const struct adreno_board {
 	 * the later steps are checked.
 	 */
 	{ "r5q", false, false, 0x10000, 0x06040001, "a640_zap.mdt", "a640_zap.b02", "a640_gmu.bin", "a630_sqe.fw",
-	  { { 257000, 64 }, { 345000, 128 }, { 427000, 192 } }, 1, 0x8c1fe000, 1024 * 1024, 15, 0x00200200,
+	  { { 345000, 128 }, { 427000, 192 }, { 499000, 256 } }, 1, 0x8c1fe000, 1024 * 1024, 15, 0x00200200,
 	  false, 0x401, 0x10000000 },
 }, *board;
 

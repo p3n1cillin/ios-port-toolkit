@@ -60,10 +60,15 @@
  * into reset. Nothing is written anywhere but to the chip's registers and its RAM.
  */
 #include <kern/clock.h>
+#include <kern/locks.h>
 #include <kern/thread.h>
 #include <libkern/libkern.h>
 #include <mach/mach_types.h>
 #include <machine/machine_routines.h>
+
+static LCK_GRP_DECLARE(haptic_lock_group, "redwood-haptic");
+static LCK_MTX_DECLARE(haptic_wake_lock, &haptic_lock_group);
+static int haptic_wake_chan;
 #include <pexpert/pexpert.h>
 #include <miscfs/devfs/devfs.h>
 #include <sys/conf.h>
@@ -938,6 +943,9 @@ haptic_write(__unused dev_t dev, struct uio *uio, __unused int ioflag)
 			if (peak > heard_peak) {
 				heard_peak = peak;
 			}
+			lck_mtx_lock(&haptic_wake_lock);
+			wakeup(&haptic_wake_chan);
+			lck_mtx_unlock(&haptic_wake_lock);
 		} else {
 			quiet_us = now_us();
 		}
@@ -967,6 +975,9 @@ redwood_haptic_pretend(uint32_t peak)
 	if (peak > heard_peak) {
 		heard_peak = peak;
 	}
+	lck_mtx_lock(&haptic_wake_lock);
+	wakeup(&haptic_wake_chan);
+	lck_mtx_unlock(&haptic_wake_lock);
 }
 
 static int
@@ -1205,7 +1216,15 @@ r5q_serve(void)
 				}
 			}
 		}
-		wait_ms(2);
+		if (!r5q_on && !active && !broken) {
+			lck_mtx_lock(&haptic_wake_lock);
+			if (!broken && (heard_us == 0 || now_us() - heard_us >= ACTIVE_US)) {
+				msleep(&haptic_wake_chan, &haptic_wake_lock, PZERO, "r5q-haptic-idle", NULL);
+			}
+			lck_mtx_unlock(&haptic_wake_lock);
+		} else {
+			wait_ms(2);
+		}
 	}
 	r5q_motor(false, 0);
 	say("haptic: the motor is given up on (%u played, %u of them longer than a tap, %u cut)\n", taps, loops, capped);

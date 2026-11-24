@@ -34,5 +34,7 @@ rm -rf "$T"
 # src/camera_isp.c) -- from source too: the root carried prebuilt/userland's from 2026-11-15, and the exposure fixes
 # for the back camera (camera_isp.c, isp_ae) would never have reached it. The SDK's clang and lld, as build.sh's $DYN.
 SDK=${SDK:-$IOS_WORK/sdks-source/iPhoneOS16.5.sdk}
-clang -target arm64-apple-ios16.5 -isysroot $SDK -fuse-ld=lld -O2 -dynamiclib -install_name /redwood/lib/libredwood-media.dylib 	-framework CoreFoundation -framework CoreMedia -framework CoreVideo -framework IOSurface -lobjc -I$U/src 	-o $OUT/libredwood-media.dylib $U/src/inject_media.c $U/src/camera_device.c $U/src/camera_isp.c
+OH_INC=${OH_INC:-$IOS_WORK/openh264-ios/src/codec/api/wels}
+OH_LIB=${OH_LIB:-$IOS_WORK/openh264-ios/libopenh264_enc.a}
+clang -target arm64-apple-ios16.5 -isysroot $SDK -fuse-ld=lld -O2 -dynamiclib -install_name /redwood/lib/libredwood-media.dylib -framework CoreFoundation -framework CoreMedia -framework CoreVideo -framework IOSurface -framework VideoToolbox -lc++ -lobjc -I$U/src -I$OH_INC -o $OUT/libredwood-media.dylib $U/src/inject_media.c $U/src/camera_device.c $U/src/camera_isp.c $U/src/vt_h264_enc.c $OH_LIB
 echo "build_init: $OUT/libredwood-media.dylib ($(stat -c %s $OUT/libredwood-media.dylib) bytes)"

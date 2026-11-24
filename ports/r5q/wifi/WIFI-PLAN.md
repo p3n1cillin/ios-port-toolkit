@@ -1375,3 +1375,8 @@ Code in place, untested (paused for the night):
 - **Owner check (2026-11-21, Test 424 standard):** a Voice Memos recording played back "sounds good". The microphone is done;
   open only: A/V sync in camera video (MEMORY-PLAN.md) and the sub/3rd microphones (ADC3/ADC4) for stereo or noise
   cancellation.
+
+- **Test 434 (2026-11-23, `kernel t434`, `root test434`, standard, `fbscale=3`):**
+  - **SLPI & sensors:** Magnetometer calibration active (`slpi: see: mag_cal 1`); `cm_rate`: `a=90.7/s, g=87.0/s, m=50.0/s, d=88.7/s`.
+  - **Power & display:** Fixed `phone.py charger` kernel S2MU106 fuel-gauge path (`SOC 89.60 %, 4245 mV, 321 mA, capacity 4410 mAh learned`) and enabled OLED low brightness.
+  - **Native `@3x` Retina benchmark (`fbscale=3`, kept in `phone-args.txt`):** `mgq` reports `main-screen-width = 1125`, `main-screen-height = 2436`, `main-screen-scale = 3`; `memq` `memsize 6144 MB`, `memorystatus_level 72%`, `free 3449 MB`, `201` processes, footprint `1150 MB` (`@2x` baseline earlier in Test 434: `memorystatus_level 76%`, `free 3799 MB`, `180` processes, footprint `983 MB`). While scrolling Settings, `fps_test` hit `55.7`, `55.7`, `59.8`, `59.9 frames/s` (8 s average `33.7 frames/s` including idle tail), and `klog` measured `266 frames in 5532 ms (48 a second)` with `2986 us` each in the driver (`95 in 100 under 18 ms`, 0 swaps waited/gave up); Camera open/preview measured `243 frames in 5005 ms (48 a second)`, `5503 us` in driver. Lock, Home, Settings, FaceTime, and Camera screenshots fill `1080x2400` cleanly with accurate touch, 0 GPU faults (`adreno` 427 MHz), and 0 CrashReporter logs.

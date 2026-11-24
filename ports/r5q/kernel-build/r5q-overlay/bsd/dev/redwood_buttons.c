@@ -603,7 +603,17 @@ buttons_thread(void *parameter, __unused wait_result_t result)
 			printf("buttons: more than half of %llu reads have failed: giving up\n", bus.reads);
 			break;
 		}
-		delay_for_interval(POLL_MS, NSEC_PER_MSEC);
+		/* (Test 440) Screen-off deep-idle backoff: 16 ms (62.5 Hz) -> 64 ms (15.6 Hz) while panel sleeps and no key is held */
+		{
+			extern bool redwood_display_asleep(void);
+
+			if (redwood_display_asleep() && !power.last && !volume_up.last && !volume_down.last) {
+				tick += 3;
+				delay_for_interval(POLL_MS * 4, NSEC_PER_MSEC);
+			} else {
+				delay_for_interval(POLL_MS, NSEC_PER_MSEC);
+			}
+		}
 	}
 out:
 	if (steps < 5) {

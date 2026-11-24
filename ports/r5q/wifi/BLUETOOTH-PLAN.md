@@ -461,3 +461,4 @@ expects, answering or skipping Apple's chip-specific commands. That needs to be 
   - The dynamic store's ComputerName still reads empty, yet bluetoothd has the name. It probably reads it through
     the same SCPreferences path at start.
   - For a fresh install, the key would have to be in the /var template; for now it lives in the saved store.
+- **Test 434 (2026-11-23, `kernel t434`, `root test434`, standard):** `BTServer` profile daemons enabled; `bt_test` reports `CoreBluetooth: state 5` with 0 Bluetooth CrashReporter logs.

@@ -1,0 +1,226 @@
+diff --git a/userland/src/audio_plugin.c b/userland/src/audio_plugin.c
+index 4bef2dd..7b17ce8 100644
+--- a/userland/src/audio_plugin.c
++++ b/userland/src/audio_plugin.c
+@@ -230,7 +230,10 @@ static struct device devices[] = {
+  * has them as a data source control on the input, which the HAL answers those properties from. There
+  * is one microphone here, at the bottom: 'imic', the iPhone's internal (bottom) one.
+  */
+-#define MIC_SOURCE              'imic'
++#define MIC_SOURCE_BOTTOM       'imic'
++#define MIC_SOURCE_FRONT        'fmic'
++#define MIC_SOURCE_TOP          'smic'
++static UInt32 mic_source = MIC_SOURCE_BOTTOM;
+ #define MANUFACTURER            CFSTR("redwood")
+ /* how often a device says where its clock is, in frames: also the largest I/O buffer the HAL will use */
+ #define TIMESTAMP_PERIOD        16384
+@@ -469,12 +472,18 @@ property(AudioObjectID object, const AudioObjectPropertyAddress *address, UInt32
+ 			WORD(0);
+ 			break;
+ 		case kAudioSelectorControlPropertyCurrentItem:
++			WORD(mic_source);
++			break;
+ 		case kAudioSelectorControlPropertyAvailableItems:
+-			WORD(MIC_SOURCE);
++			LIST(MIC_SOURCE_BOTTOM);
++			LIST(MIC_SOURCE_FRONT);
++			LIST(MIC_SOURCE_TOP);
+ 			break;
+ 		case kAudioSelectorControlPropertyItemName:
+-			if (qualifier_size == sizeof(UInt32) && qualifier != NULL && *(const UInt32 *)qualifier == MIC_SOURCE) {
+-				STRING(CFSTR("Bottom"));
++			if (qualifier_size == sizeof(UInt32) && qualifier != NULL) {
++				UInt32 q = *(const UInt32 *)qualifier;
++				STRING(q == MIC_SOURCE_BOTTOM ? CFSTR("Bottom") : q == MIC_SOURCE_FRONT ? CFSTR("Front") :
++				    q == MIC_SOURCE_TOP ? CFSTR("Top") : CFSTR(""));
+ 			} else {
+ 				STRING(CFSTR(""));
+ 			}
+@@ -798,9 +807,30 @@ set_property_data(AudioServerPlugInDriverRef driver, AudioObjectID object, pid_t
+ 		return 0;
+ 	}
+ 	if (object == OBJECT_CODEC_SOURCE) {
+-		/* the one microphone there is */
+-		return size == sizeof(UInt32) ? (*(const UInt32 *)data == MIC_SOURCE ? 0 : kAudioHardwareIllegalOperationError) :
+-		       kAudioHardwareBadPropertySizeError;
++		AudioObjectPropertyAddress changed = { kAudioSelectorControlPropertyCurrentItem, kAudioObjectPropertyScopeGlobal, 0 };
++		UInt32 wanted;
++		int fd;
++
++		if (size != sizeof(UInt32)) {
++			return kAudioHardwareBadPropertySizeError;
++		}
++		wanted = *(const UInt32 *)data;
++		if (wanted != MIC_SOURCE_BOTTOM && wanted != MIC_SOURCE_FRONT && wanted != MIC_SOURCE_TOP) {
++			return kAudioHardwareIllegalOperationError;
++		}
++		pthread_mutex_lock(&lock);
++		mic_source = wanted;
++		fd = open("/dev/redwood-mic", O_WRONLY | O_NONBLOCK);
++		if (fd >= 0) {
++			uint8_t sel = (wanted == MIC_SOURCE_FRONT || wanted == MIC_SOURCE_TOP) ? 1 : 0;
++			(void)write(fd, &sel, 1);
++			close(fd);
++		}
++		pthread_mutex_unlock(&lock);
++		if (host != NULL) {
++			host->PropertiesChanged(host, OBJECT_CODEC_SOURCE, 1, &changed);
++		}
++		return 0;
+ 	}
+ 	if (address->mSelector == kAudioStreamPropertyIsActive) {
+ 		if (size != sizeof(UInt32)) {
+diff --git a/userland/src/inject_media.c b/userland/src/inject_media.c
+index 0b3f52d..51cc381 100644
+--- a/userland/src/inject_media.c
++++ b/userland/src/inject_media.c
+@@ -37,7 +37,9 @@
+ #include <CoreFoundation/CoreFoundation.h>
+ #include <CoreMedia/CoreMedia.h>
+ #include <CoreVideo/CoreVideo.h>
++#include "vt_h264_enc.h"
+ #include <dlfcn.h>
++#include <errno.h>
+ #include <fcntl.h>
+ #include <mach-o/dyld.h>
+ #include <mach/mach_time.h>
+@@ -47,6 +49,7 @@
+ #include <stdarg.h>
+ #include <stdbool.h>
+ #include <stdio.h>
++#include <stdlib.h>
+ #include <string.h>
+ #include <sys/sysctl.h>
+ #include <unistd.h>
+@@ -637,6 +640,110 @@ image_added(__unused const struct mach_header *header, __unused intptr_t image_s
+ 	}
+ }
+ 
++/* Preserve the user's completed ReplayKit recording as a standalone DCIM file
++ * before the normal Photos export can move its source. Photos owns its catalogue. */
++#include <sys/stat.h>
++
++static IMP orig_rp_export_photos;
++
++static void
++r5q_copy_mp4_to_dcim(id video_url)
++{
++	static const char directory[] = "/private/var/mobile/Media/DCIM/100APPLE";
++	char staging[] = "/private/var/mobile/Media/DCIM/100APPLE/.r5q-replay-XXXXXX";
++	struct stat info;
++	uint8_t buffer[32768];
++	const char *source;
++	int input, output;
++	bool complete = false;
++
++	if (video_url == nil) {
++		return;
++	}
++	id path = ((id (*)(id, SEL))objc_msgSend)(video_url, sel_registerName("path"));
++	source = path == nil ? NULL : ((const char *(*)(id, SEL))objc_msgSend)(path, sel_registerName("UTF8String"));
++	if (source == NULL) {
++		return;
++	}
++	input = open(source, O_RDONLY | O_NOFOLLOW | O_NONBLOCK);
++	if (input < 0) {
++		return;
++	}
++	if (fstat(input, &info) != 0 || !S_ISREG(info.st_mode) || info.st_size <= 0) {
++		close(input);
++		return;
++	}
++	(void)mkdir("/private/var/mobile/Media/DCIM", 0755);
++	(void)mkdir(directory, 0755);
++	output = mkstemp(staging);
++	if (output < 0) {
++		close(input);
++		return;
++	}
++
++	off_t remaining = info.st_size;
++	while (remaining > 0) {
++		size_t want = remaining < (off_t)sizeof(buffer) ? (size_t)remaining : sizeof(buffer);
++		ssize_t count = read(input, buffer, want);
++		if (count < 0 && errno == EINTR) {
++			continue;
++		}
++		if (count <= 0) {
++			break;
++		}
++		ssize_t offset = 0;
++		while (offset < count) {
++			ssize_t written = write(output, buffer + offset, (size_t)(count - offset));
++			if (written < 0 && errno == EINTR) {
++				continue;
++			}
++			if (written <= 0) {
++				goto finish;
++			}
++			offset += written;
++		}
++		remaining -= count;
++	}
++	complete = remaining == 0;
++finish:
++	close(input);
++	if (complete) {
++		(void)fchown(output, 501, 501);
++		complete = fsync(output) == 0;
++	}
++	if (close(output) != 0) {
++		complete = false;
++	}
++	if (complete) {
++		/* Publish a complete file atomically. link() never replaces an existing asset. */
++		const char *leaf = strrchr(staging, '/');
++		char destination[128];
++		snprintf(destination, sizeof(destination), "%s/R5Q_Replay_%s.MP4", directory, leaf + sizeof("/.r5q-replay-") - 1);
++		if (link(staging, destination) == 0) {
++			say("redwood: replayd: saved standalone screen recording (%lld bytes)\n", (long long)info.st_size);
++		}
++	}
++	(void)unlink(staging);
++}
++
++static void
++my_rp_export_photos(id self, SEL _cmd, id video_url, id handler)
++{
++	r5q_copy_mp4_to_dcim(video_url);
++	((void (*)(id, SEL, id, id))orig_rp_export_photos)(self, _cmd, video_url, handler);
++}
++
++static void
++r5q_hook_replayd_photos(void)
++{
++	Class cls = objc_getClass("RPPhotosUtility");
++	Method m = cls != Nil ? class_getClassMethod(cls, sel_registerName("exportVideoToPhotosLibrary:completionHandler:")) : NULL;
++	if (m != NULL) {
++		orig_rp_export_photos = method_setImplementation(m, (IMP)my_rp_export_photos);
++		say("redwood: replayd: hooked +[RPPhotosUtility exportVideoToPhotosLibrary:completionHandler:]\n");
++	}
++}
++
+ __attribute__((constructor))
+ static void
+ redwood_media_init(void)
+@@ -644,6 +751,12 @@ redwood_media_init(void)
+ 	const char *name = getprogname();
+ 	size_t length = 0;
+ 
++	if (name != NULL && strcmp(name, "replayd") == 0) {
++		r5q_register_h264_encoder();
++		r5q_hook_replayd_photos();
++		say("redwood: replayd: registered OpenH264 H.264 encoder\n");
++		return;
++	}
+ 	if (name == NULL || strcmp(name, "mediaserverd") != 0) {
+ 		return;
+ 	}
+@@ -665,6 +778,7 @@ redwood_media_init(void)
+ 	if (camera) {
+ 		say("redwood: mediaserverd: the kernel has a camera (/dev/redwood-camera)\n");
+ 		register_hevc_encoder();
++		r5q_register_h264_encoder();
+ 	}
+ 	_dyld_register_func_for_add_image(image_added);         /* also called for every image already there */
+ }

@@ -176,9 +176,51 @@ slpi_log_sysctl(__unused struct sysctl_oid *oidp, __unused void *arg1, __unused 
 	return error;
 }
 
+static volatile uint32_t r5q_mic_sel_override = 0xffffffffu;
+
+void redwood_r5q_mic_set_sel(uint32_t sel);
+void
+redwood_r5q_mic_set_sel(uint32_t sel)
+{
+	r5q_mic_sel_override = sel ? 1 : 0;
+}
+
+uint32_t redwood_r5q_mic_get_sel(void);
+uint32_t
+redwood_r5q_mic_get_sel(void)
+{
+	uint32_t sel = 0;
+
+	if (r5q_mic_sel_override != 0xffffffffu) {
+		return r5q_mic_sel_override;
+	}
+	return PE_parse_boot_argn("mic_sel", &sel, sizeof(sel)) && sel == 1 ? 1 : 0;
+}
+
+static int tell(const char *format, ...) __printflike(1, 2);
+
+static int
+mic_sel_sysctl(__unused struct sysctl_oid *oidp, __unused void *arg1, __unused int arg2, struct sysctl_req *req)
+{
+	int value = (int)redwood_r5q_mic_get_sel(), error;
+
+	error = sysctl_io_number(req, value, sizeof(value), &value, NULL);
+	if (error != 0 || req->newptr == 0) {
+		return error;
+	}
+	if (value != 0 && value != 1) {
+		return EINVAL;
+	}
+	redwood_r5q_mic_set_sel((uint32_t)value);
+	tell("adsp: mic: kern.redwood.mic_sel set to %d (%s)\n", value, value == 1 ? "sub-mic ADC3" : "main-mic ADC1");
+	return 0;
+}
+
 SYSCTL_DECL(_kern_redwood);
 SYSCTL_PROC(_kern_redwood, OID_AUTO, slpi_log, CTLTYPE_OPAQUE | CTLFLAG_RD | CTLFLAG_LOCKED, NULL, 0, slpi_log_sysctl, "A",
     "the sensors' DSP's lines of the kernel's log (redwood_adsp.c)");
+SYSCTL_PROC(_kern_redwood, OID_AUTO, mic_sel, CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_LOCKED, NULL, 0, mic_sel_sysctl, "I",
+    "0: main microphone (ADC1 + MICB1, Bottom); 1: sub microphone (ADC3 + MICB3, Top/Front)");
 
 static void
 say_line(const char *line, bool aloud)
@@ -2935,6 +2977,8 @@ static struct {
 	uint32_t status, other_ids[4];
 	uint64_t suid[SEE_KINDS][2];            /* (Test 223) every kind's sensor */
 	bool have[SEE_KINDS];
+	uint64_t mag_cal_suid[2];               /* (Test 434) SLPI fused magnetometer calibration */
+	bool have_mag_cal;
 } see;
 
 /*
@@ -2961,8 +3005,15 @@ struct redwood_motion {
 		uint32_t n;
 		uint64_t time;
 	} ring[3][16];
+	/*
+	 * (Test 434, version 3) SLPI sns_mag_cal hard-iron bias (uT * 1000) and status (0 uncal .. 3 high accuracy),
+	 * appended at the end so version 2 readers stay binary-compatible.
+	 */
+	int32_t mag_cal_bias[3];
+	uint32_t mag_cal_status;
+	uint32_t mag_cal_count;
 };
-static struct redwood_motion motion = { .version = 2 };
+static struct redwood_motion motion = { .version = 3 };
 
 static int
 motion_sysctl(__unused struct sysctl_oid *oidp, __unused void *arg1, __unused int arg2, struct sysctl_req *req)
@@ -3142,6 +3193,51 @@ see_event(const uint64_t from[2], uint32_t msg_id, const uint8_t *p, uint32_t le
 	char type[32] = "";
 	int32_t data[6] = { 0 };
 
+	if (see.have_mag_cal && see.mag_cal_suid[0] == from[0] && see.mag_cal_suid[1] == from[1]) {
+		if (msg_id == 1022 || msg_id == 1025) {
+			int32_t bias[3] = { 0 };
+			uint32_t status = 0;
+
+			while (pb_next(p, length, &at, &field, &wire, &value, &bytes, &count)) {
+				if (field == 1 && wire == 5 && n < 3) {
+					bias[n++] = float_milli((uint32_t)value);
+				} else if (field == 1 && wire == 2) {
+					for (uint32_t i = 0; i + 4 <= count && n < 3; i += 4) {
+						uint32_t bits;
+
+						memcpy(&bits, bytes + i, 4);
+						bias[n++] = float_milli(bits);
+					}
+				} else if (((msg_id == 1022 && field == 4) || (msg_id == 1025 && field == 2)) && wire == 0) {
+					status = (uint32_t)value;
+				}
+			}
+			if (n >= 3) {
+				motion.mag_cal_bias[0] = bias[0];
+				motion.mag_cal_bias[1] = bias[1];
+				motion.mag_cal_bias[2] = bias[2];
+				motion.mag_cal_status = status;
+				__asm__ volatile ("dmb ish" ::: "memory");
+				motion.mag_cal_count++;
+				motion.seq++;
+				if (motion.mag_cal_count <= 10 || motion.mag_cal_count % 200 == 0) {
+					tell("slpi: see: mag_cal #%u (msg %u): bias %d %d %d (x1000), status %u\n",
+					    motion.mag_cal_count, msg_id, bias[0], bias[1], bias[2], status);
+				}
+			}
+		} else {
+			static unsigned magcal_other;
+
+			if (magcal_other++ < 4) {
+				uint8_t b[16] = { 0 };
+
+				memcpy(b, p, length < sizeof(b) ? length : sizeof(b));
+				tell("slpi: see: mag_cal event %u (%u bytes): %02x %02x %02x %02x %02x %02x %02x %02x\n",
+				    msg_id, length, b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]);
+			}
+		}
+		return;
+	}
 	for (int k = 0; k < SEE_KINDS; k++) {
 		if (see.have[k] && see.suid[k][0] == from[0] && see.suid[k][1] == from[1]) {
 			kind = k;
@@ -3179,6 +3275,11 @@ see_event(const uint64_t from[2], uint32_t msg_id, const uint8_t *p, uint32_t le
 						see.suid[k][1] = suid[1];
 						see.have[k] = true;
 					}
+				}
+				if (strcmp(type, "mag_cal") == 0 && !see.have_mag_cal) {
+					see.mag_cal_suid[0] = suid[0];
+					see.mag_cal_suid[1] = suid[1];
+					see.have_mag_cal = true;
 				}
 				if (strcmp(type, "accel") == 0 && !see.have_accel) {
 					see.accel[0] = suid[0];
@@ -3348,9 +3449,9 @@ see_input(const uint8_t *m, uint32_t size)
 static void
 see_thread(__unused void *parameter, __unused wait_result_t result)
 {
-	static const char *const kinds[] = { "accel", "gyro", "mag", "ambient_light", "proximity", "pressure", "sig_motion",
-		                             "registry", "resampler", "remote_proc_state", "timer", "interrupt", "async_com_port",
-		                             "device_orient", "data_acquisition_engine" };
+	static const char *const kinds[] = { "accel", "gyro", "mag", "mag_cal", "ambient_light", "proximity", "pressure",
+		                             "sig_motion", "registry", "resampler", "remote_proc_state", "timer", "interrupt",
+		                             "async_com_port", "device_orient", "data_acquisition_engine" };
 	static const uint8_t rate[] = { 0x0d, 0x00, 0x00, 0x20, 0x41 };        /* sns_std_sensor_config { sample_rate = 10.0 } */
 
 	tell("slpi: see: the sensors' service at node %u port %u: asked for its sensors\n", see.node, see.port);
@@ -3375,6 +3476,7 @@ see_thread(__unused void *parameter, __unused wait_result_t result)
 		if (see.have_accel) {
 			see_lookup("gyro");
 			see_lookup("mag");
+			see_lookup("mag_cal");
 			see_lookup("ambient_light");
 			see_lookup("proximity");
 			sleep_ms(1000);
@@ -3412,9 +3514,10 @@ see_thread(__unused void *parameter, __unused wait_result_t result)
 		}
 		tell("slpi: see: rates asked for: accelerometer and gyroscope %u a second, compass %u\n", motion_hz, mag_hz);
 
-		for (unsigned round = 0; round < 3 && !(see.have[SEE_MAG] && see.have[SEE_LIGHT] && see.have[SEE_PROX]); round++) {
+		for (unsigned round = 0; round < 3 && !(see.have[SEE_MAG] && see.have_mag_cal && see.have[SEE_LIGHT] && see.have[SEE_PROX]); round++) {
 			see_lookup("gyro");
 			see_lookup("mag");
+			see_lookup("mag_cal");
 			see_lookup("ambient_light");
 			see_lookup("proximity");
 			sleep_ms(2000);
@@ -3429,6 +3532,9 @@ see_thread(__unused void *parameter, __unused wait_result_t result)
 			tell("slpi: see: compass at the rate above: %s\n", see_send(see.suid[SEE_MAG], 513, rate10, sizeof(rate10)) == 0 ? "asked" :
 			    "NOT SENT");
 		}
+		if (see.have_mag_cal) {
+			tell("slpi: see: mag_cal on change: %s\n", see_send(see.mag_cal_suid, 514, NULL, 0) == 0 ? "asked" : "NOT SENT");
+		}
 		if (see.have[SEE_LIGHT]) {
 			tell("slpi: see: ambient light on change: %s\n", see_send(see.suid[SEE_LIGHT], 514, NULL, 0) == 0 ? "asked" :
 			    "NOT SENT");
@@ -3440,8 +3546,9 @@ see_thread(__unused void *parameter, __unused wait_result_t result)
 	for (unsigned minute = 0;; minute++) {
 		sleep_ms(60000);
 		if (minute < 5 || minute % 30 == 0) {
-			tell("slpi: see: minute %u: accel %u (%d %d %d), mag %u, light %u (%d lux/1000), proximity %u (%d)\n", minute + 1,
-			    motion.count[SEE_ACCEL], motion.accel[0], motion.accel[1], motion.accel[2], motion.count[SEE_MAG],
+			tell("slpi: see: minute %u: accel %u (%d %d %d), mag %u, mag_cal %u (st %u bias %d %d %d), light %u (%d lux/1000), proximity %u (%d)\n",
+			    minute + 1, motion.count[SEE_ACCEL], motion.accel[0], motion.accel[1], motion.accel[2], motion.count[SEE_MAG],
+			    motion.mag_cal_count, motion.mag_cal_status, motion.mag_cal_bias[0], motion.mag_cal_bias[1], motion.mag_cal_bias[2],
 			    motion.count[SEE_LIGHT], motion.lux, motion.count[SEE_PROX], motion.prox[0]);
 		}
 	}
@@ -4570,6 +4677,8 @@ sl_thread(__unused void *parameter, __unused wait_result_t result)
 	bool told = false;
 	uint32_t slpi = 0;
 
+	unsigned idle_cnt = 0;
+
 	PE_parse_boot_argn("slpi", &slpi, sizeof(slpi));
 	if (slpi >= 4) {
 		thread_t thread;
@@ -4579,7 +4688,13 @@ sl_thread(__unused void *parameter, __unused wait_result_t result)
 		}
 	}
 	for (;;) {
-		sleep_us(1000);
+		bool got = false;
+
+		{
+			extern bool redwood_display_asleep(void);
+
+			sleep_us(idle_cnt < 20 ? 1000 : idle_cnt < 100 ? 4000 : redwood_display_asleep() ? 25000 : 8000);
+		}
 		for (;;) {
 			struct sl_packet *packet = NULL;
 			unsigned from = SL_CHANNELS;
@@ -4597,6 +4712,7 @@ sl_thread(__unused void *parameter, __unused wait_result_t result)
 			if (packet == NULL) {
 				break;
 			}
+			got = true;
 			if (from == SL_QRTR) {
 				sl_qrtr_input(packet->data, packet->length);
 			} else {
@@ -4604,6 +4720,7 @@ sl_thread(__unused void *parameter, __unused wait_result_t result)
 			}
 			kfree_data(packet, sizeof(*packet) + packet->length);
 		}
+		idle_cnt = got ? 0 : (idle_cnt < 100 ? idle_cnt + 1 : 100);
 		if (!told && now_us() - began > 15000000ull) {
 			unsigned count = 0, see = 0;
 
@@ -5657,10 +5774,18 @@ link_thread(__unused void *parameter, __unused wait_result_t result)
 	struct glink_packet *packet;
 	bool gave_up = false;
 
+	unsigned idle_cnt = 0;
+
 	bzero(&last, sizeof(last));
 	dsp_words(&last);
 	while (link_wanted) {
-		sleep_us(1000);
+		bool got = false;
+
+		{
+			extern bool redwood_display_asleep(void);
+
+			sleep_us(idle_cnt < 5 ? 1000 : redwood_display_asleep() ? 10000 : 4000);
+		}
 		doorbells();
 		if (dsp_words(&words) && memcmp(&words, &last, sizeof(words)) != 0) {
 			last = words;
@@ -5690,6 +5815,7 @@ link_thread(__unused void *parameter, __unused wait_result_t result)
 			if (packet == NULL) {
 				break;
 			}
+			got = true;
 			if (from == CHANNEL_QRTR) {
 				qrtr_input(packet->data, packet->length);
 			} else if (from == CHANNEL_PMIC) {
@@ -5699,6 +5825,7 @@ link_thread(__unused void *parameter, __unused wait_result_t result)
 			}
 			kfree_data(packet, sizeof(*packet) + packet->length);
 		}
+		idle_cnt = got ? 0 : (idle_cnt < 5 ? idle_cnt + 1 : 5);
 	}
 	link_runs = false;
 	thread_terminate(current_thread());
@@ -6466,14 +6593,27 @@ r5q_slim_wait(struct r5q_slim_rx *r, uint8_t mc, uint8_t tid, uint8_t *out, unsi
 		uint32_t end = r->wrap ? r->words + ((at - (r->words % 2048u)) & 2047u) :
 		    (at < R5Q_SLIM_RX_WORDS ? at : R5Q_SLIM_RX_WORDS);
 
+		__asm__ volatile ("dsb sy" ::: "memory");
 		while (r->words < end) {
-			uint32_t x = r->words_va[r->words % 2048u];
+			uint32_t idx = r->words % 2048u;
+			uint32_t x = r->words_va[idx];
 			const uint8_t *mb = (const uint8_t *)r->msg;
+			unsigned tries = 0;
 
+			while (x == 0xffffffffu && tries < 40) {
+				delay_for_interval(50, NSEC_PER_USEC);
+				__asm__ volatile ("dsb sy" ::: "memory");
+				x = r->words_va[idx];
+				tries++;
+			}
+			if (tries > 0) {
+				tell("adsp: slim: %s: rx word %u settled after %u us (%#x)\n", what, idx, tries * 50, x);
+			}
 			r->words++;
 			if (r->wrap) {
 				uint32_t j = r->posted % 2048u;
 
+				r->words_va[j] = 0xffffffffu;
 				r->fifo_va[2 * j] = (uint32_t)(r->words_pa + 4 * j);
 				r->fifo_va[2 * j + 1] = 4u;
 				__asm__ volatile ("dsb sy" ::: "memory");
@@ -6570,15 +6710,18 @@ static bool
 r5q_slim_rd8(struct r5q_slim_link *l, uint8_t la, uint16_t offset, uint8_t *value)
 {
 	uint16_t ec = (uint16_t)(0x8u | ((0x800u + offset) << 4));
-	uint8_t tid = r5q_slim_next_tid(l), m[48];
-	uint8_t q[6] = { 0x06, 0x60, la, tid, (uint8_t)ec, (uint8_t)(ec >> 8) };
 
-	if (!r5q_slim_put(l, q, 6) || !r5q_slim_wait(l->rx, 0x64, tid, m, 20, "link: read")) {
-		l->errors++;
-		return false;
+	for (int attempt = 0; attempt < 2; attempt++) {
+		uint8_t tid = r5q_slim_next_tid(l), m[48];
+		uint8_t q[6] = { 0x06, 0x60, la, tid, (uint8_t)ec, (uint8_t)(ec >> 8) };
+
+		if (r5q_slim_put(l, q, 6) && r5q_slim_wait(l->rx, 0x64, tid, m, 50, "link: read")) {
+			*value = m[4];
+			return true;
+		}
 	}
-	*value = m[4];
-	return true;
+	l->errors++;
+	return false;
 }
 
 static bool
@@ -6707,6 +6850,7 @@ r5q_slim_tx_channel_off(struct r5q_slim_link *l)
 	(void)r5q_slim_user(l, "CHAN_CTRL remove (channel 134)", 0x23, k, 3, 1);
 	(void)r5q_slim_user(l, "RECONFIG_NOW", 0x24, r, 2, 0);
 	(void)r5q_slim_user(l, "DISCONNECT_PORT (codec TX port 6)", 0x2e, x, 3, 2);
+	(void)r5q_slim_user(l, "RECONFIG_NOW (disconnect)", 0x24, r, 2, 0);
 	(void)r5q_slim_wr8(l, l->ifd_la, 0x050 + R5Q_MIC_TX_PORT, 0x00);
 	(void)r5q_slim_wr8(l, l->ifd_la, 0x100 + 4 * R5Q_MIC_TX_PORT, 0x00);
 }
@@ -6714,20 +6858,25 @@ r5q_slim_tx_channel_off(struct r5q_slim_link *l)
 /* the codec's capture path (the WCD9340's registers: Test 421, below) */
 static bool r5q_cdc_capture_on(struct r5q_slim_link *l);
 static bool r5q_cdc_capture_on2(struct r5q_slim_link *l);
-static void r5q_cdc_capture_unmute(struct r5q_slim_link *l);
-static void r5q_cdc_capture_off(struct r5q_slim_link *l);
+static bool r5q_cdc_capture_unmute(struct r5q_slim_link *l);
+static void r5q_cdc_capture_down(struct r5q_slim_link *l);
+static void r5q_cdc_capture_clock_off(struct r5q_slim_link *l);
 
 /* the link, kept once r5q_slim_v5 has found the codec (mic=7): redwood_mic.c's r5q mode uses it through these */
 static struct r5q_slim_link r5q_link;
 static struct r5q_slim_rx r5q_link_rx;
 static uint32_t r5q_link_next;
 static bool r5q_link_up, r5q_mic_path_on;
+/* (Test 450) the microphone a recording started with: on, unmute, settle and down all use it, so a change of
+ * kern.redwood.mic_sel or /dev/redwood-mic's 'f'/'s' during a recording takes effect at the next one (it had mixed
+ * the ADC1 and ADC3 paths, or left ADC1 and MIC BIAS1 on) */
+static uint32_t r5q_mic_sel_latched;
 static uint8_t r5q_codec_la = 0xff, r5q_codec_ifd_la = 0xff;
 static LCK_GRP_DECLARE(r5q_link_group, "r5q-slim");
 static LCK_MTX_DECLARE(r5q_link_lock, &r5q_link_group);
 
 bool redwood_r5q_mic_codec_on(void);
-void redwood_r5q_mic_codec_unmute(void);
+bool redwood_r5q_mic_codec_unmute(void);
 void redwood_r5q_mic_codec_off(void);
 
 bool
@@ -6741,6 +6890,9 @@ redwood_r5q_mic_codec_on(void)
 	}
 	lck_mtx_lock(&r5q_link_lock);
 	r5q_link.errors = 0;
+	if (!r5q_mic_path_on) {
+		r5q_mic_sel_latched = redwood_r5q_mic_get_sel();
+	}
 	ok = r5q_cdc_capture_on(&r5q_link) && r5q_slim_tx_channel_on(&r5q_link) && r5q_cdc_capture_on2(&r5q_link);
 	r5q_mic_path_on = true;
 	tell("adsp: mic: the codec's capture path %s (%u writes, %u errors, tx %u)\n", ok ? "UP" : "FAILED", r5q_link.writes,
@@ -6749,15 +6901,18 @@ redwood_r5q_mic_codec_on(void)
 	return ok;
 }
 
-void
+bool
 redwood_r5q_mic_codec_unmute(void)
 {
+	bool ok;
+
 	if (!r5q_link_up) {
-		return;
+		return false;
 	}
 	lck_mtx_lock(&r5q_link_lock);
-	r5q_cdc_capture_unmute(&r5q_link);
+	ok = r5q_cdc_capture_unmute(&r5q_link);
 	lck_mtx_unlock(&r5q_link_lock);
+	return ok;
 }
 
 void
@@ -6767,8 +6922,9 @@ redwood_r5q_mic_codec_off(void)
 		return;
 	}
 	lck_mtx_lock(&r5q_link_lock);
+	r5q_cdc_capture_down(&r5q_link);
 	r5q_slim_tx_channel_off(&r5q_link);
-	r5q_cdc_capture_off(&r5q_link);
+	r5q_cdc_capture_clock_off(&r5q_link);
 	r5q_mic_path_on = false;
 	tell("adsp: mic: the codec's capture path down (tx %u)\n", r5q_link_next);
 	lck_mtx_unlock(&r5q_link_lock);
@@ -6902,6 +7058,51 @@ static const struct r5q_cdc_op r5q_cdc_down[] = {
 	{ 0x0622, 0xc0, 0x00, 0 },      /* MIC BIAS1 off */
 };
 
+/* (Test 435/436) Boot-arg mic_sel=1 or dynamic source selection ('fmic'/'smic'): WCD9340 top sub-mic on ADC3 + MICB3 instead of ADC1 + MICB1 */
+static uint32_t
+r5q_cdc_mic_sel(void)
+{
+	return r5q_mic_sel_latched;     /* (Test 450) as redwood_r5q_mic_codec_on read it */
+}
+
+static const struct r5q_cdc_op r5q_cdc_route_sub[] = {
+	{ 0x0d3b, 0x30, 0x20, 0 },      /* CDC_IF TX6 MUX = DEC6 */
+	{ 0x0a92, 0x80, 0x00, 0 },      /* ADC MUX6 = AMIC */
+	{ 0x0d22, 0x0c, 0x04, 0 },      /*   CDC_TX_INP_MUX_ADC_MUX2_CFG1 */
+	{ 0x0d28, 0x07, 0x03, 0 },      /* AMIC MUX6 = ADC3 (ADC_MUX6_CFG0) */
+	{ 0x0610, 0x1f, 0x04, 0 },      /* ADC3 Volume 4 (ANA_AMIC3) */
+	{ 0x0a94, 0, 0x00, 0 },         /* DEC6 Volume 84 = 0 dB (TX6_TX_VOL_CTL) */
+	{ 0x0a91, 0x0f, 0x04, 0 },      /* tavil_set_decimator_rate: 48 kHz */
+	{ 0x0625, 0xc0, 0x40, 1100 },   /* MIC BIAS3 on (ANA_MICB3) */
+};
+
+static const struct r5q_cdc_op r5q_cdc_dec_adc_sub[] = {
+	{ 0x0a92, 0x06, 0x00, 0 },      /* tavil_codec_enable_dec PRE_PMU */
+	{ 0x0a91, 0x10, 0x10, 0 },      /*   TX mute */
+	{ 0x0a91, 0x20, 0x20, 0 },      /* decimator 6's clock */
+	{ 0x0a92, 0x60, 0x40, 0 },      /* POST_PMU: HPF 150 Hz while it settles */
+	{ 0x0a99, 0x02, 0x02, 1010 },
+	{ 0x0a99, 0x02, 0x00, 0 },
+	{ 0x0a94, 0, 0x00, 0 },
+	{ 0x0611, 0x40, 0x40, 0 },      /* ADC3 PRE_PMU: tx hold (ANA_AMIC4) */
+	{ 0x0610, 0x80, 0x80, 0 },      /* ADC3 on (ANA_AMIC3) */
+};
+
+static const struct r5q_cdc_op r5q_cdc_settle_sub[] = {
+	{ 0x0611, 0x40, 0x00, 0 },
+	{ 0x0a92, 0x60, 0x00, 0 },
+	{ 0x0a99, 0x02, 0x02, 1010 },
+	{ 0x0a99, 0x02, 0x00, 0 },
+};
+
+static const struct r5q_cdc_op r5q_cdc_down_sub[] = {
+	{ 0x0610, 0x80, 0x00, 0 },      /* ADC3 off */
+	{ 0x0611, 0x40, 0x00, 0 },
+	{ 0x0a91, 0x10, 0x10, 0 },      /* decimator 6 muted, its clock off */
+	{ 0x0a91, 0x20, 0x00, 0 },
+	{ 0x0625, 0xc0, 0x00, 0 },      /* MIC BIAS3 off */
+};
+
 /* tavil_update_cpr_defaults (v1.1): data then address, 4 bytes little-endian each, to CPR_WR_DATA_0.. / CPR_WR_ADDR_0.. */
 static const uint32_t r5q_cdc_cpr[16][2] = {
 	{ 0x00000820, 0x94 }, { 0x00000fc0, 0x48 }, { 0x0000f000, 0x44 }, { 0x0000bb80, 0xc0000178 },
@@ -6933,9 +7134,11 @@ r5q_cdc_run(struct r5q_slim_link *l, const char *what, const struct r5q_cdc_op *
 static void
 r5q_cdc_snapshot(struct r5q_slim_link *l, const char *when)
 {
-	static const uint16_t regs[] = { 0x0003, 0x0009, 0x0011, 0x0202, 0x0601, 0x0603, 0x0606, 0x060e, 0x060f, 0x0622,
-		                         0x0711, 0x0a91, 0x0a92, 0x0a93, 0x0a94, 0x0d22, 0x0d28, 0x0d3b, 0x0d41, 0x0d42, 0x0d82 };
-	char line[400];
+	static const uint16_t regs[] = { 0x0002, 0x0003, 0x0009, 0x0011, 0x0202, 0x0601, 0x0603, 0x0606, 0x060e, 0x060f,
+		                         0x0610, 0x0611, 0x0622, 0x0625, 0x0711, 0x0a91, 0x0a92, 0x0a93, 0x0a94, 0x0a99,
+		                         0x0d22, 0x0d28, 0x0d3b, 0x0d41, 0x0d42, 0x0d82 };
+	static const uint16_t ifd_regs[] = { 0x020, 0x021, 0x022, 0x056, 0x118, 0x1f6 };
+	char line[512];
 	unsigned at = 0;
 
 	for (unsigned i = 0; i < sizeof(regs) / sizeof(regs[0]) && at + 16 < sizeof(line); i++) {
@@ -6945,6 +7148,17 @@ r5q_cdc_snapshot(struct r5q_slim_link *l, const char *when)
 		at += (unsigned)snprintf(line + at, sizeof(line) - at, " %03x=%s%02x", regs[i], ok ? "" : "?", v);
 	}
 	tell("adsp: codec: %s:%s\n", when, line);
+	if (l->ifd_la != 0xff) {
+		at = 0;
+		line[0] = '\0';
+		for (unsigned i = 0; i < sizeof(ifd_regs) / sizeof(ifd_regs[0]) && at + 16 < sizeof(line); i++) {
+			uint8_t v = 0;
+			bool ok = r5q_slim_rd8(l, l->ifd_la, ifd_regs[i], &v);
+
+			at += (unsigned)snprintf(line + at, sizeof(line) - at, " %03x=%s%02x", ifd_regs[i], ok ? "" : "?", v);
+		}
+		tell("adsp: slim: ifd (%s):%s\n", when, line);
+	}
 }
 
 /* (Test 424) once, at boot as soon as the codec is found: iOS's first recording no longer waits ~5 s for it */
@@ -6990,11 +7204,16 @@ r5q_cdc_init_once(struct r5q_slim_link *l)
 static bool
 r5q_cdc_capture_on(struct r5q_slim_link *l)
 {
+	uint32_t sel = r5q_cdc_mic_sel();
+	const struct r5q_cdc_op *route = sel == 1 ? r5q_cdc_route_sub : r5q_cdc_route;
+	unsigned n_route = sel == 1 ? (unsigned)(sizeof(r5q_cdc_route_sub) / sizeof(r5q_cdc_route_sub[0]))
+	                            : (unsigned)(sizeof(r5q_cdc_route) / sizeof(r5q_cdc_route[0]));
+
 	if (!r5q_cdc_init_once(l)) {
 		return false;
 	}
 	if (!r5q_cdc_run(l, "clock", r5q_cdc_mclk_on, sizeof(r5q_cdc_mclk_on) / sizeof(r5q_cdc_mclk_on[0])) ||
-	    !r5q_cdc_run(l, "route", r5q_cdc_route, sizeof(r5q_cdc_route) / sizeof(r5q_cdc_route[0]))) {
+	    !r5q_cdc_run(l, sel == 1 ? "route (sub-mic ADC3)" : "route", route, n_route)) {
 		return false;
 	}
 	{
@@ -7007,6 +7226,10 @@ r5q_cdc_capture_on(struct r5q_slim_link *l)
 
 		(void)PE_parse_boot_argn("mic_gain", &gain, sizeof(gain));
 		gain = gain > 20 ? 20 : gain;
+		if (sel == 1) {
+			tell("adsp: codec: ADC3's analog gain code %u (mic_sel=1)\n", gain);
+			return r5q_cdc_upd(l, 0x0610, 0x1f, (uint8_t)gain);
+		}
 		tell("adsp: codec: ADC1's analog gain code %u\n", gain);
 		return r5q_cdc_upd(l, 0x060e, 0x1f, (uint8_t)gain);
 	}
@@ -7016,7 +7239,11 @@ r5q_cdc_capture_on(struct r5q_slim_link *l)
 static bool
 r5q_cdc_capture_on2(struct r5q_slim_link *l)
 {
-	bool ok = r5q_cdc_run(l, "decimator 6 and ADC1", r5q_cdc_dec_adc, sizeof(r5q_cdc_dec_adc) / sizeof(r5q_cdc_dec_adc[0]));
+	uint32_t sel = r5q_cdc_mic_sel();
+	const struct r5q_cdc_op *ops = sel == 1 ? r5q_cdc_dec_adc_sub : r5q_cdc_dec_adc;
+	unsigned n_ops = sel == 1 ? (unsigned)(sizeof(r5q_cdc_dec_adc_sub) / sizeof(r5q_cdc_dec_adc_sub[0]))
+	                          : (unsigned)(sizeof(r5q_cdc_dec_adc) / sizeof(r5q_cdc_dec_adc[0]));
+	bool ok = r5q_cdc_run(l, sel == 1 ? "decimator 6 and ADC3" : "decimator 6 and ADC1", ops, n_ops);
 	int32_t dgain = 0;      /* (Test 424: 0 dB, was 12) */
 
 	(void)PE_parse_boot_argn("mic_dgain", &dgain, sizeof(dgain));
@@ -7028,23 +7255,39 @@ r5q_cdc_capture_on2(struct r5q_slim_link *l)
 	return ok;
 }
 
-static void
+static bool
 r5q_cdc_capture_unmute(struct r5q_slim_link *l)
 {
-	(void)r5q_cdc_run(l, "unmute", r5q_cdc_unmute, 1);
+	return r5q_cdc_run(l, "unmute", r5q_cdc_unmute, 1);
 }
 
-static void
+static bool
 r5q_cdc_capture_settle(struct r5q_slim_link *l)
 {
-	(void)r5q_cdc_run(l, "settle", r5q_cdc_settle, sizeof(r5q_cdc_settle) / sizeof(r5q_cdc_settle[0]));
+	uint32_t sel = r5q_cdc_mic_sel();
+	const struct r5q_cdc_op *ops = sel == 1 ? r5q_cdc_settle_sub : r5q_cdc_settle;
+	unsigned n_ops = sel == 1 ? (unsigned)(sizeof(r5q_cdc_settle_sub) / sizeof(r5q_cdc_settle_sub[0]))
+	                          : (unsigned)(sizeof(r5q_cdc_settle) / sizeof(r5q_cdc_settle[0]));
+	bool ok = r5q_cdc_run(l, "settle", ops, n_ops);
+
 	r5q_cdc_snapshot(l, "settled");
+	return ok;
 }
 
 static void
-r5q_cdc_capture_off(struct r5q_slim_link *l)
+r5q_cdc_capture_down(struct r5q_slim_link *l)
 {
-	(void)r5q_cdc_run(l, "down", r5q_cdc_down, sizeof(r5q_cdc_down) / sizeof(r5q_cdc_down[0]));
+	uint32_t sel = r5q_cdc_mic_sel();
+	const struct r5q_cdc_op *ops = sel == 1 ? r5q_cdc_down_sub : r5q_cdc_down;
+	unsigned n_ops = sel == 1 ? (unsigned)(sizeof(r5q_cdc_down_sub) / sizeof(r5q_cdc_down_sub[0]))
+	                          : (unsigned)(sizeof(r5q_cdc_down) / sizeof(r5q_cdc_down[0]));
+
+	(void)r5q_cdc_run(l, "down", ops, n_ops);
+}
+
+static void
+r5q_cdc_capture_clock_off(struct r5q_slim_link *l)
+{
 	(void)r5q_cdc_run(l, "clock off", r5q_cdc_mclk_off, sizeof(r5q_cdc_mclk_off) / sizeof(r5q_cdc_mclk_off[0]));
 }
 
@@ -7054,13 +7297,15 @@ redwood_r5q_mic_codec_settle(void);
 bool
 redwood_r5q_mic_codec_settle(void)
 {
+	bool ok;
+
 	if (!r5q_link_up) {
 		return false;
 	}
 	lck_mtx_lock(&r5q_link_lock);
-	r5q_cdc_capture_settle(&r5q_link);
+	ok = r5q_cdc_capture_settle(&r5q_link);
 	lck_mtx_unlock(&r5q_link_lock);
-	return true;
+	return ok;
 }
 
 static void
@@ -7116,6 +7361,9 @@ r5q_slim_v5(vm_offset_t slim, uint32_t mic)
 		*(volatile uint32_t *)(pp + BAM_P_IRQ_EN) = 0;
 		*(volatile uint32_t *)(pp + BAM_P_CTRL) = BAM_P_EN | BAM_P_SYS_MODE | (pipe == 3 ? BAM_P_DIRECTION : 0);
 	}
+	for (uint32_t i = 0; i < 2048u; i++) {
+		rx_words[i] = 0xffffffffu;
+	}
 	for (uint32_t i = 0; i < R5Q_SLIM_RX_WORDS; i++) {
 		rx_fifo[2 * i] = (uint32_t)(rx_words_pa + 4 * i);
 		rx_fifo[2 * i + 1] = 4u;
@@ -7130,8 +7378,18 @@ r5q_slim_v5(vm_offset_t slim, uint32_t mic)
 	for (int ms = 0; ms < 5000; ms++) {
 		uint32_t at = (*(volatile uint32_t *)(bam + SLIM_PIPE(3) + BAM_P_SW_OFSTS) & 0xffff) / 8;
 
+		__asm__ volatile ("dsb sy" ::: "memory");
 		while (words < at && words < R5Q_SLIM_RX_WORDS) {
-			uint32_t w = rx_words[words++];
+			uint32_t w = rx_words[words];
+			unsigned tries = 0;
+
+			while (w == 0xffffffffu && tries < 40) {
+				delay_for_interval(50, NSEC_PER_USEC);
+				__asm__ volatile ("dsb sy" ::: "memory");
+				w = rx_words[words];
+				tries++;
+			}
+			words++;
 
 			if (have == 0) {
 				need = ((w & 0x1f) + 1 + 3) / 4;        /* the length field is the message less one byte */

@@ -34,6 +34,7 @@ extern uint64_t redwood_bb_answer[64];  /* (Test 358) bsd/dev/redwood_wifi.c, ke
 /* (Test 380) bsd/dev/redwood_wifi.c: QMI to the modem's services over QRTR, one port per (connection, service, client) */
 int redwood_bb_qmi_send(void * client, uint8_t service, uint8_t qmux_client, const void * message, size_t length);
 void redwood_bb_qmi_close(void * client);
+int redwood_bb_pds_handle(void * client, uint8_t qmux_client, const void * message, size_t length);
 }
 
 extern "C" void RedwoodBasebandPublish(void);
@@ -295,14 +296,22 @@ RedwoodBasebandUserClient::qmuxWrite(const uint8_t * f, uint32_t len)
 		out[o++] = 0x02; out[o++] = 4; out[o++] = 0;            /* result TLV: success */
 		out[o++] = 0; out[o++] = 0; out[o++] = 0; out[o++] = 0;
 		if (msgid == 0x22 && wanted == 6) {
-			/*
-			 * (Test 388) No PDS client: locationd asks the baseband for GPS through PDS, and this modem's PDS answers
-			 * neither as an iPhone's does (QMI_ERR_INVALID_INDEX) nor with the data locationd wants; every failure made
-			 * locationd ask for a baseband reset (Tests 385-387). Refused: result 1, error 0x05 (client IDs exhausted).
-			 */
-			out[o - 4] = 1;
-			out[o - 2] = 0x05;
-			bblog("RedwoodBaseband: qmux: CTL GET_CLIENT_ID for PDS refused\n");
+			uint32_t gps_on = 0;
+			if (PE_parse_boot_argn("gps", &gps_on, sizeof(gps_on)) && gps_on != 0) {
+				uint8_t cid = ++fNextClient[wanted];
+				out[o++] = 0x01; out[o++] = 2; out[o++] = 0;
+				out[o++] = wanted; out[o++] = cid;
+				bblog("RedwoodBaseband: qmux: CTL GET_CLIENT_ID for PDS (gps=%u): client %u\n", gps_on, cid);
+			} else {
+				/*
+				 * (Test 388) No PDS client unless gps=1: locationd asks the baseband for GPS through PDS, and this modem's PDS answers
+				 * neither as an iPhone's does (QMI_ERR_INVALID_INDEX) nor with the data locationd wants; every failure made
+				 * locationd ask for a baseband reset (Tests 385-387). Refused: result 1, error 0x05 (client IDs exhausted).
+				 */
+				out[o - 4] = 1;
+				out[o - 2] = 0x05;
+				bblog("RedwoodBaseband: qmux: CTL GET_CLIENT_ID for PDS refused\n");
+			}
 		} else if (msgid == 0x22) {                             /* GET_CLIENT_ID */
 			uint8_t cid = ++fNextClient[wanted];
 			out[o++] = 0x01; out[o++] = 2; out[o++] = 0;
@@ -340,9 +349,14 @@ RedwoodBasebandUserClient::forwardToModem(const uint8_t * f, uint32_t len)
 	 */
 	uint16_t msgid = (uint16_t) (m[3] | m[4] << 8);
 	/*
-	 * (Test 386) Answered here with success, not sent: PDS RESET (service 6, message 0) -- the modem answers it
-	 * QMI_ERR_INVALID_INDEX and locationd then asks for a baseband reset (Test 385).
+	 * (Test 436) When gps=1 is enabled, QMI_PDS (service 6) requests from locationd are answered by the kernel's
+	 * QMI_PDS <-> QMI_LOC bridge (redwood_bb_pds_handle in redwood_wifi.c), which supplies the mandatory TLVs for
+	 * GET_GPS_SERVICE_VERSION (0x36) and GET_GPS_SERVICE_STATE (0x20) and streams QMI_LOC NMEA sentences as
+	 * QMI_PDS_EVENT_REPORT_IND (0x0001, TLV 0x10).
 	 */
+	if (svc == 6 && redwood_bb_pds_handle(this, client, m, mlen) == 0) {
+		return;
+	}
 	bool local_ok = svc == 6;      /* (Test 387: every PDS request -- GET_GPS_SERVICE_VERSION failed the same way) */
 	int error = local_ok ? 1 : svc == 0x22 ? 1 /* EPERM */ : redwood_bb_qmi_send(this, svc, client, m, mlen);
 	static SInt32 told;

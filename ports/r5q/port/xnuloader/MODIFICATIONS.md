@@ -16,3 +16,6 @@ Wi-Fi, audio and sensors DSPs (the sensors DSP held for the kernel to release), 
 - `loader.c` (Tests 390-391): `bbnode=1` and `cam=5` are also read in the boot-argument scan the test builds use (every
   image is one), so the `baseband` node (now with the iPhone X's own non-identifying properties) and the camera's
   `isp` node are made; MobileGestalt's HasBaseband/cellular-data and still-camera follow them.
+- `loader.c` (Test 434): with `cam=5`, the `isp` node also carries the camera capabilities the port implements
+  (autofocus, front flash, video frame rates and zoom, burst, panorama) and `camera-front`, so MobileGestalt reports
+  them; multi-camera, HDR and Face ID ("pearl") stay out.

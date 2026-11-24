@@ -55,6 +55,7 @@ enum {
 	REDWOOD_CAMERA_SENSOR = 3,      /* another sensor: a which (as in the frames' header), b its mode (~0: the usual one);
 	                                 * the frames stop, everything goes down, and the next read starts the other one */
 	REDWOOD_CAMERA_FOCUS = 4,       /* the lens to a: 0 (the furthest) to 1023, from the next frame or so */
+	REDWOOD_CAMERA_OIS_MODE = 5,    /* the main camera's optical stabiliser mode: a 0 still, 1 movie */
 };
 
 struct redwood_camera_command {

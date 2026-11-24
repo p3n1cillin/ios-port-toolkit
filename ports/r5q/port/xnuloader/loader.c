@@ -4004,13 +4004,26 @@ run_kernel(int have_checkpoint, uint64_t checkpoint)
 	dt_end(&w);
 	/*
 	 * and of its camera what is here: with torch=N the flash (MobileGestalt's camera-flash; without
-	 * it Control Center has no flashlight); with cam=5 the node itself, for a camera there is (with it
-	 * MobileGestalt's video-camera). The rest of the iPhone's camera is not here, nor said to be.
+	 * it Control Center has no flashlight); with cam=5 the node itself plus supported camera capabilities
+	 * (auto-focus, front-flash, video fps/zoom, burst, panorama) while leaving unimplemented multi-cam/HDR/pearl out.
 	 */
 	if (torch_requested || camera_requested) {
 		dt_begin(&w, "camera");
 		if (torch_requested) {
 			dt_identity_one(&w, identity_camera, sizeof(identity_camera) / sizeof(identity_camera[0]), identity_camera_data, "flash");
+		}
+		if (camera_requested) {
+			static const char *const cam_caps[] = {
+				"auto-focus", "video-cap", "video-stills",
+				"rear-max-video-fps-1080p", "rear-max-video-fps-720p", "rear-max-video-frame_rate",
+				"rear-max-video-zoom", "front-max-video-fps-1080p", "front-max-video-fps-720p",
+				"front-max-video-zoom", "front-flash-capability",
+				"rear-burst", "front-burst", "rear-burst-image-duration", "front-burst-image-duration",
+				"rear-max-burst-length", "front-max-burst-length", "panorama",
+			};
+			for (unsigned i = 0; i < sizeof(cam_caps) / sizeof(cam_caps[0]); i++) {
+				dt_identity_one(&w, identity_camera, sizeof(identity_camera) / sizeof(identity_camera[0]), identity_camera_data, cam_caps[i]);
+			}
 		}
 		dt_end(&w);
 	}
@@ -4099,6 +4112,7 @@ run_kernel(int have_checkpoint, uint64_t checkpoint)
 	if (camera_requested) {
 		dt_begin(&w, "isp");
 		dt_prop_u32(&w, "camera-rear", 1);
+		dt_prop_u32(&w, "camera-front", 1);
 		dt_end(&w);
 	}
 	/*

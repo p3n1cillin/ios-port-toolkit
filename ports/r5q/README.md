@@ -1,4 +1,4 @@
-# Galaxy S10 Lite (r5q) â€” the native iOS port's working tree
+# Galaxy S10 Lite (r5q) — the native iOS port's working tree
 
 This is the port the toolkit at the repository root was distilled from: iOS 16.5 running natively on the
 Samsung Galaxy S10 Lite (SM-G770F, SM8150), installed in place of Android (iOS system volume on the phone's
@@ -20,12 +20,16 @@ binaries, no build outputs and no phone backups are in this repository (see [the
 | `wifi/*_test.*`, `wifi/magrec.c`, `wifi/cm_rate.m` | on-phone probes: CoreMotion, CoreLocation, orientation, video, the magnetometer |
 | `wifi/r5qsign.py`, `wifi/appinst.m`, `wifi/ipa_install.py` | signing and installing apps built here |
 | `pipeline/` | how a test is built now: the root volume, the test image, the run ([pipeline/README.md](pipeline/README.md)) |
-| `phone.py` | everything done with the phone from the PC: `cycle` (flash, restart, follow the log), `args`, `logs`, `smem`, `screenshot`, â€¦ |
+| `phone.py` | everything done with the phone from the PC: `cycle` (flash, restart, follow the log), `args`, `logs`, `smem`, `screenshot`, … |
 | `build_*.py`, `package_install_boot.py` | the build pipeline (kernel in a sandbox, loader, shim, BOOT image) |
 | `wifi/CAMERA-PLAN.md`, `wifi/CAMERA-FEASIBILITY.md` | the camera: how iOS 16.5 reaches it, the design, Tests 267-269 |
 | `wifi/BLUETOOTH-PLAN.md`, `wifi/BLUETOOTH-IOS-RESEARCH.md` | Bluetooth, Tests 244-262, and how iOS 16.5 reaches its controller |
 | `wifi/WIFI-PLAN.md` | everything since Test 111, step by step with what every test showed: Wi-Fi, sound, GPU, apps, sensors, CoreMotion, the compass, the microphone |
 | `SESSION.md` | the test-by-test log of the earlier stages |
+| `kernel-build/r5q-overlay/bsd/dev/redwood_apple80211.c` | the Apple80211 ioctls iOS's wifid uses (scan, join, link rate) over the kernel's WLAN driver (Tests 443-444) |
+| `wifi/inject_sb_r5q.m` | a library inserted into SpringBoard: Control Center and status-bar fixes for the GL path (Tests 442-444) |
+| `wifi/vt_enc_probe.c` | on-phone VideoToolbox encoder benchmark (HEVC presets), Tests 431-434 |
+| `userland-patches/` | patches to the donor's userland (media library, init, ReplayKit export) against the donor revision they name |
 
 ## Storage (Test 412, 2026-11-20)
 
@@ -34,6 +38,27 @@ by init (`var_hfs=1`) in place of the 1.6 GB RAM filesystem; iOS reports "3.7 GB
 [wifi/STORAGE-PLAN.md](wifi/STORAGE-PLAN.md); tools: `storage/mkplace.py`, `wifi/hfsplace.c`, `wifi/hfsmount.c`,
 `pipeline/build_init.sh` + `pipeline/macho_static.py` (static init from source with LLVM's linker),
 `pipeline/panic_sym.py`.
+
+## Since Test 430 (2026-11-21 to 11-24, Tests 431-450)
+
+The standard image is listed in [pipeline/README.md](pipeline/README.md) with each step's evidence. In short:
+
+- **Video recording with sound:** a NEON ISP and Cisco's OpenH264 as a VideoToolbox H.264 encoder: 1080p30 at
+  30 fps with the microphone in sync, 1080p60 / 720p60 from a 1634-line IMX586 mode, OIS movie mode while recording
+  (Tests 431-434). Exposure bias, AE/AWB lock and the back flash in the Camera app.
+- **Three back-facing lenses in iOS:** the wide IMX586 (1x), the ultra-wide S5K3L6 (0.5x) switched live
+  (`kern.redwood.cam_main`), and the front IMX616 (Tests 438-442).
+- **Microphone:** reliable across sessions under camera load (RX barriers and sentinels, a symmetric SLIMbus
+  teardown; Tests 432-433), and the bottom/top microphones as iOS data sources (Tests 435-436).
+- **Display:** native @3x (`fbscale=3`, 1125x2436 points), a 4-thread compositor, Adreno 640 at 499 MHz, GL fixes
+  for Control Center and translucent views (Tests 434-449).
+- **Power:** a CPU governor (`cpufreq=2`), event-driven driver threads (>12,000 to ~350 wakeups a second), slower
+  polling while the screen is off (Tests 438-441).
+- **Sound:** the earpiece as iOS's "Receiver" route (Tests 441-442); ReplayKit screen recordings saved (Test 436).
+- **Radios:** CommCenter in the standard boot; GPS (`gps=1`) through the modem's QMI LOC with a QMI PDS bridge for
+  locationd -- satellites seen, no position fix yet (Tests 436-438). Bluetooth registered before launchd (Test 445).
+- **Test 450:** fixes from a review of the above (the memory benchmark no longer starts with `cpufreq=2`, GPS stops
+  when its client closes, the microphone choice is fixed per recording, bounded settle retries).
 
 ## State (Test 353)
 

@@ -39,7 +39,7 @@ candidate designs).
       `/dev/redwood-camera` serves mode 1, 4000x3000.
     - mediaserverd's injected capture device registered **two streams, back and front**, and the graph started
       them.
-    - **Camera.app opens with its full interface** (modes, shutter, 1Ã—, switch camera) and the green in-use dot,
+    - **Camera.app opens with its full interface** (modes, shutter, 1×, switch camera) and the green in-use dot,
       **but the preview is black.**
     - mediaserverd logs "no /dev/redwood-camera (Input/output error): no frames". **The open returns EIO even for
       root** (new tool `wifi/devread.c`: `/var/r5q/bin/devread PATH [BYTES] [r|rw]`). The node is major 20 and does
@@ -75,20 +75,20 @@ candidate designs).
   - #1 on GPIO94/95 (NORTH tile 0x03900000);
   - #2 on GPIO47/48 (EAST tile 0x03500000).
 
-  Pins and tiles come from the DT's `i2c-gpio` nodes and Linux pinctrl-sm8150.c. Register 0x00 and 0x02â€“0x2f are
+  Pins and tiles come from the DT's `i2c-gpio` nodes and Linux pinctrl-sm8150.c. Register 0x00 and 0x02–0x2f are
   read; 0x01 (STATUS / an interrupt latch) is skipped. The pins go back as found.
 - **Both chips answer: ID 0x02.** The same register map for both:
 
-  | Reg | #1 | #2 | Meaning (Samsung s2mpb03.h/.c: 0 ID, 1 STATUS, 2 CTRL, 3â€“9 LDO1â€“7_CTRL, 0xaâ€“0xb slew) |
+  | Reg | #1 | #2 | Meaning (Samsung s2mpb03.h/.c: 0 ID, 1 STATUS, 2 CTRL, 3–9 LDO1–7_CTRL, 0xa–0xb slew) |
   | --- | --- | --- | --- |
-  | 0x03â€“0x09 | 1c 20 2c 20 0e 28 28 | 1c 20 2c 20 0e 28 28 | LDO1â€“7: **bit 7 (enable) clear on every one: all off**; bits 5:0 the voltage |
+  | 0x03–0x09 | 1c 20 2c 20 0e 28 28 | 1c 20 2c 20 0e 28 28 | LDO1–7: **bit 7 (enable) clear on every one: all off**; bits 5:0 the voltage |
 
-  Voltage: LDO1, 2 and 4 = 0.7 V + n Ã— 12.5 mV; LDO3 = 0.7 V + n Ã— 25 mV; LDO5â€“7 = 1.8 V + n Ã— 25 mV. For example,
+  Voltage: LDO1, 2 and 4 = 0.7 V + n × 12.5 mV; LDO3 = 0.7 V + n × 25 mV; LDO5–7 = 1.8 V + n × 25 mV. For example,
   LDO3 0x2c gives 1.8 V. These are the reset values, not the DT's sensor voltages.
 - Done in this test: the regulators are reachable and readable from our kernel, and their register map is known
   (Samsung's open-source driver, e.g. github.com/ianmacd/gts6lwifi drivers/regulator/s2mpb03.c).
 - **Next (writes, the first of the camera port):**
-  1. set and enable one sensor's LDOs as the DT gives them (AVDD 2.8 V, DVDD about 1.05â€“1.1 V, IOVDD 1.8 V);
+  1. set and enable one sensor's LDOs as the DT gives them (AVDD 2.8 V, DVDD about 1.05–1.1 V, IOVDD 1.8 V);
   2. its MCLK (camcc) and its reset GPIO;
   3. read its chip ID over CCI;
   4. power everything down again.
@@ -211,7 +211,7 @@ candidate designs).
     and CSID 400, camnoc_axi, slow_ahb;
   - GCC hf/sf AXI branches;
   - **the titan power domain is 0xc1bc**: the donor's 0xc194 is a clock register here and must not be written;
-  - CSI-PHY v1.1 at 0xac65000 + 0x1000Â·n, with its own 4-lane D-PHY tables (settle 14 at lane +0x08);
+  - CSI-PHY v1.1 at 0xac65000 + 0x1000·n, with its own 4-lane D-PHY tables (settle 14 at lane +0x08);
   - RPMh: MMCX and MX levels and `ldoc3` (1.2 V CSI-PHY supply), through the Wi-Fi driver's TCS helper (one owner
     of TCS 1).
 - **SMMU:** one SMR (0x86200840: stream 0x840, mask 0x620) with an S2CR copied from a boot context bank whose
@@ -493,7 +493,7 @@ candidate designs).
   switch to 3 Mbit/s (a serial engine's GCC clock change). A separate hazard, not the camera's (noted for later).
   The camera lines of finished runs are found again after a reset in the loader's ring (`rxlog` ->
   `loader_log_putc`; firmware-ring-now.bin): Test 304's 150 holding lines, intact.
-  - GPU temperatures 52-59 Â°C in every run, the battery full: not heat or power.
+  - GPU temperatures 52-59 °C in every run, the battery full: not heat or power.
 - **Where it stands:** the receive side alone runs 150 s (304). Full unpaced sessions of ~20 s run (294-296). The
   paced runs hung while the **memory stage** (camera NoC, GCC AXI, IFE-lite, the SMMU match) stayed up but idle
   for over a minute after only 3 frames, and iOS's long Camera-app session hung. So the trigger looks like the
@@ -661,7 +661,7 @@ candidate designs).
   hung.** The Wi-Fi log (1 s polls) ended at "step: RCGs" (90.486 s).
 - **The Wi-Fi log made streaming (2026-11-19):** `klog -f SECS` sends only what is new every 50 ms (~60 KB a run,
   r5qd relays output as it comes) and `phone.py wlog` restarts it at once, writing each chunk to the file as it
-  arrives: a hang loses â‰¤ ~50 ms.
+  arrives: a hang loses ≤ ~50 ms.
 - **Test 326 (the t325 kernel again, streamed log): the same place, exactly.** Session 3: CSI-PHY 2 configured,
   CSID resets, "CSID RX cfg 0x232103 0x41, RDI0 ... ctrl 0x1", **"[94.978812] step: camera NoC (SMMU lock taken)"**,
   then nothing: the camnoc RCG (0xc170) switch and the camnoc_axi branch (0xc18c). Test 279's first hang note said
@@ -855,8 +855,8 @@ candidate designs).
     `frontsensor_probe(7)`. That is power, ID, init + res3, the crop, IOP 160, CSI-PHY 3 / settle 28, the receive
     path, "on", then **the same `cam_session_frames` loop** as the rear camera (the battery's lock let go), "off",
     and everything down. The front camera keeps no pipeline across switches.
-  - iOS's exposure on the IMX616: lines Ã— 919/729 (its line is ~7.29 Âµs against the S5K3L6's 9.19), frame lines Ã—
-    5160/3268, coarse time â‰¤ frame âˆ’ 48, analog gain as Sony's code 1024 âˆ’ 1024/gain.
+  - iOS's exposure on the IMX616: lines × 919/729 (its line is ~7.29 µs against the S5K3L6's 9.19), frame lines ×
+    5160/3268, coarse time ≤ frame − 48, analog gain as Sony's code 1024 − 1024/gain.
   - Kernel soak without the owner: `cam_soak_alt=1` alternates short sessions front/rear, `cam_soak_front=1` makes
     the long one the front camera's; the soak reader asks for an exposure at frame 15 (both sensors).
 - **Test 340 result: THE FRONT CAMERA STREAMS THROUGH THE SESSION PATH, switching with the rear.** Six short sessions
@@ -900,11 +900,11 @@ candidate designs).
   S5K3L6), RGGB. The soak's `cam_soak_alt=2` turns through the three cameras; `cam_soak_front=2` makes the long session
   the main camera's. The IMX586's tuning (`com.samsung.tuned.sony_imx586.bin`, `--crop 0.243,0.2427,0.757,0.7573`:
   corner gains ~1.8x over the crop) installed as the back slot's `camera-s5khm2sd.isp`.
-- **Test 343 (kernel t343; the three cameras in turn): ALL THREE SENSORS SERVE SESSIONS.** Six short sessions front â†’
-  main â†’ ultra-wide â†’ front â†’ main â†’ ultra-wide, each "30 frames handed over, 0 misses"; each front or main request
+- **Test 343 (kernel t343; the three cameras in turn): ALL THREE SENSORS SERVE SESSIONS.** Six short sessions front →
+  main → ultra-wide → front → main → ultra-wide, each "30 frames handed over, 0 misses"; each front or main request
   after the ultra-wide: "the S5K3L6's pipeline goes down first"; exposure "taken" on all three. Then **20 s from the
   main camera: 600 frames, 465,600 packets, ECC 0, CRC 0, SMMU gfsr 0**, no IFE violation; iOS running.
-  - Middle-line means: front 20 (facing up, a dim room), ultra-wide 15 (â‰ˆ its black level: facing the desk),
+  - Middle-line means: front 20 (facing up, a dim room), ultra-wide 15 (≈ its black level: facing the desk),
     **main 0-4**: dark too, but below the 64 (16 of 255) black level the iOS side assumes. The IMX586's pedestal may
     differ: to be checked in a lit scene (the pattern was exact, so the data path is not the cause).
 - **Test 345 (kernel t345; `cammain=2`, the main camera facing the desk): THE IMX586'S BLACK LEVEL IS 0.** A 10-bit
@@ -915,7 +915,7 @@ candidate designs).
   shadows would be crushed.
 - **Test 350 (kernel t350; the three-camera soak): THE SONY SENSORS' WHOLE BINNED FRAMES.** iOS's sessions no longer
   get the 1028x772 crop of the IMX586 and the IMX616 but their modes' whole frames: **IMX586 res5 2000x1500** (crop
-  0,0, line length tripled to 16128 so a 2500-byte line, ~4.9 Âµs on four lanes at ~1 Gb/s, fits its line time;
+  0,0, line length tripled to 16128 so a 2500-byte line, ~4.9 µs on four lanes at ~1 Gb/s, fits its line time;
   frame length 3571, ~30 a second at 24 MHz) and **IMX616 res3 1632x1224** (its own crop 4,0, frame 5160): the
   sensors' full field of view and 2.5-3.7x the pixels for photographs. (`struct sony_cam` has the frame's
   width/height; `imx586_full` / `imx616_full` for level 7; `cam_full=0` keeps the crops.)
@@ -927,7 +927,7 @@ candidate designs).
     line ratio now 919/1167).
   - mediaserverd needs no change: it offers iOS fixed formats (4032x3024 ...), renders them from any raw frame, and
     sizes its read from each frame's header.
-  - **Result:** six short sessions front (1632x1224) â†’ main (2000x1500) â†’ ultra-wide (1028x772), twice, each "30
+  - **Result:** six short sessions front (1632x1224) → main (2000x1500) → ultra-wide (1028x772), twice, each "30
     frames handed over, 0 misses"; then **20 s from the main camera: 600 frames, 902,400 packets (1,504 a frame),
     ECC 0, CRC 0**, WM0 at one address (0xd8200000), SMMU gfsr 0; iOS running.
 - **Test 351 (the t350 kernel; the standard image): iOS gets the whole frames.** mediaserverd: "frames of 2000x1500
@@ -955,17 +955,17 @@ candidate designs).
     data itself was wrong.
     - A **dark frame** (4 lines, 1x) of the IMX586's full 2000x1500 mode (Test 350's: line length tripled to 16128)
       was not black: a level ramping from ~3 at the top to ~137 at the bottom, column stripes, 45% of pixels at 0.
-      It scaled with gain and not with exposure, and Râ‰ˆGâ‰ˆB.
-    - iOS is told black 0. With white balance RÃ—2.1, BÃ—1.8 that offset became the flat purple streaks.
+      It scaled with gain and not with exposure, and R≈G≈B.
+    - iOS is told black 0. With white balance R×2.1, B×1.8 that offset became the flat purple streaks.
     - The cropped mode (line length 10752) gives a dark frame of mean 1.2, flat.
   - **Test 397:** boot-arg `cam586_ll=N` sets the full frame's line length, with the frame length and iOS's line ratio
     scaled. At **10752** (frame 5356 lines, ratio 919/778, the same ~30 a second) the dark frame is mean 3, flat.
-    The link stays clean: 1504 packets a frame, ECC 0, CRC 0. The top ~16 rows keep a small fading offset (~50â†’40).
+    The link stays clean: 1504 packets a frame, ECC 0, CRC 0. The top ~16 rows keep a small fading offset (~50→40).
   - **Test 398:** 10752 is the default (imx586_full). Standard image = r5q-install-boot-398.img (kernel t398, root
     test395). IMG_0007.HEIC saved; mediaserverd 102 MB.
   - **Test 396 (kept):** the Sony mode tables set `0x0220 = 0x62` and a short exposure of their own (`0x0224 = 500`;
     the IMX616 also a short gain, `0x0216`). The kernel now writes both exposures and both gains in one group hold.
-    Measured afterwards: the exposure response (4 â†’ 3000 lines) was about the same as before, so this was not the
+    Measured afterwards: the exposure response (4 → 3000 lines) was about the same as before, so this was not the
     cause. It keeps the two in step.
   - Still for the owner: a lit scene, for colour (white balance and tuning). In a dark room iOS's auto-exposure sits
     at ~7 ms and 3-5x gain, and the preview is noise.
@@ -1304,3 +1304,33 @@ every frame below has **0.00%**, warm or cold, which is the gate.
   00 00 -- servo on, status 0x02 (running)**; hall centres x 2038, y 2044 (12-bit, mid-range). Servo off at the end.
   `cam_ois=0` leaves it alone. Not measured: how much it steadies a hand-held picture (owner's eye); video mode
   (0x0002 = 1) not used yet.
+
+## Fast NEON ISP, OpenH264 H.264 encoder, camera controls, OIS movie mode, and SLIMbus mic reliability (2026-11-22, Tests 431-433)
+
+- **Fast NEON camera ISP (`userland/src/camera_isp.c`):** Added 2-row linear RGB cell cache, stepped LSC, fixed-point 3x3 CCM, and ARM64 NEON kernels (`isp_bench`: 1080p **55.78 -> 7.27 ms/frame = 137.6 fps**; 720p **25.29 -> 4.94 ms/frame = 202.6 fps**).
+- **VideoToolbox `'avc1'` software H.264 encoder (`userland/src/vt_h264_enc.{h,c}`, linked into `libredwood-media.dylib`):** Cross-compiled Cisco OpenH264 v2.4.1 (`libopenh264_enc.a`, `-DAPPLE_IOS -DHAVE_NEON_AARCH64`, registered via `r5q_register_h264_encoder()` in `inject_media.c` with `CMClassImplementationID` -> `com.apple.videotoolbox.videoencoder.h264.redwood`). Note: iOS 16.5 `VTCompressionSessionCreate` routes out-of-process over XPC (`mediaserverd`) unless `kVTCompressionSessionOption_AllowClientProcessEncode = @YES` is passed to `VTCompressionSessionCreateWithOptions` or the session runs in `mediaserverd`. Standalone `vt_h264_test` (defaults: 4 threads, `MEDIUM_COMPLEXITY`): 720p `out=60/60 key=2 dec=60/0err` **8.0 ms/f (125.35 fps)**; 1080p **16.2 ms/f (61.86 fps)** (`cmp=1`: **59.58 fps**); 1080p with ISP **19.8 ms/f (50.44 fps)**; `AVAssetWriter` 720p 60f **244.86 fps**. Set persistent `CAMUserPreferenceCaptureEncodingBehavior = 1` (`cfpref`) so `Camera.app` records H.264 `.MOV` instead of stub HEVC.
+- **Camera 1-to-1 controls & OIS movie mode (`userland/src/camera_isp.{h,c}`, `camera_device.c`, `bsd/dev/redwood_camera.c`, `redwood_sec_ts.c`):** Added `ExposureBias` (`-3..+3`), `LockAENow`/`UnlockAENow`, `LockAWBNow`/`UnlockAWBNow` (with `MD_*_LOCKED` metadata), non-blocking back-camera `FlashMode` (2-frame pulse via `/dev/redwood-torch`), and `VideoRecordingInProgress` forwarding `REDWOOD_CAMERA_OIS_MODE` (= 5) to `redwood_r5q_cam_ois_mode()` (`cam: ois mode=1` on record start, `cam: ois mode=0` on stop).
+- **SLIMbus BAM RX race & multi-session mic fix (Tests 431-433):**
+  - **Test 431 (`kernel t431`, `root test431`):** Verified 1080p `Camera.app` H.264 `avc1` @ 30.01 fps (`15.2 Mbps`) + `4032x3024` JPEG + `cam: ois mode=1/0`, but mic audio was `-91.0 dB` silent due to `r5q_slim_wait()` reading uninitialized RX word `0x00000000` ahead of BAM pipe 3 DMA under IMX586 CSI load (`codec: unmute` FAILED, `a91=34`).
+  - **Test 432 (`kernel t432`):** Added `dsb sy` barriers, `0xffffffff` RX word sentinels, `50 ms` read retry, and bool `unmute`/`settle` return handling in `redwood_adsp.c` / `redwood_mic.c` (plus fixed shadowed `r5qd_quiet` and `no link` retry in `phone.py`). Session 1 recorded clean H.264 + mic audio (`max_volume -15.8 dB`, `0` SLIMbus errors, `a91=24`), while intermittent Session 2 silence persisted because `DISCONNECT_PORT` lacked a trailing `RECONFIG_NOW` and AFE port `0x4001` stopped/started out of order relative to SLIMbus channel 134 teardown/setup.
+  - **Test 433 (`kernel t433`, standard):** Reordered `redwood_mic.c` (`dsp_path_on -> redwood_r5q_mic_codec_on -> dsp_port_on`, `undo`: `dsp_off -> redwood_r5q_mic_codec_off`) and `redwood_adsp.c` (`down -> tx_channel_off -> clock_off`), committed `DISCONNECT_PORT` with `RECONFIG_NOW (disconnect)` (ack `0x2f`), and added IFD snapshot logging. Verified **6/6 consecutive capture sessions** on Test 433 (cold & warm `Camera.app` + two `record_test 2` runs) with 0 SLIMbus errors, `cam: ois mode=1/0`, `4032x3024` JPEG (`IMG_0017.JPG`), and both pulled `Camera.app` videos (`IMG_0018.MOV`: 1080p H.264 @ 29.96 fps, AAC `96.6 kbps`, `max_volume -16.7 dB`; `IMG_0019.MOV` after cold kill/reopen: 1080p H.264 @ 30.01 fps, AAC `98.3 kbps`, `max_volume -8.6 dB`).
+- **Test 434 (`kernel t434`, `root test434`, standard, 2026-11-23): `1080p60` (`Video-FES-60`), full-FOV lens shading, and MobileGestalt capabilities:**
+  - **Full-FOV lens shading (`RWCISP02`, without `--crop`) & MobileGestalt:** Rebuilt lens shading table without crop; verified `IMG_0020.JPG` (`4032x3024` rear), `IMG_0021.MOV` (`1080p30`), and `IMG_0022.JPG` (`3088x2320` front), plus `/var/r5q/bin/mgq` reporting `front-facing-camera=true`, `auto-focus-camera=true`, and `camera-front-flash=true`.
+  - **`Video-FES-60` `1080p60` / `720p60` pipeline (`userland/src/camera_device.c`, `camera_isp.{h,c}`, `vt_h264_enc.c`):** Added 3rd Back Camera format `{ 4224, 2376, 60, 2304, 1296 }` (`FrontEndScalerOutputWidth=2304`, `FrontEndScalerOutputHeight=1296`, matching `csu_resolveFormatIndexForNamedStreamFormat`'s `'Video-FES-60'`), set `isp.target_frame_lines = 1634u` for 60 fps (`3268u` for 30 fps) matching IMX586 `1634`-line readout (`~58-59 fps`, `ecc 0 crc 0`, `SMMU gfsr 0`), reused `PrimaryScaler` NV12 for `SecondaryScaler` preview via `isp_scale_nv12()` (4 slices for scaled preview, 8 slices for `PrimaryScaler`), set `isp_measure()` decimation `step = 8` on 60 fps (`step = 4` kept for 30 fps), and tuned OpenH264 (`LOW_COMPLEXITY`, CAVLC, `LEVEL_4_2`, `bEnableSceneChangeDetect=false`, `iLoopFilterDisableIdc=2`, `uiIntraPeriod=60`, `16/24 Mbps` cap on `1080p > 35 fps`).
+  - **Verification (`IMG_0031.MOV` & baked-in rebuilt Test 434 image `43be4a3347311b87fb5a3a32108b96025307341c3e84fccbb45a70c60ec2d6af`):** Live `Camera.app` `HD · 60` (`IMG_0031.MOV`, `9,301,515` bytes) verified via `ffprobe`: `h264 High L42 1920x1080`, `avg_frame_rate=6975/137 (50.91 fps)`, `duration=5.480000 s`, `bit_rate=13406405`, `nb_frames=279`, `aac LC 44100 Hz mono`, `bit_rate=94111`, `nb_frames=239`, `ffmpeg volumedetect` `max_volume: -36.5 dB`. Rebuilt `test434-root.apfs.new` + `r5q-install-boot-434.img`, flashed and cycled via `phone.py cycle`, and verified baked-in `/redwood/lib/libredwood-media.dylib` exposes Back Camera `[4]/[5] 1280x 720, { 2- 60 fps}`, `[8]/[9] 1920x1080, { 2- 60 fps}`, `[16]/[17] 3840x2160, { 2- 60 fps}` with 0 CrashReporter logs.
+
+## Review fixes and the toolkit's checks (2026-11-24, Test 450)
+
+- **Test 450 (kernel t450, root test447, standard):** fixes from a three-way review of Tests 431-449, mostly outside
+  the camera (pipeline/README.md has the list): the memory benchmark no longer runs at every boot with `cpufreq=2`,
+  GPS stops when its client closes, the microphone source is fixed per recording, unmute/settle retries are bounded.
+- **Camera.app video on Test 450:** `IMG_0037.MOV` (imported into Photos): `toolkit/tools/av_check.py` -- h264
+  1920x1080, 634 frames in 21.13 s (30.0 fps), AAC 21.13 s, both from 0. The same tool on the Test 430-era movies
+  (port/build/vid) flags each one: HEVC at 5.3-5.4 fps, 10.1 s of picture in 17 s of sound, and IMG_0009.MOV with no
+  moov (never finalised).
+- **Checked from the toolkit, against this camera's own history:** `cam_map.py live.dts` finds the lens motor, OIS
+  and EEPROM on CCI 1 master 1 (GPIO33/34) and warns they are off the IMX586's bus (what Test 428 found by scanning);
+  `pmic_ldo.py log` on Test 343's boot log flags `LDO3 0x80 = 0.700 V on <<< WRONG: the device tree gives LDO3 1.800 V`
+  -- the Test 427 bug, visible two days and 84 tests before it was found; Test 427's log comes out clean.
+- Open (minor, from the review): `cam_full=0` reports 1634 frame lines for the 3268-line cropped mode; the OIS movie
+  mode is not re-sent after a session restart.

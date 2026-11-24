@@ -1,0 +1,156 @@
+--- a/userland/src/inject_media.c
++++ b/userland/src/inject_media.c
+@@ -39,6 +39,7 @@
+ #include <CoreVideo/CoreVideo.h>
+ #include "vt_h264_enc.h"
+ #include <dlfcn.h>
++#include <errno.h>
+ #include <fcntl.h>
+ #include <mach-o/dyld.h>
+ #include <mach/mach_time.h>
+@@ -48,6 +49,7 @@
+ #include <stdarg.h>
+ #include <stdbool.h>
+ #include <stdio.h>
++#include <stdlib.h>
+ #include <string.h>
+ #include <sys/sysctl.h>
+ #include <unistd.h>
+@@ -638,11 +640,8 @@
+ 	}
+ }
+ 
+-/*
+- * (Test 436) ReplayKit Photos export fallback in replayd: when +[RPPhotosUtility exportVideoToPhotosLibrary:completionHandler:]
+- * runs, copy the finished screen recording MP4 into /private/var/mobile/Media/DCIM/100APPLE/IMG_XXXX.MP4 as well so every
+- * screen recording is preserved in the Camera Roll directory even if PhotoKit performChangesAndWait: returns an error.
+- */
++/* Preserve the user's completed ReplayKit recording as a standalone DCIM file
++ * before the normal Photos export can move its source. Photos owns its catalogue. */
+ #include <sys/stat.h>
+ 
+ static IMP orig_rp_export_photos;
+@@ -650,57 +649,81 @@
+ static void
+ r5q_copy_mp4_to_dcim(id video_url)
+ {
+-	const char *src = NULL;
+-	struct stat st;
+-	char dst[128];
+-	int in_fd, out_fd;
+-	uint8_t buf[32768];
+-	ssize_t r;
++	static const char directory[] = "/private/var/mobile/Media/DCIM/100APPLE";
++	char staging[] = "/private/var/mobile/Media/DCIM/100APPLE/.r5q-replay-XXXXXX";
++	struct stat info;
++	uint8_t buffer[32768];
++	const char *source;
++	int input, output;
++	bool complete = false;
+ 
+ 	if (video_url == nil) {
+ 		return;
+ 	}
+-	id path_str = ((id (*)(id, SEL))objc_msgSend)(video_url, sel_registerName("path"));
+-	if (path_str != nil) {
+-		src = ((const char *(*)(id, SEL))objc_msgSend)(path_str, sel_registerName("UTF8String"));
+-	}
+-	if (src == NULL || stat(src, &st) != 0 || st.st_size <= 0) {
++	id path = ((id (*)(id, SEL))objc_msgSend)(video_url, sel_registerName("path"));
++	source = path == nil ? NULL : ((const char *(*)(id, SEL))objc_msgSend)(path, sel_registerName("UTF8String"));
++	if (source == NULL) {
++		return;
++	}
++	input = open(source, O_RDONLY | O_NOFOLLOW | O_NONBLOCK);
++	if (input < 0) {
++		return;
++	}
++	if (fstat(input, &info) != 0 || !S_ISREG(info.st_mode) || info.st_size <= 0) {
++		close(input);
+ 		return;
+ 	}
+ 	(void)mkdir("/private/var/mobile/Media/DCIM", 0755);
+-	(void)mkdir("/private/var/mobile/Media/DCIM/100APPLE", 0755);
+-	dst[0] = 0;
+-	for (unsigned i = 1; i <= 9999; i++) {
+-		char cand_jpg[128], cand_heic[128], cand_mov[128], cand_mp4[128];
+-		snprintf(cand_jpg, sizeof(cand_jpg), "/private/var/mobile/Media/DCIM/100APPLE/IMG_%04u.JPG", i);
+-		snprintf(cand_heic, sizeof(cand_heic), "/private/var/mobile/Media/DCIM/100APPLE/IMG_%04u.HEIC", i);
+-		snprintf(cand_mov, sizeof(cand_mov), "/private/var/mobile/Media/DCIM/100APPLE/IMG_%04u.MOV", i);
+-		snprintf(cand_mp4, sizeof(cand_mp4), "/private/var/mobile/Media/DCIM/100APPLE/IMG_%04u.MP4", i);
+-		if (access(cand_jpg, F_OK) != 0 && access(cand_heic, F_OK) != 0 &&
+-		    access(cand_mov, F_OK) != 0 && access(cand_mp4, F_OK) != 0) {
+-			strlcpy(dst, cand_mp4, sizeof(dst));
++	(void)mkdir(directory, 0755);
++	output = mkstemp(staging);
++	if (output < 0) {
++		close(input);
++		return;
++	}
++
++	off_t remaining = info.st_size;
++	while (remaining > 0) {
++		size_t want = remaining < (off_t)sizeof(buffer) ? (size_t)remaining : sizeof(buffer);
++		ssize_t count = read(input, buffer, want);
++		if (count < 0 && errno == EINTR) {
++			continue;
++		}
++		if (count <= 0) {
+ 			break;
+ 		}
+-	}
+-	if (dst[0] == 0) {
+-		return;
+-	}
+-	in_fd = open(src, O_RDONLY);
+-	if (in_fd < 0) {
+-		return;
+-	}
+-	out_fd = open(dst, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+-	if (out_fd < 0) {
+-		close(in_fd);
+-		return;
+-	}
+-	while ((r = read(in_fd, buf, sizeof(buf))) > 0) {
+-		(void)write(out_fd, buf, (size_t)r);
+-	}
+-	close(out_fd);
+-	close(in_fd);
+-	(void)chown(dst, 501, 501);
+-	say("redwood: replayd: copied screen recording %s (%lld bytes) -> %s\n", src, (long long)st.st_size, dst);
++		ssize_t offset = 0;
++		while (offset < count) {
++			ssize_t written = write(output, buffer + offset, (size_t)(count - offset));
++			if (written < 0 && errno == EINTR) {
++				continue;
++			}
++			if (written <= 0) {
++				goto finish;
++			}
++			offset += written;
++		}
++		remaining -= count;
++	}
++	complete = remaining == 0;
++finish:
++	close(input);
++	if (complete) {
++		(void)fchown(output, 501, 501);
++		complete = fsync(output) == 0;
++	}
++	if (close(output) != 0) {
++		complete = false;
++	}
++	if (complete) {
++		/* Publish a complete file atomically. link() never replaces an existing asset. */
++		const char *leaf = strrchr(staging, '/');
++		char destination[128];
++		snprintf(destination, sizeof(destination), "%s/R5Q_Replay_%s.MP4", directory, leaf + sizeof("/.r5q-replay-") - 1);
++		if (link(staging, destination) == 0) {
++			say("redwood: replayd: saved standalone screen recording (%lld bytes)\n", (long long)info.st_size);
++		}
++	}
++	(void)unlink(staging);
+ }
+ 
+ static void

@@ -2470,6 +2470,7 @@ struct sony_cam {
 	uint32_t pll_pre;                                          /* (Test 414) both PLLs' pre-divider; 0: the tables' */
 };
 static const struct sony_cam *cam_live;
+static struct sony_cam imx586_full;
 
 void redwood_r5q_cam_exposure(uint32_t lines, uint32_t gain, uint32_t frame_lines);
 void
@@ -2624,6 +2625,8 @@ main_af_up(vm_offset_t north)
  * Registers are two-byte addresses. Boot-arg cam_ois=0 leaves it alone.
  */
 static bool ois_on;
+static uint8_t ois_mode_cur;
+static volatile uint32_t ois_mode_req = 0xffffffffu;
 
 static const char *
 ois_write(uint16_t reg, const uint8_t *bytes, unsigned n)
@@ -2669,6 +2672,8 @@ main_ois_up(void)
 	unsigned tries;
 
 	ois_on = false;
+	ois_mode_cur = 0;
+	ois_mode_req = 0xffffffffu;
 	if (!af_on || (PE_parse_boot_argn("cam_ois", &want, sizeof(want)) && want == 0)) {
 		return;
 	}
@@ -2712,6 +2717,8 @@ main_ois_down(void)
 	af_bus.address = 0x0c;
 	bb = was;
 	ois_on = false;
+	ois_mode_cur = 0;
+	ois_mode_req = 0xffffffffu;
 }
 
 static void
@@ -2767,6 +2774,37 @@ af_apply(void)
 
 void redwood_r5q_cam_focus(uint32_t position);
 uint32_t redwood_r5q_cam_af_position(void);
+void redwood_r5q_cam_ois_mode(uint32_t mode);
+
+static void
+ois_apply(void)
+{
+	static const uint8_t b1[1] = { 0x01 };
+	struct bitbang *was;
+	uint32_t want = ois_mode_req;
+	uint8_t m;
+	const char *problem;
+
+	if (!ois_on || want == 0xffffffffu) {
+		return;
+	}
+	ois_mode_req = 0xffffffffu;
+	m = want ? 1 : 0;
+	if (m == ois_mode_cur) {
+		return;
+	}
+	was = bb;
+	bb = &af_bus;
+	af_bus.address = 0x24;
+	if ((problem = ois_write(0x0002, &m, 1)) == NULL && (problem = ois_write(0x0000, b1, 1)) == NULL) {
+		ois_mode_cur = m;
+		rxlog("cam: ois mode=%u\n", (unsigned)m);
+	} else {
+		rxlog("main camera: OIS mode %u: %s\n", (unsigned)m, problem);
+	}
+	af_bus.address = 0x0c;
+	bb = was;
+}
 
 void
 redwood_r5q_cam_focus(uint32_t position)
@@ -2780,6 +2818,12 @@ redwood_r5q_cam_af_position(void)
 	return af_on ? af_code : REDWOOD_R5Q_NO_FOCUS;
 }
 
+void
+redwood_r5q_cam_ois_mode(uint32_t mode)
+{
+	ois_mode_req = mode ? 1u : 0u;
+}
+
 static void
 cam_exposure_apply(void)
 {
@@ -2789,11 +2833,17 @@ cam_exposure_apply(void)
 
 	cam_reg_apply();
 	af_apply();
+	ois_apply();
 	if (!exp_pending || !cam_bus_ok) {
 		return;
 	}
 	exp_pending = false;
-	fl = exp_frame < 3268 ? 3268 : exp_frame > 0xfff0 ? 0xfff0 : exp_frame;    /* (~30 a second at the shortest) */
+	{
+		uint32_t min_fl = (cam_live == &imx586_full) ? 1634u : 3268u;
+		uint32_t req_fl = exp_frame == 0 ? 3268u : exp_frame;
+
+		fl = req_fl < min_fl ? min_fl : req_fl > 0xfff0 ? 0xfff0 : req_fl;
+	}
 	ln = exp_lines < 4 ? 4 : exp_lines > fl - 8 ? fl - 8 : exp_lines;
 	g = exp_gain < 32 ? 32 : exp_gain > 512 ? 512 : exp_gain;                  /* 1x .. 16x */
 	uint32_t w_fl = fl, w_ln = ln, w_g = g;
@@ -4624,7 +4674,17 @@ step_watch(void)
 				thread_deallocate(cam_thread);
 			}
 		}
-		delay(POLL_US);
+		/* (Test 440) Screen-off deep-idle backoff: 8 ms (125 Hz) -> 80 ms (12.5 Hz) while panel sleeps and no finger is down */
+		{
+			extern bool redwood_display_asleep(void);
+
+			if (redwood_display_asleep() && (rd(GPIO_IO(PIN_INT)) & 1) && !any_finger_down()) {
+				ticks += 9;
+				delay(POLL_US * 10);
+			} else {
+				delay(POLL_US);
+			}
+		}
 	}
 }
 
@@ -4677,6 +4737,8 @@ __attribute__((used, aligned(64))) struct r5q_touch_mailbox r5q_touch_mbox = { .
 static void
 pc_touch_thread(__unused void *parameter, __unused wait_result_t result)
 {
+	uint32_t idle_ticks = 0;
+
 	r5q_touch_mbox.done = r5q_touch_mbox.seq;
 	for (;;) {
 		uint32_t seq = r5q_touch_mbox.seq;
@@ -4685,6 +4747,7 @@ pc_touch_thread(__unused void *parameter, __unused wait_result_t result)
 			uint32_t kind = r5q_touch_mbox.kind, x0 = r5q_touch_mbox.x0, y0 = r5q_touch_mbox.y0;
 			uint32_t x1 = r5q_touch_mbox.x1, y1 = r5q_touch_mbox.y1, ms = r5q_touch_mbox.ms;
 
+			idle_ticks = 0;
 			if (x0 > 65535 || y0 > 65535 || x1 > 65535 || y1 > 65535 || ms > 10000) {
 				printf("touch: from the PC: gesture %u out of range, not played\n", seq);
 			} else if (kind == 4) {
@@ -4713,8 +4776,10 @@ pc_touch_thread(__unused void *parameter, __unused wait_result_t result)
 				printf("touch: from the PC: %s at %u,%u\n", kind == 3 ? "press" : "tap", x0, y0);
 			}
 			r5q_touch_mbox.done = seq;
+		} else if (idle_ticks < 100) {
+			idle_ticks++;
 		}
-		delay_for_interval(20, NSEC_PER_MSEC);
+		delay_for_interval(idle_ticks < 100 ? 20 : 100, NSEC_PER_MSEC);
 	}
 }
 

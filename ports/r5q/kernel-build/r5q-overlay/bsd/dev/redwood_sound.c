@@ -1265,6 +1265,10 @@ static bool mapped, copp_open, stream_open;
 static uint32_t map_handle, copp;
 static volatile uint32_t returned;      /* the periods the DSP has said it is done with (a bit each) */
 static volatile uint32_t written_done, underflows, write_errors;
+static LCK_MTX_DECLARE(feeder_wake_lock, &sound_lock_group);
+static LCK_MTX_DECLARE(watch_wake_lock, &sound_lock_group);
+static int watch_wake_chan;
+static volatile int sound_spk_route;
 
 /* The DSP's events: the "done" of every write, and underflows. On the link's thread. */
 static bool
@@ -1279,6 +1283,7 @@ events(uint8_t service, __unused uint16_t port, uint32_t opcode, uint32_t token,
 		}
 		OSIncrementAtomic((volatile SInt32 *)&written_done);
 		OSBitOrAtomic(1u << (token & 31), &returned);
+		wakeup((void *)&returned);
 		return true;
 	}
 	if (opcode == APR_BASIC_RSP_RESULT && (token & WRITE_TOKEN)) {
@@ -1286,6 +1291,7 @@ events(uint8_t service, __unused uint16_t port, uint32_t opcode, uint32_t token,
 		OSIncrementAtomic((volatile SInt32 *)&write_errors);
 		OSIncrementAtomic((volatile SInt32 *)&written_done);
 		OSBitOrAtomic(1u << (token & 31), &returned);
+		wakeup((void *)&returned);
 		return true;
 	}
 	if (opcode == ASM_SESSION_EVENT_RX_UNDERFLOW) {
@@ -1489,7 +1495,15 @@ play(uint32_t ms, bool amplifiers)
 				tone_over = true;
 			}
 		}
-		sleep_ms(2);
+		if (returned == 0 && !stopping) {
+			struct timespec ts = { 0, 50 * NSEC_PER_MSEC };
+
+			lck_mtx_lock(&feeder_wake_lock);
+			if (returned == 0 && !stopping) {
+				msleep((void *)&returned, &feeder_wake_lock, PZERO, "r5q-sound-feed", &ts);
+			}
+			lck_mtx_unlock(&feeder_wake_lock);
+		}
 	}
 	ended = now_us();
 	{
@@ -1550,6 +1564,7 @@ ios_sink(const int16_t *frames, uint32_t count)
 	ios_frames += taken;
 	if (sound) {
 		last_sound_us = now_us();
+		wakeup(&watch_wake_chan);
 	}
 	return taken;
 }
@@ -1652,7 +1667,15 @@ feeder_thread(__unused void *parameter, __unused wait_result_t result)
 				}
 			}
 		}
-		sleep_ms(2);
+		if (returned == 0 && !stopping) {
+			struct timespec ts = { 0, 50 * NSEC_PER_MSEC };
+
+			lck_mtx_lock(&feeder_wake_lock);
+			if (returned == 0 && !stopping) {
+				msleep((void *)&returned, &feeder_wake_lock, PZERO, "r5q-sound-feed", &ts);
+			}
+			lck_mtx_unlock(&feeder_wake_lock);
+		}
 	}
 	say("sound: the feeder stops: %u periods written (%u could not be sent), %u given back (%u with an error), %u underflows; "
 	    "from iOS %llu frames came, %llu went to the DSP, %llu of silence filled in\n", sent, failed, written_done, write_errors,
@@ -1694,6 +1717,7 @@ watch(void)
 	bool on = false, given_up = false, muted = false;
 	uint64_t last_look = 0, last_monitor = 0;
 	uint32_t starts = 0, changes = 0, generation = 0, extra = 0, monitor = 0, monitor_looks = 0;
+	int applied_route = 0;
 
 	guard_level(below);                     /* (from the first sample on: see guard_off()) */
 
@@ -1701,6 +1725,8 @@ watch(void)
 		uint64_t now = now_us(), sounded = last_sound_us;
 		uint32_t extra_now, generation_now;
 		bool muted_now;
+		int route_now = sound_spk_route;
+		uint32_t route_atten = (route_now == 1) ? 128 : 0;      /* Receiver mode: -16 dB safe earpiece level */
 
 		if (redwood_audio_volume(&extra_now, &muted_now, &generation_now) && generation_now != generation) {
 			generation = generation_now;
@@ -1716,19 +1742,29 @@ watch(void)
 					spk_stop();
 					on = false;
 				}
-			} else if (on && !spk_volume(below + extra, 1)) {
+			} else if (on && !spk_volume(below + extra + route_atten, 1)) {
 				guard_off(true);
 				on = false;
 				given_up = true;
 			} else if (!given_up) {
-				guard_level(below + extra);
+				guard_level(below + extra + route_atten);
+			}
+			applied_route = route_now;
+		} else if (route_now != applied_route) {
+			applied_route = route_now;
+			if (on && !muted && !spk_volume(below + extra + route_atten, 1)) {
+				guard_off(true);
+				on = false;
+				given_up = true;
+			} else if (!given_up && !muted) {
+				guard_level(below + extra + route_atten);
 			}
 		}
 		if (!on && !given_up && !muted && sounded != 0 && now - sounded < 100000) {
 			say_when("iOS plays: the amplifiers are started");
 			starts++;
 			ios_peak = 0;
-			if (!spk_start() || !spk_volume(below + extra, 1)) {
+			if (!spk_start() || !spk_volume(below + extra + route_atten, 1)) {
 				say("sound: THE AMPLIFIERS DID NOT START; iOS's sound goes on to the DSP, unheard\n");
 				guard_off(true);
 				given_up = true;
@@ -1770,7 +1806,17 @@ watch(void)
 				}
 			}
 		}
-		sleep_ms(5);
+		if (!on && !stopping) {
+			struct timespec ts = { 0, 500 * NSEC_PER_MSEC };
+
+			lck_mtx_lock(&watch_wake_lock);
+			if (!stopping && (last_sound_us == 0 || now_us() - last_sound_us >= 100000)) {
+				msleep(&watch_wake_chan, &watch_wake_lock, PZERO, "r5q-sound-watch", &ts);
+			}
+			lck_mtx_unlock(&watch_wake_lock);
+		} else {
+			sleep_ms(10);
+		}
 	}
 	guard_off(true);
 	say("sound: the watcher stops; the amplifiers were started %u times, iOS set the volume %u times%s\n", starts, changes,
@@ -1786,6 +1832,8 @@ static void
 take_down(void)
 {
 	stopping = true;
+	wakeup((void *)&returned);
+	wakeup(&watch_wake_chan);
 	if (level >= 4) {
 		redwood_audio_set_sink("nothing", NULL);
 	}
@@ -1982,6 +2030,33 @@ redwood_sound_dsp_down(void)
 		take_down();
 	}
 }
+
+#include <sys/sysctl.h>
+
+SYSCTL_DECL(_kern_redwood);
+
+static int
+sound_spk_route_sysctl(__unused struct sysctl_oid *oidp, __unused void *arg1, __unused int arg2, struct sysctl_req *req)
+{
+	int value = sound_spk_route, error;
+
+	error = sysctl_io_number(req, value, sizeof(value), &value, NULL);
+	if (error != 0 || req->newptr == 0) {
+		return error;
+	}
+	if (value < 0 || value > 2) {
+		return EINVAL;
+	}
+	if (value != sound_spk_route) {
+		sound_spk_route = value;
+		wakeup(&watch_wake_chan);
+		say("sound: route -> %s (%d)\n", value == 1 ? "Receiver" : value == 2 ? "Dual" : "Speaker", value);
+	}
+	return 0;
+}
+
+SYSCTL_PROC(_kern_redwood, OID_AUTO, spk_route, CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_LOCKED,
+    0, 0, sound_spk_route_sysctl, "I", "Audio output route (0=Speaker, 1=Receiver, 2=Dual)");
 
 void
 redwood_sound_quiesce(void)

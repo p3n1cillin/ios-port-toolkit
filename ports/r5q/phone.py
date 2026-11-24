@@ -179,11 +179,23 @@ def charger():
     print(text.rstrip())
     regs = {}
     for line in text.splitlines():
-        name, _, vals = line.partition(' = ') if ' = ' in line else (line.split(' =')[0], '', line.split(' =')[-1])
+        if '=' not in line:
+            continue
+        left, _, right = line.partition('=')
+        parts = left.split()
+        if len(parts) < 2:
+            continue
         try:
-            regs[line.split(' ')[0] + ' ' + line.split(' ')[1]] = [int(v, 16) for v in line.split('=')[1].split()]
+            regs[parts[0] + ' ' + parts[1]] = [int(v, 16) for v in right.split()]
         except ValueError:
-            pass
+            continue
+    if not regs:
+        print('=> PM8150B charger registers did not answer (S10 Lite uses S2MU106 I2C); checking live kernel battery log...')
+        out = r5qd_quiet('run', '/var/r5q/bin/klog', '58000', timeout=20)
+        hits = [l for l in out.splitlines() if 'battery:' in l or 'charger:' in l]
+        for l in hits[-8:]:
+            print('   ' + l)
+        return
     st = regs.get('chgr status_1..2')
     if st:
         print(f'=> charger state: {CHG_STATE[st[0] & 7]}')
@@ -329,7 +341,7 @@ def usb_present():
         return False
 
 
-def r5qd(*args, timeout=30):
+def r5qd_quiet(*args, timeout=30):
     """a wifi/r5qd_client.py command; '' when the phone does not answer over Wi-Fi"""
     try:
         r = subprocess.run([sys.executable, str(pathlib.Path(__file__).resolve().parent / 'wifi/r5qd_client.py'), *args],
@@ -343,11 +355,11 @@ def unstick_usb():
     """(2026-11-20) The loader's USB is present but silent while iOS answers over Wi-Fi: restart the phone from iOS
     (/var/r5q/bin/r5q_reboot, reboot(2) over r5qd; the firmware restarts the phone and the loader brings its USB up
     again). No replugging. True when a restart was sent."""
-    if not usb_present() or 'pong' not in r5qd('ping', timeout=15):
+    if not usb_present() or 'pong' not in r5qd_quiet('ping', timeout=15):
         return False
     print('    USB cable connected but the loader does not answer (stuck link): restarting the phone from iOS over Wi-Fi',
           flush=True)
-    r5qd('run', '/var/r5q/bin/r5q_reboot', timeout=20)     # (the connection drops as the phone restarts)
+    r5qd_quiet('run', '/var/r5q/bin/r5q_reboot', timeout=20)     # (the connection drops as the phone restarts)
     return True
 
 
@@ -366,6 +378,8 @@ def wait_for_phone(seconds=3600, unstick=False):
                     print('the loader answers on USB (maintenance mode, or iOS running in live mode: `phone.py alive` tells)')
                     return
             except subprocess.TimeoutExpired:
+                continue
+            if 'Write to device failed' in (quick.stdout + quick.stderr):
                 continue
             break                                           # (an answer, just not the loader: no restart)
         else:

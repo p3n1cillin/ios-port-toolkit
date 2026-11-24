@@ -124,6 +124,9 @@ struct redwood_motion {                 /* as redwood_adsp.c */
 		uint32_t n;
 		uint64_t time;
 	} ring[3][16];
+	int32_t mag_cal_bias[3];        /* (Test 434, version 3) SLPI sns_mag_cal bias (uT * 1000) & status */
+	uint32_t mag_cal_status;
+	uint32_t mag_cal_count;
 };
 
 /*
@@ -501,7 +504,7 @@ auto_brightness(const struct redwood_motion *m)
 	}
 	smooth = smooth < 0 ? log10(m->lux / 1000.0 + 1) : 0.973 * smooth + 0.027 * log10(m->lux / 1000.0 + 1);
 	target = 0.08 + 0.23 * smooth;
-	target = target < 0.05 ? 0.05 : target > 1.0 ? 1.0 : target;
+	target = target < 0.025 ? 0.025 : target > 1.0 ? 1.0 : target;
 	if (ticks++ % 25 == 0) {                /* once a second: has the user moved the slider? */
 		float now = brightness_get();
 
@@ -548,16 +551,67 @@ auto_brightness(const struct redwood_motion *m)
 }
 
 /*
- * (Test 243) The magnetometer hard-iron calibrated here, as Android does in the sensors DSP (sns_mag_cal), before iOS
- * sees it. The raw field carries the phone's own magnets: owner's figure-8 recording (wifi/magrec.c, scratchpad
- * magfit.py) fits a sphere of radius 50.5 uT (the Earth's field: units right) around (-95.1, 39.0, -425.8) uT, axes
- * as the accelerometer's (no swap). iOS's own calibrator never came out of "uncalibrated" with the raw field. Start
- * from that offset; refine it as the phone is turned (a sphere fit over up to 48 samples spread at least 12 uT apart,
- * taken when the fit is round enough: radius 25..70 uT, residual under 3 uT).
+ * (Test 243 / 434) The magnetometer hard-iron calibrated before iOS sees it:
+ *   1. Persist learned offset across boots in /private/var/tmp/r5q_magcal.dat.
+ *   2. Reject transient single-sample glitches (> 80 uT jump from last good sample) unless >= 3 consecutive samples agree.
+ *   3. Prefer SLPI sns_mag_cal bias when status >= 2 (Test 434), checking sign ambiguity automatically.
+ *   4. Fallback 2-pass outlier-trimmed sphere fit over up to 64 samples (>= 10 uT spacing, >= 18 uT span on all 3 axes,
+ *      radius 20..80 uT, residual < 7.5 uT), blended smoothly so compass headings do not jump.
  */
-#define MAGCAL_SAMPLES 48
+#include <time.h>
+#define MAGCAL_SAMPLES          64
+#define MAGCAL_CACHE_PATH       "/private/var/tmp/r5q_magcal.dat"
 
-static double magcal_offset[3] = { -95.1, 39.0, -425.8 };
+static double magcal_offset[3] = { -95.0, 40.0, -445.0 };
+static double magcal_saved[3] = { -95.0, 40.0, -445.0 };
+static time_t magcal_saved_at;
+
+static void
+magcal_load(void)
+{
+	FILE *fp = fopen(MAGCAL_CACHE_PATH, "rb");
+	double buf[3];
+	char line[160];
+
+	if (fp == NULL) {
+		return;
+	}
+	if (fread(buf, sizeof(double), 3, fp) == 3 &&
+	    isfinite(buf[0]) && isfinite(buf[1]) && isfinite(buf[2]) &&
+	    fabs(buf[0]) < 1000.0 && fabs(buf[1]) < 1000.0 && fabs(buf[2]) < 1000.0) {
+		memcpy(magcal_offset, buf, sizeof(magcal_offset));
+		memcpy(magcal_saved, buf, sizeof(magcal_saved));
+		snprintf(line, sizeof(line), "r5q-bbd: compass: loaded offset %.1f %.1f %.1f from %s\n",
+		    buf[0], buf[1], buf[2], MAGCAL_CACHE_PATH);
+		say(line);
+	}
+	fclose(fp);
+}
+
+static void
+magcal_save_if_needed(void)
+{
+	time_t now = time(NULL);
+	double d2 = 0.0;
+	FILE *fp;
+
+	for (int k = 0; k < 3; k++) {
+		double d = magcal_offset[k] - magcal_saved[k];
+		d2 += d * d;
+	}
+	if (d2 < 4.0 || (magcal_saved_at != 0 && now - magcal_saved_at < 30)) {
+		return;
+	}
+	fp = fopen(MAGCAL_CACHE_PATH ".tmp", "wb");
+	if (fp != NULL) {
+		size_t w = fwrite(magcal_offset, sizeof(double), 3, fp);
+		fclose(fp);
+		if (w == 3 && rename(MAGCAL_CACHE_PATH ".tmp", MAGCAL_CACHE_PATH) == 0) {
+			memcpy(magcal_saved, magcal_offset, sizeof(magcal_saved));
+			magcal_saved_at = now;
+		}
+	}
+}
 
 static bool
 solve4(double a[4][5], double x[4])
@@ -595,34 +649,14 @@ solve4(double a[4][5], double x[4])
 	return true;
 }
 
-static void
-magcal_feed(const double raw[3])
+static bool
+fit_sphere(const double pts[][3], unsigned n, double x[4], double *r_out, double *res_out)
 {
-	static double kept[MAGCAL_SAMPLES][3];
-	static unsigned n, next, fresh, fits;
-	double a[4][5] = { { 0 } }, x[4], r, res = 0;
-	char line[200];
+	double a[4][5] = { { 0 } }, r, rad2, res = 0.0;
 
 	for (unsigned i = 0; i < n; i++) {
-		double d = 0;
-
-		for (int k = 0; k < 3; k++) {
-			d += (raw[k] - kept[i][k]) * (raw[k] - kept[i][k]);
-		}
-		if (d < 12.0 * 12.0) {
-			return;                         /* too near one already kept */
-		}
-	}
-	memcpy(kept[next], raw, sizeof(kept[0]));
-	next = (next + 1) % MAGCAL_SAMPLES;
-	n = n < MAGCAL_SAMPLES ? n + 1 : n;
-	if (++fresh < 8 || n < 16) {
-		return;
-	}
-	fresh = 0;
-	for (unsigned i = 0; i < n; i++) {
-		double row[5] = { 2 * kept[i][0], 2 * kept[i][1], 2 * kept[i][2], 1,
-			kept[i][0] * kept[i][0] + kept[i][1] * kept[i][1] + kept[i][2] * kept[i][2] };
+		double row[5] = { 2 * pts[i][0], 2 * pts[i][1], 2 * pts[i][2], 1,
+			pts[i][0] * pts[i][0] + pts[i][1] * pts[i][1] + pts[i][2] * pts[i][2] };
 
 		for (int j = 0; j < 4; j++) {
 			for (int k = 0; k < 5; k++) {
@@ -631,24 +665,98 @@ magcal_feed(const double raw[3])
 		}
 	}
 	if (!solve4(a, x)) {
-		return;
+		return false;
 	}
-	r = sqrt(x[3] + x[0] * x[0] + x[1] * x[1] + x[2] * x[2]);
+	rad2 = x[3] + x[0] * x[0] + x[1] * x[1] + x[2] * x[2];
+	if (rad2 <= 0.0 || !isfinite(rad2)) {
+		return false;
+	}
+	r = sqrt(rad2);
 	for (unsigned i = 0; i < n; i++) {
-		double d = sqrt((kept[i][0] - x[0]) * (kept[i][0] - x[0]) + (kept[i][1] - x[1]) * (kept[i][1] - x[1]) +
-		    (kept[i][2] - x[2]) * (kept[i][2] - x[2])) - r;
+		double dx = pts[i][0] - x[0], dy = pts[i][1] - x[1], dz = pts[i][2] - x[2];
+		double d = sqrt(dx * dx + dy * dy + dz * dz) - r;
 
 		res += d * d;
 	}
-	res = sqrt(res / n);
-	if (r >= 25 && r <= 70 && res < 3) {
+	*r_out = r;
+	*res_out = sqrt(res / n);
+	return isfinite(r) && isfinite(*res_out);
+}
+
+static void
+magcal_feed(const double raw[3])
+{
+	static double kept[MAGCAL_SAMPLES][3];
+	static unsigned n, next, fresh, fits;
+	double minv[3], maxv[3], x[4], r = 0.0, res = 0.0;
+	char line[200];
+
+	for (unsigned i = 0; i < n; i++) {
+		double d = 0;
+
 		for (int k = 0; k < 3; k++) {
-			magcal_offset[k] = 0.7 * magcal_offset[k] + 0.3 * x[k];
+			d += (raw[k] - kept[i][k]) * (raw[k] - kept[i][k]);
 		}
+		if (d < 4.0 * 4.0) {
+			return;                         /* too near one already kept */
+		}
+	}
+	memcpy(kept[next], raw, sizeof(kept[0]));
+	next = (next + 1) % MAGCAL_SAMPLES;
+	n = n < MAGCAL_SAMPLES ? n + 1 : n;
+	if (++fresh < 6 || n < 12) {
+		return;
+	}
+	fresh = 0;
+	for (int k = 0; k < 3; k++) {
+		minv[k] = maxv[k] = kept[0][k];
+	}
+	for (unsigned i = 1; i < n; i++) {
+		for (int k = 0; k < 3; k++) {
+			if (kept[i][k] < minv[k]) minv[k] = kept[i][k];
+			if (kept[i][k] > maxv[k]) maxv[k] = kept[i][k];
+		}
+	}
+	if (maxv[0] - minv[0] < 18.0 || maxv[1] - minv[1] < 18.0 || maxv[2] - minv[2] < 18.0) {
+		return;
+	}
+	if (!fit_sphere(kept, n, x, &r, &res)) {
+		return;
+	}
+	/* Second IRLS pass dropping > 10 uT residuals if >= 16 inliers remain. */
+	{
+		double inliers[MAGCAL_SAMPLES][3];
+		unsigned ni = 0;
+
+		for (unsigned i = 0; i < n; i++) {
+			double dx = kept[i][0] - x[0], dy = kept[i][1] - x[1], dz = kept[i][2] - x[2];
+			double d = fabs(sqrt(dx * dx + dy * dy + dz * dz) - r);
+
+			if (d <= 10.0) {
+				memcpy(inliers[ni++], kept[i], sizeof(inliers[0]));
+			}
+		}
+		if (ni >= 16 && ni < n) {
+			double x2[4], r2 = 0.0, res2 = 0.0;
+
+			if (fit_sphere(inliers, ni, x2, &r2, &res2)) {
+				memcpy(x, x2, sizeof(x));
+				r = r2;
+				res = res2;
+			}
+		}
+	}
+	bool accept = (r >= 20.0 && r <= 80.0 && res < 7.5 &&
+	    fabs(x[0]) < 1000.0 && fabs(x[1]) < 1000.0 && fabs(x[2]) < 1000.0);
+	if (accept) {
+		for (int k = 0; k < 3; k++) {
+			magcal_offset[k] = 0.65 * magcal_offset[k] + 0.35 * x[k];
+		}
+		magcal_save_if_needed();
 	}
 	if (fits++ < 10 || fits % 50 == 0) {
 		snprintf(line, sizeof(line), "r5q-bbd: compass: fit of %u samples: centre %.1f %.1f %.1f, radius %.1f uT, residual %.1f: %s\n",
-		    n, x[0], x[1], x[2], r, res, r >= 25 && r <= 70 && res < 3 ? "taken" : "not taken");
+		    n, x[0], x[1], x[2], r, res, accept ? "taken" : "not taken");
 		say(line);
 	}
 }
@@ -700,18 +808,29 @@ sensors_thread(__unused void *arg)
 	light = NULL;
 	/* (Test 229) the compass alone */
 	compass = sensor_service(client, "Redwood compass", 0xff00, 0x0a);
+	magcal_load();
 	/* (Test 230) the gyroscope (0xff00/9), rad/s on the same axes as Android's: CoreMotion's gyro and device motion */
 	gyro = sensor_service(client, "Redwood gyroscope", 0xff00, 0x09);
 	snprintf(line, sizeof(line), "r5q-bbd: sensors: ambient light service %p, compass service %p\n", (void *)light, (void *)compass);
 	say(line);
+	uint32_t last_cal_count = 0, spikes_dropped = 0, slpi_cal_logs = 0;
+	bool slpi_cal_active = false, have_prev_mag = false, disp_off = false;
+	double prev_mag[3] = { 0 };
+	unsigned mag_jump_streak = 0;
 	/*
-	 * (Test 348) Every 5 ms, not 40: the kernel now gets ~100 accelerometer and gyroscope samples a second and 50 from
-	 * the compass (Test 347, see_rate), but a 40 ms poll that sends only the newest sample capped what iOS saw at 25 a
-	 * second (cm_rate: 23.2/s in an app), too few for CoreMotion's fusion and the compass. Auto-brightness keeps its
-	 * 40 ms step (every eighth round).
+	 * (Test 348 / 440) Every 5 ms while screen is on, backing off to 50 ms (20 Hz) while display is asleep
+	 * (kern.redwood.cpufreq_state contains "disp=off") to eliminate 180/s idle userland wakeups.
 	 */
 	for (unsigned round = 0;; round++) {
-		usleep(5000);
+		usleep(disp_off ? 50000 : 5000);
+		if (round % (disp_off ? 20 : 200) == 0) {
+			char cbuf[192];
+			size_t csz = sizeof(cbuf) - 1;
+			if (sysctlbyname("kern.redwood.cpufreq_state", cbuf, &csz, NULL, 0) == 0) {
+				cbuf[csz] = '\0';
+				disp_off = (strstr(cbuf, "disp=off") != NULL);
+			}
+		}
 		size = sizeof(m);
 		if (sysctlbyname("kern.redwood.motion", &m, &size, NULL, 0) != 0) {
 			continue;
@@ -744,9 +863,75 @@ sensors_thread(__unused void *arg)
 					double raw[3] = { v[i][0] / 1000.0, v[i][1] / 1000.0, v[i][2] / 1000.0 };
 					IOHIDEventRef event;
 
-					magcal_feed(raw);               /* (Test 243) hard iron off, see magcal_feed */
-					event = IOHIDEventCreateCompassEvent(NULL, t[i], raw[0] - magcal_offset[0], raw[1] - magcal_offset[1],
-					    raw[2] - magcal_offset[2], 0);
+					if (!isfinite(raw[0]) || !isfinite(raw[1]) || !isfinite(raw[2]) ||
+					    fabs(raw[0]) > 5000.0 || fabs(raw[1]) > 5000.0 || fabs(raw[2]) > 5000.0) {
+						continue;
+					}
+					if (have_prev_mag) {
+						double d2 = (raw[0] - prev_mag[0]) * (raw[0] - prev_mag[0]) +
+						    (raw[1] - prev_mag[1]) * (raw[1] - prev_mag[1]) +
+						    (raw[2] - prev_mag[2]) * (raw[2] - prev_mag[2]);
+						if (d2 > 80.0 * 80.0) {
+							if (++mag_jump_streak < 3) {
+								if (spikes_dropped++ < 10) {
+									snprintf(line, sizeof(line),
+									    "r5q-bbd: compass: dropped spike %.1f %.1f %.1f (prev %.1f %.1f %.1f)\n",
+									    raw[0], raw[1], raw[2], prev_mag[0], prev_mag[1], prev_mag[2]);
+									say(line);
+								}
+								continue;
+							}
+						}
+					}
+					mag_jump_streak = 0;
+					memcpy(prev_mag, raw, sizeof(prev_mag));
+					have_prev_mag = true;
+
+					if (size >= sizeof(m) && m.version >= 3 && m.mag_cal_status >= 1) {
+						if (m.mag_cal_count != last_cal_count) {
+							double sb[3] = {
+								m.mag_cal_bias[0] / 1000.0,
+								m.mag_cal_bias[1] / 1000.0,
+								m.mag_cal_bias[2] / 1000.0,
+							};
+							double mag_sb = sqrt(sb[0] * sb[0] + sb[1] * sb[1] + sb[2] * sb[2]);
+
+							last_cal_count = m.mag_cal_count;
+							if (isfinite(mag_sb) && mag_sb > 5.0 && mag_sb < 1500.0) {
+								double dm2 = (raw[0] - sb[0]) * (raw[0] - sb[0]) +
+								    (raw[1] - sb[1]) * (raw[1] - sb[1]) +
+								    (raw[2] - sb[2]) * (raw[2] - sb[2]);
+								double dp2 = (raw[0] + sb[0]) * (raw[0] + sb[0]) +
+								    (raw[1] + sb[1]) * (raw[1] + sb[1]) +
+								    (raw[2] + sb[2]) * (raw[2] + sb[2]);
+								double sgn = (dp2 < dm2 * 0.25 && dm2 > 10000.0) ? -1.0 : 1.0;
+								double alpha = slpi_cal_active ? 0.25 : 0.60;
+
+								for (int k = 0; k < 3; k++) {
+									double eff = sgn * sb[k];
+									magcal_offset[k] = (1.0 - alpha) * magcal_offset[k] + alpha * eff;
+								}
+								slpi_cal_active = true;
+								magcal_save_if_needed();
+								if (slpi_cal_logs++ < 5) {
+									snprintf(line, sizeof(line),
+									    "r5q-bbd: compass: SLPI mag_cal st=%u sgn=%.0f bias %.1f %.1f %.1f -> off %.1f %.1f %.1f\n",
+									    m.mag_cal_status, sgn, sb[0], sb[1], sb[2],
+									    magcal_offset[0], magcal_offset[1], magcal_offset[2]);
+									say(line);
+								}
+							}
+						}
+					} else if (!slpi_cal_active) {
+						magcal_feed(raw);
+					}
+					/*
+					 * (Test 445) Pass linear hard-iron-corrected field without non-linear radial
+					 * clamping so CoreMotion/CLCompassCalculator sees a true 3D sphere and locks
+					 * high-accuracy heading cleanly on rotation.
+					 */
+					event = IOHIDEventCreateCompassEvent(NULL, t[i],
+					    raw[0] - magcal_offset[0], raw[1] - magcal_offset[1], raw[2] - magcal_offset[2], 0);
 					if (event != NULL) {
 						IOHIDEventSetIntegerValue(event, 0x4, 1);
 						IOHIDVirtualServiceClientDispatchEvent(compass, event);
@@ -797,6 +982,317 @@ sensors_thread(__unused void *arg)
 	return NULL;
 }
 
+/*
+ * (Test 435) QuartzCore virtual display writeback (ReplayKit / AirPlay cloning).
+ * Without AppleM2ScalerCSCDriver, CA::WindowServer::IOSurface::copy_surface (vtable 0x1d5b38a38 slot +160 =
+ * 0x1d5b38ad8 -> 0x188321ff0) fails IOSurfaceAcceleratorCreate and returns false ("CoreAnimation: failed to copy
+ * main layer"). When the original method returns false, lock src and dst IOSurfaces and perform software scaling,
+ * rotation, and BGRA/RGBA -> NV12 ('420f'/'420v') or 32-bit copy into dst (stored at *((IOSurfaceRef *)dst_obj + 8)).
+ */
+#include <IOKit/IOReturn.h>
+#include <IOSurface/IOSurfaceRef.h>
+
+#define WS_IOSURFACE_COPY_SLOT  0x1d5b38ad8ull
+#define WS_IOSURFACE_COPY_IMPL  0x188321ff0ull
+
+static bool (*orig_ws_iosurface_copy)(void *dst_obj, IOSurfaceRef src, uint32_t flags, uint32_t transform,
+    const void *src_rect, const void *dst_rect, float scale);
+
+static inline uint8_t
+clamp_u8(int v)
+{
+	return (uint8_t)(v < 0 ? 0 : v > 255 ? 255 : v);
+}
+
+static inline void
+unpack_rgb(const uint8_t *px, uint32_t fmt, int *r, int *g, int *b)
+{
+	if (fmt == 0x52474241u /* RGBA */) {
+		*r = px[0];
+		*g = px[1];
+		*b = px[2];
+	} else if (fmt == 0x41524742u /* ARGB */) {
+		*r = px[1];
+		*g = px[2];
+		*b = px[3];
+	} else if (fmt == 0x41424752u /* ABGR */) {
+		*b = px[1];
+		*g = px[2];
+		*r = px[3];
+	} else { /* 0x42475241 BGRA and default */
+		*b = px[0];
+		*g = px[1];
+		*r = px[2];
+	}
+}
+
+static inline uint8_t
+rgb_to_y(int r, int g, int b, bool full_range)
+{
+	return full_range ? clamp_u8((77 * r + 150 * g + 29 * b + 128) >> 8)
+	                  : clamp_u8(((66 * r + 129 * g + 25 * b + 128) >> 8) + 16);
+}
+
+static inline void
+rgb_to_uv(int r, int g, int b, bool full_range, uint8_t *cb, uint8_t *cr)
+{
+	if (full_range) {
+		*cb = clamp_u8(((-43 * r - 85 * g + 128 * b + 128) >> 8) + 128);
+		*cr = clamp_u8(((128 * r - 107 * g - 21 * b + 128) >> 8) + 128);
+	} else {
+		*cb = clamp_u8(((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128);
+		*cr = clamp_u8(((112 * r - 94 * g - 18 * b + 128) >> 8) + 128);
+	}
+}
+
+static inline void
+map_rotated_coords(size_t dx, size_t dy, size_t dw, size_t dh, size_t sw, size_t sh, uint32_t rot, size_t *sx, size_t *sy)
+{
+	size_t x, y;
+
+	switch (rot & 3u) {
+	case 1: /* 90 CW */
+		x = (dy * sw) / dh;
+		y = ((dw - 1 - dx) * sh) / dw;
+		break;
+	case 2: /* 180 */
+		x = ((dw - 1 - dx) * sw) / dw;
+		y = ((dh - 1 - dy) * sh) / dh;
+		break;
+	case 3: /* 270 CW */
+		x = ((dh - 1 - dy) * sw) / dh;
+		y = (dx * sh) / dw;
+		break;
+	default:
+		x = (dx * sw) / dw;
+		y = (dy * sh) / dh;
+		break;
+	}
+	*sx = x < sw ? x : sw - 1;
+	*sy = y < sh ? y : sh - 1;
+}
+
+static bool
+blit_to_nv12(const uint8_t *src_base, size_t src_w, size_t src_h, size_t src_bpr, uint32_t src_fmt,
+    IOSurfaceRef dst, bool full_range, uint32_t flags, uint32_t transform)
+{
+	uint8_t *y_base = (uint8_t *)IOSurfaceGetBaseAddressOfPlane(dst, 0);
+	uint8_t *uv_base = (uint8_t *)IOSurfaceGetBaseAddressOfPlane(dst, 1);
+	size_t y_bpr = IOSurfaceGetBytesPerRowOfPlane(dst, 0);
+	size_t uv_bpr = IOSurfaceGetBytesPerRowOfPlane(dst, 1);
+	size_t y_w = IOSurfaceGetWidthOfPlane(dst, 0);
+	size_t y_h = IOSurfaceGetHeightOfPlane(dst, 0);
+	size_t uv_w = IOSurfaceGetWidthOfPlane(dst, 1);
+	size_t uv_h = IOSurfaceGetHeightOfPlane(dst, 1);
+	uint32_t sx_off[4096];
+
+	if (y_base == NULL || uv_base == NULL || y_w == 0 || y_h == 0 || y_w > 4096 ||
+	    y_bpr < y_w || uv_w == 0 || uv_h == 0 || uv_bpr < uv_w * 2) {
+		return false;
+	}
+	if ((flags & 7u) == 0 && transform == 0) {
+		for (size_t x = 0; x < y_w; x++) {
+			size_t sx = (x * src_w) / y_w;
+			if (sx >= src_w) {
+				sx = src_w - 1;
+			}
+			sx_off[x] = (uint32_t)(sx * 4u);
+		}
+		for (size_t dy = 0; dy < y_h; dy += 2) {
+			size_t sy0 = (dy * src_h) / y_h;
+			size_t sy1 = dy + 1 < y_h ? ((dy + 1) * src_h) / y_h : sy0;
+			const uint8_t *s0 = src_base + (sy0 < src_h ? sy0 : src_h - 1) * src_bpr;
+			const uint8_t *s1 = src_base + (sy1 < src_h ? sy1 : src_h - 1) * src_bpr;
+			uint8_t *dy0 = y_base + dy * y_bpr;
+			uint8_t *dy1 = dy + 1 < y_h ? y_base + (dy + 1) * y_bpr : NULL;
+			size_t uvy = dy >> 1;
+			uint8_t *duv = uvy < uv_h ? uv_base + uvy * uv_bpr : NULL;
+			size_t dx = 0;
+
+			for (; dx + 1 < y_w; dx += 2) {
+				int r00, g00, b00, r01, g01, b01, r10, g10, b10, r11, g11, b11;
+				uint32_t ox0 = sx_off[dx], ox1 = sx_off[dx + 1];
+
+				unpack_rgb(s0 + ox0, src_fmt, &r00, &g00, &b00);
+				unpack_rgb(s0 + ox1, src_fmt, &r01, &g01, &b01);
+				dy0[dx] = rgb_to_y(r00, g00, b00, full_range);
+				dy0[dx + 1] = rgb_to_y(r01, g01, b01, full_range);
+				if (dy1 != NULL) {
+					unpack_rgb(s1 + ox0, src_fmt, &r10, &g10, &b10);
+					unpack_rgb(s1 + ox1, src_fmt, &r11, &g11, &b11);
+					dy1[dx] = rgb_to_y(r10, g10, b10, full_range);
+					dy1[dx + 1] = rgb_to_y(r11, g11, b11, full_range);
+				} else {
+					r10 = r00; g10 = g00; b10 = b00;
+					r11 = r01; g11 = g01; b11 = b01;
+				}
+				if (duv != NULL && dx + 1 < uv_w * 2) {
+					int mr = (r00 + r01 + r10 + r11 + 2) >> 2;
+					int mg = (g00 + g01 + g10 + g11 + 2) >> 2;
+					int mb = (b00 + b01 + b10 + b11 + 2) >> 2;
+					rgb_to_uv(mr, mg, mb, full_range, &duv[dx], &duv[dx + 1]);
+				}
+			}
+			if (dx < y_w) {
+				int r, g, b;
+				uint32_t ox = sx_off[dx];
+
+				unpack_rgb(s0 + ox, src_fmt, &r, &g, &b);
+				dy0[dx] = rgb_to_y(r, g, b, full_range);
+				if (duv != NULL && dx + 1 < uv_w * 2) {
+					rgb_to_uv(r, g, b, full_range, &duv[dx], &duv[dx + 1]);
+				}
+				if (dy1 != NULL) {
+					unpack_rgb(s1 + ox, src_fmt, &r, &g, &b);
+					dy1[dx] = rgb_to_y(r, g, b, full_range);
+				}
+			}
+		}
+		return true;
+	} else {
+		uint32_t rot = transform != 0 ? (transform & 3u) : (flags & 7u);
+
+		for (size_t dy = 0; dy < y_h; dy++) {
+			uint8_t *dy_row = y_base + dy * y_bpr;
+			uint8_t *duv = (dy & 1u) == 0 && (dy >> 1) < uv_h ? uv_base + (dy >> 1) * uv_bpr : NULL;
+
+			for (size_t dx = 0; dx < y_w; dx++) {
+				size_t sx, sy;
+				int r, g, b;
+
+				map_rotated_coords(dx, dy, y_w, y_h, src_w, src_h, rot, &sx, &sy);
+				unpack_rgb(src_base + sy * src_bpr + sx * 4u, src_fmt, &r, &g, &b);
+				dy_row[dx] = rgb_to_y(r, g, b, full_range);
+				if (duv != NULL && (dx & 1u) == 0 && dx + 1 < uv_w * 2) {
+					rgb_to_uv(r, g, b, full_range, &duv[dx], &duv[dx + 1]);
+				}
+			}
+		}
+		return true;
+	}
+}
+
+static bool
+blit_to_32bit(const uint8_t *src_base, size_t src_w, size_t src_h, size_t src_bpr, uint32_t src_fmt,
+    IOSurfaceRef dst, uint32_t dst_fmt)
+{
+	uint8_t *dst_base = (uint8_t *)IOSurfaceGetBaseAddress(dst);
+	size_t dst_w = IOSurfaceGetWidth(dst);
+	size_t dst_h = IOSurfaceGetHeight(dst);
+	size_t dst_bpr = IOSurfaceGetBytesPerRow(dst);
+
+	if (dst_base == NULL || dst_w == 0 || dst_h == 0 || dst_w > 4096 || dst_bpr < dst_w * 4u) {
+		return false;
+	}
+	for (size_t dy = 0; dy < dst_h; dy++) {
+		size_t sy = (dy * src_h) / dst_h;
+		const uint32_t *srow = (const uint32_t *)(src_base + (sy < src_h ? sy : src_h - 1) * src_bpr);
+		uint32_t *drow = (uint32_t *)(dst_base + dy * dst_bpr);
+
+		for (size_t dx = 0; dx < dst_w; dx++) {
+			size_t sx = (dx * src_w) / dst_w;
+			uint32_t px = srow[sx < src_w ? sx : src_w - 1];
+
+			if (src_fmt != dst_fmt) {
+				px = (px & 0xff00ff00u) | ((px & 0x00ff0000u) >> 16) | ((px & 0x000000ffu) << 16);
+			}
+			drow[dx] = px;
+		}
+	}
+	return true;
+}
+
+static bool
+my_ws_iosurface_copy(void *dst_obj, IOSurfaceRef src, uint32_t flags, uint32_t transform,
+    const void *src_rect, const void *dst_rect, float scale)
+{
+	static unsigned calls;
+	IOSurfaceRef dst;
+	bool ok = false;
+
+	if (orig_ws_iosurface_copy != NULL && orig_ws_iosurface_copy(dst_obj, src, flags, transform, src_rect, dst_rect, scale)) {
+		return true;
+	}
+	if (dst_obj == NULL || src == NULL) {
+		return false;
+	}
+	dst = *(IOSurfaceRef *)((char *)dst_obj + 64);
+	if (dst == NULL) {
+		return false;
+	}
+	if (IOSurfaceLock(src, kIOSurfaceLockReadOnly, NULL) != kIOReturnSuccess) {
+		return false;
+	}
+	if (IOSurfaceLock(dst, 0, NULL) != kIOReturnSuccess) {
+		IOSurfaceUnlock(src, kIOSurfaceLockReadOnly, NULL);
+		return false;
+	}
+	{
+		size_t src_w = IOSurfaceGetWidth(src);
+		size_t src_h = IOSurfaceGetHeight(src);
+		size_t src_bpr = IOSurfaceGetBytesPerRow(src);
+		uint32_t src_fmt = IOSurfaceGetPixelFormat(src);
+		const uint8_t *src_base = (const uint8_t *)IOSurfaceGetBaseAddress(src);
+		size_t dst_w = IOSurfaceGetWidth(dst);
+		size_t dst_h = IOSurfaceGetHeight(dst);
+		uint32_t dst_fmt = IOSurfaceGetPixelFormat(dst);
+		size_t dst_planes = IOSurfaceGetPlaneCount(dst);
+		unsigned n = calls++;
+
+		if (n < 3 || (n % 300) == 0) {
+			char line[240];
+
+			snprintf(line, sizeof(line),
+			    "r5q-bbd: copy_surface #%u: src=%zux%zu fmt=0x%08x bpr=%zu -> dst=%zux%zu fmt=0x%08x planes=%zu flags=0x%x xform=%u rects=%d/%d\n",
+			    n, src_w, src_h, src_fmt, src_bpr, dst_w, dst_h, dst_fmt, dst_planes, flags, transform,
+			    src_rect != NULL ? 1 : 0, dst_rect != NULL ? 1 : 0);
+			say(line);
+		}
+		if (src_base != NULL && src_w > 0 && src_h > 0 && src_bpr >= src_w * 4u) {
+			if ((dst_fmt == 0x34323066u /* 420f */ || dst_fmt == 0x34323076u /* 420v */) && dst_planes >= 2) {
+				ok = blit_to_nv12(src_base, src_w, src_h, src_bpr, src_fmt, dst,
+				    dst_fmt == 0x34323066u, flags, transform);
+			} else if (dst_fmt == 0x42475241u /* BGRA */ || dst_fmt == 0x52474241u /* RGBA */) {
+				ok = blit_to_32bit(src_base, src_w, src_h, src_bpr, src_fmt, dst, dst_fmt);
+			}
+		}
+	}
+	IOSurfaceUnlock(dst, 0, NULL);
+	IOSurfaceUnlock(src, kIOSurfaceLockReadOnly, NULL);
+	return ok;
+}
+
+static void
+iosurface_copy_hook(void)
+{
+	size_t length = 0;
+	uintptr_t start = (uintptr_t)_dyld_get_shared_cache_range(&length), slide;
+	uintptr_t *entry;
+	vm_address_t page;
+	char line[200];
+
+	if (start == 0) {
+		return;
+	}
+	slide = start - CACHE_UNSLID_BASE;
+	entry = (uintptr_t *)(WS_IOSURFACE_COPY_SLOT + slide);
+	if (*entry != WS_IOSURFACE_COPY_IMPL + slide) {
+		snprintf(line, sizeof(line), "r5q-bbd: QuartzCore IOSurface::copy_surface: found %#lx, expected %#llx; left alone\n",
+		    *entry - slide, WS_IOSURFACE_COPY_IMPL);
+		say(line);
+		return;
+	}
+	page = (vm_address_t)entry & ~(vm_address_t)(vm_page_size - 1);
+	if (vm_protect(mach_task_self(), page, vm_page_size, FALSE, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY) != KERN_SUCCESS) {
+		say("r5q-bbd: QuartzCore IOSurface::copy_surface: cannot make vtable writable\n");
+		return;
+	}
+	orig_ws_iosurface_copy = (bool (*)(void *, IOSurfaceRef, uint32_t, uint32_t, const void *, const void *, float))*entry;
+	*entry = (uintptr_t)my_ws_iosurface_copy;
+	vm_protect(mach_task_self(), page, vm_page_size, FALSE, VM_PROT_READ);
+	say("r5q-bbd: QuartzCore IOSurface::copy_surface hooked for virtual display writeback\n");
+}
+
 __attribute__((constructor)) static void
 start(void)
 {
@@ -804,6 +1300,7 @@ start(void)
 
 	no_als_wait();
 	orientation_hook();
+	iosurface_copy_hook();
 	if (pthread_create(&thread, NULL, sensors_thread, NULL) == 0) {
 		pthread_detach(thread);
 	}

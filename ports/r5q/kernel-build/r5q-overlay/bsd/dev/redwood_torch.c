@@ -57,7 +57,12 @@
  * drivers/thermal/qcom/qcom-spmi-temp-alarm.c.
  */
 #include <kern/clock.h>
+#include <kern/locks.h>
 #include <kern/thread.h>
+
+static LCK_GRP_DECLARE(torch_lock_group, "redwood-torch");
+static LCK_MTX_DECLARE(torch_wake_lock, &torch_lock_group);
+static int torch_wake_chan;
 #include <libkern/libkern.h>
 #include <mach/mach_types.h>
 #include <machine/machine_routines.h>
@@ -556,6 +561,9 @@ torch_write(__unused dev_t dev, struct uio *uio, __unused int ioflag)
 		}
 		wanted = value > 1000 ? 1000 : value;
 		asked++;
+		lck_mtx_lock(&torch_wake_lock);
+		wakeup(&torch_wake_chan);
+		lck_mtx_unlock(&torch_wake_lock);
 	}
 	return 0;
 }
@@ -655,7 +663,15 @@ serve(void)
 				break;
 			}
 		}
-		wait_ms(20);
+		if (applied == 0 && want == 0 && !broken) {
+			lck_mtx_lock(&torch_wake_lock);
+			if (!broken && (wanted == 0 || waiting_for_off)) {
+				msleep(&torch_wake_chan, &torch_wake_lock, PZERO, "r5q-torch-idle", NULL);
+			}
+			lck_mtx_unlock(&torch_wake_lock);
+		} else {
+			wait_ms(20);
+		}
 	}
 	if (lit) {
 		(void)dark();

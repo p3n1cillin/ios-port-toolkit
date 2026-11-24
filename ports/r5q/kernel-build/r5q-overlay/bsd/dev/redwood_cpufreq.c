@@ -20,6 +20,7 @@
 #include <machine/machine_routines.h>
 #include <pexpert/pexpert.h>
 #include <sys/redwood_input.h>
+#include <sys/sysctl.h>
 #include <sys/systm.h>
 #include <vm/vm_kern.h>
 
@@ -100,6 +101,45 @@ domain_of(uint32_t phys_id)
 	return core < 4 ? 0 : core < 7 ? 1 : 2;
 }
 
+struct cpufreq_dom {
+	vm_offset_t base;
+	uint32_t perf_state;
+	uint32_t top_row;
+	uint32_t mid_row;
+	uint32_t cur_row;
+	uint32_t khz[EPSS_TABLE_ROWS];
+	uint32_t last_busy;
+	bool active;
+};
+
+static struct cpufreq_dom cpufreq_doms[EPSS_DOMAINS];
+static uint32_t cpufreq_mode;
+
+SYSCTL_DECL(_kern_redwood);
+
+extern bool redwood_display_asleep(void);
+
+static int
+cpufreq_state_sysctl(__unused struct sysctl_oid *oidp, __unused void *arg1, __unused int arg2, struct sysctl_req *req)
+{
+	char buf[192];
+	int at = 0;
+
+	at += snprintf(buf + at, sizeof(buf) - at, "mode=%u disp=%s", cpufreq_mode, redwood_display_asleep() ? "off" : "on");
+	for (uint32_t d = 0; d < EPSS_DOMAINS; d++) {
+		if (!cpufreq_doms[d].active) {
+			continue;
+		}
+		uint32_t r = cpufreq_doms[d].cur_row;
+		at += snprintf(buf + at, sizeof(buf) - at, " d%u:r%u/%u(%uMHz,%u%%)",
+		    d, r, cpufreq_doms[d].top_row, cpufreq_doms[d].khz[r] / 1000, cpufreq_doms[d].last_busy);
+	}
+	return sysctl_io_string(req, buf, sizeof(buf), 0, NULL);
+}
+
+SYSCTL_PROC(_kern_redwood, OID_AUTO, cpufreq_state, CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_LOCKED,
+    0, 0, cpufreq_state_sysctl, "A", "Current SM8150 OSM/EPSS CPU frequency governor state");
+
 static void
 raise_domain(uint32_t domain, uint32_t cores)
 {
@@ -117,14 +157,97 @@ raise_domain(uint32_t domain, uint32_t cores)
 		if (row > 0 && khz <= top_khz) {
 			break;                  /* the table ends by repeating its last row */
 		}
+		cpufreq_doms[domain].khz[row] = khz;
 		top = row;
 		top_khz = khz;
 	}
+	cpufreq_doms[domain].base = base;
+	cpufreq_doms[domain].perf_state = perf_state;
+	cpufreq_doms[domain].top_row = top;
+	cpufreq_doms[domain].mid_row = top / 2;
+	cpufreq_doms[domain].cur_row = top;
+	cpufreq_doms[domain].active = true;
 	was = *(volatile uint32_t *)(base + perf_state);
 	*(volatile uint32_t *)(base + perf_state) = top;
 	delay_for_interval(20, NSEC_PER_MSEC);
-	tell("cpufreq: group %u (%u of our cores): row %u -> %u of the frequency table, %u MHz\n", domain, cores, was, top,
-	    top_khz / 1000);
+	tell("cpufreq: group %u (%u of our cores): row %u -> %u of the frequency table, %u-%u MHz\n", domain, cores, was, top,
+	    cpufreq_doms[domain].khz[0] / 1000, top_khz / 1000);
+}
+
+/*
+ * (Test 439) Boot-arg cpufreq=2: dynamic SM8150 OSM/EPSS CPU frequency governor.
+ * Keeps all clusters at max MHz during early boot (15 s), then scales each cluster
+ * independently between row 0 (min MHz & voltage when idle) and top_row (instant boost under load).
+ */
+static void
+cpufreq_governor_thread(__unused void *arg, __unused wait_result_t wr)
+{
+	const ml_topology_info_t *topology = ml_get_topology_info();
+	uint64_t idle_before[MAX_CPUS] = { 0 }, then;
+	uint32_t idle_ticks[EPSS_DOMAINS] = { 0 };
+
+	delay_for_interval(15000, NSEC_PER_MSEC);
+	then = mach_absolute_time();
+	for (unsigned int i = 0; i < topology->num_cpus && i < MAX_CPUS; i++) {
+		(void)ml_cpu_idle_time((int)i, &idle_before[i]);
+	}
+	tell("cpufreq: dynamic governor active (100 ms active / 250 ms idle)\n");
+
+	for (;;) {
+		bool any_boosted = false;
+		uint64_t now, dt;
+		uint32_t max_busy[EPSS_DOMAINS] = { 0 };
+
+		for (uint32_t d = 0; d < EPSS_DOMAINS; d++) {
+			if (cpufreq_doms[d].active && cpufreq_doms[d].cur_row > 0) {
+				any_boosted = true;
+			}
+		}
+		delay_for_interval(any_boosted ? 100 : (redwood_display_asleep() ? 500 : 250), NSEC_PER_MSEC);
+		now = mach_absolute_time();
+		dt = now > then ? now - then : 1;
+		for (unsigned int i = 0; i < topology->num_cpus && i < MAX_CPUS; i++) {
+			uint64_t idle = 0, didle, busy;
+			uint32_t pct, dom;
+
+			if (!ml_cpu_idle_time((int)i, &idle)) {
+				continue;
+			}
+			didle = idle > idle_before[i] ? idle - idle_before[i] : 0;
+			idle_before[i] = idle;
+			busy = dt > didle ? dt - didle : 0;
+			pct = (uint32_t)(100 * busy / dt);
+			dom = domain_of(topology->cpus[i].phys_id);
+			if (dom < EPSS_DOMAINS && pct > max_busy[dom]) {
+				max_busy[dom] = pct;
+			}
+		}
+		then = now;
+		for (uint32_t d = 0; d < EPSS_DOMAINS; d++) {
+			uint32_t target;
+
+			if (!cpufreq_doms[d].active) {
+				continue;
+			}
+			cpufreq_doms[d].last_busy = max_busy[d];
+			if (max_busy[d] >= 40) {
+				target = cpufreq_doms[d].top_row;
+				idle_ticks[d] = 0;
+			} else if (max_busy[d] >= 15) {
+				target = cpufreq_doms[d].mid_row;
+				idle_ticks[d] = 0;
+			} else {
+				if (idle_ticks[d] < 2) {
+					idle_ticks[d]++;
+				}
+				target = idle_ticks[d] >= 2 ? 0 : cpufreq_doms[d].cur_row;
+			}
+			if (target != cpufreq_doms[d].cur_row) {
+				*(volatile uint32_t *)(cpufreq_doms[d].base + cpufreq_doms[d].perf_state) = target;
+				cpufreq_doms[d].cur_row = target;
+			}
+		}
+	}
 }
 
 /*
@@ -590,6 +713,7 @@ redwood_cpufreq_init(void)
 	if (!PE_parse_boot_argn("cpufreq", &enabled, sizeof(enabled)) || !enabled) {
 		return;
 	}
+	cpufreq_mode = enabled;
 	for (unsigned int i = 0; i < topology->num_cpus; i++) {
 		cores[domain_of(topology->cpus[i].phys_id)]++;
 	}
@@ -602,6 +726,14 @@ redwood_cpufreq_init(void)
 		}
 	}
 	printf("cpufreq: on core %u a loop ran at %u, now at %u\n", here, before, loop_speed());
+	if (cpufreq_mode >= 2) {
+		thread_t gov_thread;
+
+		if (kernel_thread_start(cpufreq_governor_thread, NULL, &gov_thread) == KERN_SUCCESS) {
+			thread_deallocate(gov_thread);
+		}
+	}
+	enabled = 0;            /* (Test 450) it held cpufreq=2, which started bench_all on every boot without membench */
 	if (PE_parse_boot_argn("membench", &enabled, sizeof(enabled)) && enabled == 1) {
 		memory_bench();
 	} else if (enabled == 2) {

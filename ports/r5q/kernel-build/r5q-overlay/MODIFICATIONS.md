@@ -133,3 +133,20 @@ table grew from 16 to 96).
   end; the frames report its position (boot-arg `cam_af`).
 - `bsd/dev/redwood_sec_ts.c` (Test 430): the main camera's optical stabiliser (RUMBA S4, 0x24 on GPIO33/34) started in
   still mode with each session and stopped at the end (boot-arg `cam_ois`).
+- `bsd/dev/redwood_adsp.c`, `bsd/dev/redwood_mic.c` (Tests 432-436): `dsb sy` barriers and 0xffffffff sentinels on
+  the SLIMbus RX ring, a 50 ms read retry, the teardown in reverse order with RECONFIG_NOW after DISCONNECT_PORT,
+  the top microphone (ADC3 + MIC BIAS3) as a second source (`kern.redwood.mic_sel`).
+- `bsd/dev/redwood_camera.c`, `bsd/dev/redwood_sec_ts.c`, `bsd/sys/redwood_camera.h` (Tests 431-442): the OIS movie
+  mode while recording, a 1634-line 60 fps IMX586 mode, live back-lens switching (`kern.redwood.cam_main`).
+- `bsd/dev/redwood_apple80211.c` (from the donor's; Tests 443-444): the link rate answered (APPLE80211_IOC_RATE)
+  and wifid's set requests 365 and 383 accepted.
+- `bsd/dev/redwood_wifi.c`, `iokit/Kernel/RedwoodBaseband.cpp` (Tests 436-445): GPS through the modem's QMI LOC and a
+  QMI PDS bridge for locationd (boot-arg `gps`), Bluetooth registered before launchd, a faster Wi-Fi rejoin.
+- `bsd/dev/redwood_cpufreq.c`, `redwood_haptic.c`, `redwood_torch.c`, `redwood_sound.c`, `redwood_buttons.c`
+  (Tests 438-441): a CPU governor (`cpufreq=2`), event-driven threads instead of polling, slower polling with the
+  screen off; `redwood_adreno.c` (Test 449) the GPU at 499 MHz.
+- `iokit/Kernel/MiniIOMobileFramebuffer.cpp` (Tests 434-449): @3x (`fbscale=3`), a 4-thread compositor, fewer
+  backlight log lines, `redwood_display_asleep()`.
+- Test 450 (review fixes): `redwood_cpufreq.c` (no memory benchmark at boot with `cpufreq=2`), `redwood_wifi.c`
+  (GPS stops when its client closes), `redwood_adsp.c` (the microphone source fixed per recording), `redwood_mic.c`
+  (bounded unmute/settle retries).

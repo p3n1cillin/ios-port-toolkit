@@ -11,7 +11,7 @@ IOS_WORK=${IOS_WORK:-${R5Q_WORK}}
 GL=${GL-1}; RC=${RC-rc.r5q}; RC_JOBS=${RC_JOBS-rc.jobs.quiet}; EXTRA=${EXTRA-"obj/r5qd obj/r5q_bind"}; EXTRA_SHARE=${EXTRA_SHARE-"/var/tmp/r5qd-share/r5qd /var/tmp/r5q-ringtones/Ringtones"}   # (the normal image: no bring-up tests, r5qd)
 # (Test 197) locationd: allowed, and run from /var/r5q/bin/locationd (31 MB, too big for the system image; put there over r5qd)
 # (Test 198 tried fairplayd.H2 the same way for WeatherKit: it exits at once, respawned every 10 s -- left out)
-export ALLOW=${ALLOW-locationd} RELOCATE=${RELOCATE-com.apple.locationd=/var/r5q/bin/locationd}
+export ALLOW=${ALLOW-"locationd CommCenter"} RELOCATE=${RELOCATE-com.apple.locationd=/var/r5q/bin/locationd}
 SDK=${SDK:-$IOS_WORK/sdks-source/iPhoneOS16.5.sdk}
 W=$R5Q_PORT/wifi
 # (Test 256) Bluetooth (BT=1, the default; BT= leaves it out): bluetoothd allowed, on the kernel's kctl
@@ -25,7 +25,7 @@ if [ -n "$BT" ]; then
 		$W/r5q_bluetool.c 2>&1 | grep -v 'warning\|^ \|^$\|generated' || true
 	EXTRA="$EXTRA obj/r5q_bluetool"
 	# (Test 258) labelled com.redwood.BlueTool: launchd panics when a com.apple.* job's program is not Apple's
-	export ALLOW="$ALLOW bluetooth" RELOCATE="$RELOCATE com.apple.BlueTool=/redwood/bin/r5q_bluetool"
+	export ALLOW="$ALLOW bluetooth BTServer" RELOCATE="$RELOCATE com.apple.BlueTool=/redwood/bin/r5q_bluetool"
 	export RELABEL="${RELABEL:+$RELABEL }com.apple.BlueTool=com.redwood.BlueTool"
 	export JOBENV="${JOBENV:+$JOBENV }com.apple.bluetoothd:BT_HCI_TRANSPORT=H4:POSIX:com.apple.uart.bluetooth,115200"
 	export OSLOG="${OSLOG-com.apple.backboardd} com.apple.bluetoothd"
@@ -35,8 +35,8 @@ cd $IOS_WORK/linux-source/userland
 clang -target arm64-apple-ios16.5 -isysroot $SDK -fuse-ld=lld -O1 -dynamiclib \
 	-install_name /redwood/lib/libr5q-app.dylib -lobjc -framework CoreFoundation -framework CoreGraphics -Wl,-undefined,dynamic_lookup \
 	-o obj/libr5q-app.dylib $W/inject_app.c 2>&1 | grep -v 'warning\|^ \|^$\|generated' || true
-# (Test 168) libr5q-bbd.dylib into backboardd: CoreBrightness's 5 s ALS wait made 0 (wifi/inject_bbd.c)
-clang -target arm64-apple-ios16.5 -isysroot $SDK -fuse-ld=lld -O1 -dynamiclib -install_name /redwood/lib/libr5q-bbd.dylib -fblocks -lobjc -framework CoreFoundation -framework IOKit -o obj/libr5q-bbd.dylib $W/inject_bbd.c 2>&1 | grep -v 'warning\|^ \|^$\|generated' || true
+# (Test 168) libr5q-bbd.dylib into backboardd: CoreBrightness's 5 s ALS wait made 0, ReplayKit IOSurface copy (wifi/inject_bbd.c)
+clang -target arm64-apple-ios16.5 -isysroot $SDK -fuse-ld=lld -O2 -dynamiclib -install_name /redwood/lib/libr5q-bbd.dylib -fblocks -lobjc -framework CoreFoundation -framework IOKit -framework IOSurface -o obj/libr5q-bbd.dylib $W/inject_bbd.c 2>&1 | grep -v 'warning\|^ \|^$\|generated' || true
 # (Test 395) libr5q-media.dylib into mediaserverd: CMCapture's audio silence filling off (wifi/inject_media.c)
 clang -target arm64-apple-ios16.5 -isysroot $SDK -fuse-ld=lld -O1 -dynamiclib -install_name /redwood/lib/libr5q-media.dylib -lobjc -o obj/libr5q-media.dylib $W/inject_media.c 2>&1 | grep -v 'warning\|^ \|^$\|generated' || true
 # (Test 400) libr5q-poster.dylib into PosterBoard and the poster extensions: the port's Metal device in each
@@ -49,6 +49,8 @@ POSTERS="PosterBoard CollectionsPoster PhotosPosterProvider GradientPosterExtens
 # (Test 401) libr5q-imagent.dylib into imagent: no "iMessage was signed out" "!" on Messages' icon -- iMessage can
 # never sign in on this port, so that flag is always set (wifi/inject_imagent.m); a real failed message still badges
 clang -target arm64-apple-ios16.5 -isysroot $SDK -fuse-ld=lld -O1 -dynamiclib -fobjc-arc -framework Foundation -install_name /redwood/lib/libr5q-imagent.dylib -o obj/libr5q-imagent.dylib $W/inject_imagent.m 2>&1 | grep -v 'warning\|^ \|^$\|generated' || true
+# (Test 443) libr5q-sb.dylib into SpringBoard: fix unselected Control Center CCUIRoundButton solid-white vibrant discs and post-boot status-bar Wi-Fi bars
+clang -target arm64-apple-ios16.5 -isysroot $SDK -fuse-ld=lld -O2 -dynamiclib -fobjc-arc -framework Foundation -framework UIKit -framework QuartzCore -lobjc -install_name /redwood/lib/libr5q-sb.dylib -o obj/libr5q-sb.dylib $W/inject_sb_r5q.m 2>&1 | grep -v 'warning\|^ \|^$\|generated' || true
 EXTRA_LINE=""
 rm -f obj/libr5q-sbdiag.dylib
 if [ -n "$SBDIAG" ]; then
@@ -75,18 +77,15 @@ if [ -f $IOS_WORK/linux-source/fw-camera-r5q/camera-s5k3l6.isp ]; then
 		cp $IOS_WORK/linux-source/fw-camera-r5q/camera-s5k3l6.isp $IOS_WORK/linux-source/fw-camfake/camera-$slot.isp
 	done
 fi
-# (Test 341) the front slot runs from the IMX616 since Test 340: its own tuning (camtuning_v14.py from the vendor's
-# com.samsung.tuned.sony_imx616.bin with --crop 0.1875,0.1846,0.8174,0.8154, the sensor's middle 1028x772; local only)
+# (Test 434) full-FOV binned tuning without --crop for IMX616 (1632x1224) and IMX586 (2000x1500), generated locally
 if [ -f $IOS_WORK/linux-source/fw-camera-r5q/camera-imx616.isp ]; then
 	cp $IOS_WORK/linux-source/fw-camera-r5q/camera-imx616.isp $IOS_WORK/linux-source/fw-camfake/camera-ov16a1q.isp
 fi
-# (Test 343) the back slot runs from the main IMX586: its tuning (com.samsung.tuned.sony_imx586.bin, --crop
-# 0.243,0.2427,0.757,0.7573: the middle 1028x772 of its 2000x1500 mode; local only)
 if [ -f $IOS_WORK/linux-source/fw-camera-r5q/camera-imx586.isp ]; then
 	cp $IOS_WORK/linux-source/fw-camera-r5q/camera-imx586.isp $IOS_WORK/linux-source/fw-camfake/camera-s5khm2sd.isp
 fi
 grep -q 'fw-camfake' build.sh || sed -i 's|^if \[ -d \.\./fw-gpu \]; then|if [ -d ../fw-camfake ]; then mkdir -p root/fw; cp ../fw-camfake/* root/fw/; fi      # (r5q: synthetic camera table)\n&|' build.sh
-INJECT="$(printf '%s\n' '/redwood/lib/libredwood.dylib backboardd containermanagerd containermanagerd_system' '/redwood/lib/libredwood-sb.dylib SpringBoard' '/redwood/lib/libredwood-media.dylib mediaserverd' '/redwood/lib/libredwood-app.dylib Sileo' '/redwood/lib/libredwood-tweaks.dylib Preferences' "/redwood/lib/libr5q-app.dylib $APPS" "/redwood/lib/libr5q-bbd.dylib backboardd" "/redwood/lib/libr5q-media.dylib mediaserverd" "/redwood/lib/libr5q-poster.dylib $POSTERS" "/redwood/lib/libr5q-imagent.dylib imagent" "$EXTRA_LINE")"
+INJECT="$(printf '%s\n' '/redwood/lib/libredwood.dylib backboardd containermanagerd containermanagerd_system' '/redwood/lib/libredwood-sb.dylib SpringBoard' '/redwood/lib/libredwood-media.dylib mediaserverd replayd' '/redwood/lib/libredwood-app.dylib Sileo' '/redwood/lib/libredwood-tweaks.dylib Preferences' "/redwood/lib/libr5q-app.dylib $APPS" "/redwood/lib/libr5q-bbd.dylib backboardd" "/redwood/lib/libr5q-media.dylib mediaserverd" "/redwood/lib/libr5q-poster.dylib $POSTERS" "/redwood/lib/libr5q-imagent.dylib imagent" "/redwood/lib/libr5q-sb.dylib SpringBoard" "$EXTRA_LINE")"
 echo "inject: $(echo "$INJECT" | tr '\n' ';' | wc -c) bytes"
 env REST=1 PREBUILT=1 INJECT="$INJECT" ${GL:+GL="$GL"} ${EXTRA:+EXTRA="$EXTRA"} ${EXTRA_SHARE:+EXTRA_SHARE="$EXTRA_SHARE"} ${RC_JOBS:+RC_JOBS="$RC_JOBS"} ${RC:+RC="$RC"} ./build.sh > /tmp/userland-t$N.log 2>&1 || { tail -5 /tmp/userland-t$N.log; exit 1; }
 ls root/lib | grep r5q | tr '\n' ' '; echo
@@ -105,6 +104,18 @@ if [ -f $U/libredwood-media.dylib ]; then
 	chmod 755 root/lib/libredwood-media.dylib
 	REMAKE=1
 	echo "build_root_app: libredwood-media.dylib from source (port/build/userland)"
+fi
+if [ -f $U/RedwoodAudio ]; then
+	cp $U/RedwoodAudio root/lib/RedwoodAudio.driver/RedwoodAudio     # (Test 441) Speaker + Receiver + Multi-Mic HAL from source
+	chmod 755 root/lib/RedwoodAudio.driver/RedwoodAudio
+	REMAKE=1
+	echo "build_root_app: RedwoodAudio from source (port/build/userland)"
+fi
+if [ -f $U/libredwood-gl.dylib ]; then
+	cp $U/libredwood-gl.dylib root/lib/libredwood-gl.dylib           # (Test 446) FD640 vibrant + noubwc fix from source
+	chmod 755 root/lib/libredwood-gl.dylib
+	REMAKE=1
+	echo "build_root_app: libredwood-gl.dylib from source (port/build/userland)"
 fi
 # (Test 400) the Metal driver into the built tree, then the image made again (build.sh made root/ and root.apfs)
 M=$R5Q_PORT/port/build/metal

@@ -88,9 +88,11 @@ extern void loader_log_putc(char c);
 extern bool redwood_platform_is(const char *name);
 /* (r5q, Test 421) the codec and the bus: redwood_adsp.c */
 extern bool redwood_r5q_mic_codec_on(void);
-extern void redwood_r5q_mic_codec_unmute(void);
+extern bool redwood_r5q_mic_codec_unmute(void);
 extern bool redwood_r5q_mic_codec_settle(void);
 extern void redwood_r5q_mic_codec_off(void);
+extern void redwood_r5q_mic_set_sel(uint32_t sel);
+extern uint32_t redwood_r5q_mic_get_sel(void);
 static bool r5q;
 
 static LCK_GRP_DECLARE(mic_lock_group, "redwood-mic");
@@ -1506,6 +1508,7 @@ static bool ring_primed;                        /* the reader is RING_KEEP behin
 static uint64_t ring_skipped, ring_dry;         /* frames skipped, reads that found too little: said when iOS stops */
 static volatile uint32_t ios_wants;             /* the device is open */
 static volatile bool stopping;                  /* the run ends (redwood_mic_dsp_down()) */
+static LCK_MTX_DECLARE(mic_wake_lock, &mic_lock_group);
 
 static void
 ring_put(const int16_t *samples, uint32_t count)
@@ -1559,7 +1562,10 @@ mic_dev_read(__unused dev_t dev, struct uio *uio, __unused int ioflag)
 static int
 mic_dev_open(__unused dev_t dev, __unused int flags, __unused int type, __unused struct proc *p)
 {
+	lck_mtx_lock(&mic_wake_lock);
 	ios_wants = 1;
+	wakeup((void *)&ios_wants);
+	lck_mtx_unlock(&mic_wake_lock);
 	return 0;
 }
 
@@ -1571,8 +1577,32 @@ mic_dev_close(__unused dev_t dev, __unused int flags, __unused int type, __unuse
 	return 0;
 }
 
+static int
+mic_dev_write(__unused dev_t dev, struct uio *uio, __unused int ioflag)
+{
+	uint8_t b = 0;
+	int error;
+
+	if (uio_resid(uio) < 1) {
+		return 0;
+	}
+	error = uiomove((caddr_t)&b, 1, uio);
+	if (error == 0 && r5q) {
+		uint32_t sel = (b == 1 || b == '1' || b == 'f' || b == 's' || b == 't') ? 1 : 0;
+
+		if (redwood_r5q_mic_get_sel() != sel) {
+			redwood_r5q_mic_set_sel(sel);
+			say("mic: source selected: %s (%u)\n", sel == 1 ? "sub-mic ADC3 (Top/Front)" : "main-mic ADC1 (Bottom)", sel);
+		}
+	}
+	if (uio_resid(uio) > 0) {
+		uio_update(uio, uio_resid(uio));
+	}
+	return error;
+}
+
 static const struct cdevsw mic_cdevsw = {
-	.d_open = mic_dev_open, .d_close = mic_dev_close, .d_read = mic_dev_read, .d_write = eno_rdwrt,
+	.d_open = mic_dev_open, .d_close = mic_dev_close, .d_read = mic_dev_read, .d_write = mic_dev_write,
 	.d_ioctl = eno_ioctl, .d_stop = eno_stop, .d_reset = eno_reset, .d_select = eno_select,
 	.d_mmap = eno_mmap, .d_strategy = eno_strat, .d_type = 0
 };
@@ -1594,6 +1624,7 @@ listen(bool for_ios)
 	uint64_t squares = 0;
 	unsigned next = 0;
 	bool unmuted = false, settled = false;
+	unsigned unmute_tries = 0, settle_tries = 0;    /* (Test 450) each a few tries: a failing one holds the link ~3 s */
 	uint64_t began = mach_absolute_time(), now, elapsed_ms;
 
 	struct redwood_apr_answer answer;
@@ -1622,11 +1653,12 @@ listen(bool for_ios)
 		elapsed_ms = now / NSEC_PER_MSEC;
 		if (r5q) {
 			/* (Tavil's delayed work: the TX unmute at 45 ms, the HPF corner and TX hold back at 300 ms) */
-			if (!unmuted && elapsed_ms >= 50) {
-				redwood_r5q_mic_codec_unmute();
-				unmuted = true;
+			if (!unmuted && elapsed_ms >= 50 && unmute_tries < 3) {
+				unmute_tries++;
+				unmuted = redwood_r5q_mic_codec_unmute();
 			}
-			if (!settled && elapsed_ms >= 300) {
+			if (!settled && elapsed_ms >= 300 && settle_tries < 3) {
+				settle_tries++;
 				settled = redwood_r5q_mic_codec_settle();
 			}
 		} else {
@@ -1729,8 +1761,8 @@ static void
 undo(void)
 {
 	if (r5q) {
-		redwood_r5q_mic_codec_off();
 		dsp_off();
+		redwood_r5q_mic_codec_off();
 		return;
 	}
 	dsp_off();
@@ -1748,9 +1780,8 @@ static bool
 path_up(void)
 {
 	if (r5q) {
-		/* the DSP's stream, path and port first (Android: the port at the DAI's prepare), then the codec and its
-		 * channel (Android: DAPM's widgets at the stream's start) */
-		return level >= 3 && dsp_path_on() && dsp_port_on() && redwood_r5q_mic_codec_on();
+		/* the DSP's stream/path, then the codec and SLIMbus channel, then the AFE port start */
+		return level >= 3 && dsp_path_on() && redwood_r5q_mic_codec_on() && dsp_port_on();
 	}
 	if (!clocks_on()) {
 		say("mic: the clocks were not all given: the blocks are not touched\n");
@@ -1798,7 +1829,11 @@ for_ios(void)
 		bool failed;
 
 		if (!ios_wants) {
-			sleep_ms(20);
+			lck_mtx_lock(&mic_wake_lock);
+			while (!ios_wants && !stopping) {
+				msleep((void *)&ios_wants, &mic_wake_lock, PZERO, "r5q-mic-idle", NULL);
+			}
+			lck_mtx_unlock(&mic_wake_lock);
 			continue;
 		}
 		lck_mtx_lock(&mic_lock);
@@ -1902,7 +1937,10 @@ redwood_mic_dsp_up(void)
 void
 redwood_mic_dsp_down(void)
 {
+	lck_mtx_lock(&mic_wake_lock);
 	stopping = true;
+	wakeup((void *)&ios_wants);
+	lck_mtx_unlock(&mic_wake_lock);
 	if (running) {
 		lck_mtx_lock(&mic_lock);
 		undo();

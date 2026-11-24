@@ -15,12 +15,12 @@ src, dst, A, B, K, ROOT, MSG = sys.argv[1:]
 s = open(src).read()
 a, b = int(A), int(B)
 s = re.sub(r'A, B = \d+, \d+', 'A, B = %d, %d' % (a, b), s)
-s = re.sub(r"shutil.copyfile\(R / 'port/build/xnu-r5q-t\d+\.macho'", "shutil.copyfile(R / 'port/build/%s'" % K, s)
+s = re.sub(r"shutil.copyfile\(R / 'port/build/xnu-r5q-t\d+(?:-[\w-]+)?\.macho'", "shutil.copyfile(R / 'port/build/%s'" % K, s)
 s = re.sub(r"replace\(b'TEST\d+', b'TEST\d+'\)", "replace(b'TEST%d', b'TEST%d')" % (a, b), s)
 s = re.sub(r"if \"'--test\d+'\" not in t:", "if \"'--test%d'\" not in t:" % b, s)
 s = re.sub(r"t.replace\(\"\('--test\d+',\): 'build-test\d+.sh', \", \"\('--test\d+',\): 'build-test\d+.sh', \('--test\d+',\): 'build-test\d+.sh', \"\)",
            "t.replace(\"('--test%d',): 'build-test%d.sh', \", \"('--test%d',): 'build-test%d.sh', ('--test%d',): 'build-test%d.sh', \")" % (a, a, a, a, b, b), s)
-s = re.sub(r"port/build/test\d+-root\.apfs\.new", "port/build/%s" % ROOT, s)
+s = re.sub(r"port/build/test\d+-root(?:-[\w-]+)?\.apfs(?:\.new)?", "port/build/%s" % ROOT, s)
 s = re.sub(r"print\('generated test\d+: [^']*'\)", "print('generated test%d: %s')" % (b, MSG.replace("'", "").replace("\\", "/")), s)   # (a quote in MSG broke the generator)
 open(dst, 'w').write(s)
 EOF

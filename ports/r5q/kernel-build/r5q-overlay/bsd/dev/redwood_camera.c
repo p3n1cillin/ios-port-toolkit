@@ -79,6 +79,7 @@
 #include <pexpert/pexpert.h>
 #include <vm/memory_types.h>
 #include <sys/systm.h>
+#include <sys/sysctl.h>
 #include <sys/conf.h>
 #include <sys/uio.h>
 #include <miscfs/devfs/devfs.h>
@@ -3286,7 +3287,7 @@ static const struct ctab_mode *ios_mode;
 static uint32_t ios_mode_n, ios_line_ns;
 static volatile bool ios_open, ios_streaming, ios_wanted;  /* open; frames coming; a read wants them */
 static uint64_t ios_last_read, ios_given, ios_frames_done, ios_writes_late;
-static struct { uint32_t lines, gain, frame_lines; bool pending; uint32_t focus; bool focus_pending; } ios_ask;
+static struct { uint32_t lines, gain, frame_lines; bool pending; uint32_t focus; bool focus_pending; uint32_t ois_mode; bool ois_mode_pending; } ios_ask;
 static struct { uint32_t lines, gain, frame_lines; uint64_t from; } ios_now, ios_next;
 /*
  * What the frames are (boot-arg cam_pattern): 0 the sensor's picture; 1 colour bars -- the sensor's own,
@@ -3836,7 +3837,9 @@ r5q_frame(const uint8_t *frame, uint32_t bytes, __unused void *ctx)
 		 */
 		extern void redwood_r5q_cam_exposure(uint32_t lines, uint32_t gain, uint32_t frame_lines);
 		uint32_t unity = GAIN_UNITY ? GAIN_UNITY : 32;
-		uint32_t frame_lines = ios_ask.frame_lines < 3268 ? 3268 : ios_ask.frame_lines;
+		uint32_t min_fl = (r5q_sensor == 2) ? 1634u : 3268u;
+		uint32_t req_fl = ios_ask.frame_lines == 0 ? 3268u : ios_ask.frame_lines;
+		uint32_t frame_lines = req_fl < min_fl ? min_fl : req_fl;
 		uint32_t lines = ios_ask.lines > frame_lines - 8 ? frame_lines - 8 : ios_ask.lines;
 
 		redwood_r5q_cam_exposure(lines, (uint32_t)((uint64_t)ios_ask.gain * 32 / unity), frame_lines);
@@ -3851,6 +3854,12 @@ r5q_frame(const uint8_t *frame, uint32_t bytes, __unused void *ctx)
 
 		redwood_r5q_cam_focus(ios_ask.focus);
 		ios_ask.focus_pending = false;
+	}
+	if (ios_ask.ois_mode_pending) {
+		extern void redwood_r5q_cam_ois_mode(uint32_t mode);
+
+		redwood_r5q_cam_ois_mode(ios_ask.ois_mode);
+		ios_ask.ois_mode_pending = false;
 	}
 	for (int i = 0; i < RING; i++) {
 		if (place[i].state != PLACE_READING && (p < 0 || place[i].sequence < place[p].sequence)) {
@@ -3879,6 +3888,36 @@ r5q_frame(const uint8_t *frame, uint32_t bytes, __unused void *ctx)
 	return true;
 }
 
+static volatile uint32_t r5q_cam_main_override = 0xffffffffu;
+
+static int
+cam_main_sysctl(__unused struct sysctl_oid *oidp, __unused void *arg1, __unused int arg2, struct sysctl_req *req)
+{
+	uint32_t cur = 1;
+	int value, error;
+
+	if (r5q_cam_main_override != 0xffffffffu) {
+		cur = r5q_cam_main_override;
+	} else {
+		(void)PE_parse_boot_argn("cam_main", &cur, sizeof(cur));
+	}
+	value = cur ? 1 : 0;
+	error = sysctl_io_number(req, value, sizeof(value), &value, NULL);
+	if (error != 0 || req->newptr == 0) {
+		return error;
+	}
+	if (value != 0 && value != 1) {
+		return EINVAL;
+	}
+	r5q_cam_main_override = (uint32_t)value;
+	say("camera: kern.redwood.cam_main set to %d (%s)\n", value, value ? "wide IMX586 (1x)" : "ultra-wide S5K3L6 (0.5x)");
+	return 0;
+}
+
+SYSCTL_DECL(_kern_redwood);
+SYSCTL_PROC(_kern_redwood, OID_AUTO, cam_main, CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_LOCKED, NULL, 0, cam_main_sysctl, "I",
+    "1: back wide IMX586 (1x); 0: back ultra-wide S5K3L6 (0.5x)");
+
 static void
 r5q_session(void)
 {
@@ -3894,7 +3933,11 @@ r5q_session(void)
 	uint32_t front_on = 1, main_on = 1;
 
 	(void)PE_parse_boot_argn("cam_front", &front_on, sizeof(front_on));
-	(void)PE_parse_boot_argn("cam_main", &main_on, sizeof(main_on));
+	if (r5q_cam_main_override != 0xffffffffu) {
+		main_on = r5q_cam_main_override;
+	} else {
+		(void)PE_parse_boot_argn("cam_main", &main_on, sizeof(main_on));
+	}
 	r5q_front = front_on != 0 && hw_index == 2;
 	r5q_sensor = r5q_front ? 1 : hw_index != 2 && main_on != 0 ? 2 : 0;
 	redwood_r5q_cam_sensor(r5q_sensor);
@@ -4184,6 +4227,13 @@ camdev_write(__unused dev_t dev, struct uio *uio, __unused int ioflag)
 		lck_mtx_lock(&ios_lock);
 		ios_ask.focus = c.a;
 		ios_ask.focus_pending = true;
+		lck_mtx_unlock(&ios_lock);
+		return 0;
+	}
+	if (c.command == REDWOOD_CAMERA_OIS_MODE) {
+		lck_mtx_lock(&ios_lock);
+		ios_ask.ois_mode = c.a ? 1u : 0u;
+		ios_ask.ois_mode_pending = true;
 		lck_mtx_unlock(&ios_lock);
 		return 0;
 	}

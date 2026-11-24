@@ -9395,7 +9395,7 @@ static void
 r5q_rejoin_thread(__unused void *parameter, __unused wait_result_t result)
 {
 	static struct redwood_sta_join j;
-	uint32_t wait_s = 15, tries = 0;
+	uint32_t wait_s = 2, tries = 0;
 
 	for (;;) {
 		delay_for_interval(wait_s * 1000, NSEC_PER_MSEC);
@@ -9403,7 +9403,7 @@ r5q_rejoin_thread(__unused void *parameter, __unused wait_result_t result)
 			if (join_step == 24) {
 				rejoin_wanted = false;
 			}
-			wait_s = 15;
+			wait_s = 2;
 			tries = 0;
 			continue;
 		}
@@ -9421,7 +9421,7 @@ r5q_rejoin_thread(__unused void *parameter, __unused wait_result_t result)
 		    join_step, tries, wait_s * 2 > 300 ? 300 : wait_s * 2);
 		(void)redwood_sta_ask_join_standing(&j);
 		bzero(&j, sizeof(j));
-		wait_s = wait_s * 2 > 300 ? 300 : wait_s * 2;
+		wait_s = wait_s < 5 ? 5 : (wait_s * 2 > 300 ? 300 : wait_s * 2);
 	}
 }
 
@@ -10158,6 +10158,28 @@ bt_uart_write(const uint8_t *bytes, uint32_t len)
 }
 
 static uint32_t
+bt_uart_read_now(uint8_t *bytes, uint32_t max)
+{
+	uint32_t got = 0;
+	uint32_t st = rd(bt_se + GENI_RX_FIFO_STATUS), words = st & 0x1ffffff;
+
+	for (uint32_t w = 0; w < words && got < max; w++) {
+		uint32_t word = rd(bt_se + GENI_RX_FIFO), n = 4;
+
+		if (w == words - 1 && (st & (1u << 31)) && ((st >> 28) & 7) != 0) {
+			n = (st >> 28) & 7;                     /* the last word: its valid bytes */
+		}
+		for (uint32_t i = 0; i < n && got < max; i++) {
+			bytes[got++] = (uint8_t)(word >> (8 * i));
+		}
+	}
+	if (words != 0) {
+		wr(bt_se + GENI_S_IRQ_CLEAR, 0xffffffffu);
+	}
+	return got;
+}
+
+static uint32_t
 bt_uart_read(uint8_t *bytes, uint32_t max, uint32_t ms)
 {
 	uint32_t got = 0;
@@ -10409,6 +10431,8 @@ extern bool redwood_publish_named_service(const char *name, const char *data_key
 
 static LCK_MTX_DECLARE(bt_lock, &wifi_lock_group);
 static kern_ctl_ref bt_kctl;
+static volatile bool bt_early_done;
+static volatile bool bt_hw_ready;
 static volatile uint32_t bt_unit;               /* the connected client's unit; 0 = none */
 static uint8_t bt_txq[BT_TXQ];                  /* whole host packets, waiting for the UART */
 static volatile uint32_t bt_txq_len;
@@ -10522,6 +10546,7 @@ bt_host_packet(const uint8_t *p, uint32_t n)
 		if (bt_txq_len + n <= BT_TXQ) {
 			memcpy(bt_txq + bt_txq_len, p, n);
 			bt_txq_len += n;
+			wakeup((void *)&bt_txq_len);
 			lck_mtx_unlock(&bt_lock);
 			return;
 		}
@@ -10557,10 +10582,20 @@ static errno_t
 bt_ctl_connect(__unused kern_ctl_ref ref, struct sockaddr_ctl *sac, void **unitinfo)
 {
 	char name[64] = "";
+	struct timespec ts = { .tv_sec = 45, .tv_nsec = 0 };
 
 	proc_selfname(name, sizeof(name));
 	*unitinfo = NULL;
 	lck_mtx_lock(&bt_lock);
+	if (!bt_hw_ready) {
+		printf("bt: stage 4: %s (pid %d) waiting for HCI firmware bring-up ...\n", name, proc_selfpid());
+		msleep((void *)&bt_hw_ready, &bt_lock, PZERO | PCATCH, "bt_hw_wait", &ts);
+	}
+	if (!bt_hw_ready) {
+		lck_mtx_unlock(&bt_lock);
+		printf("bt: stage 4: %s (pid %d) timed out waiting for HCI\n", name, proc_selfpid());
+		return ENXIO;
+	}
 	bt_unit = sac->sc_unit;
 	bt_hlen = 0;
 	bt_txq_len = 0;
@@ -10714,14 +10749,51 @@ bt_set_fast(uint32_t baud)
 	return false;
 }
 
+/*
+ * (Test 445) Publish IOService "bluetooth", com.apple.uart.bluetooth kctl, and /dev/uart.bluetooth early in
+ * redwood_wifi_init() (before launchd starts bluetoothd) so bluetoothd never exits with "No bluetooth on this
+ * device." during firmware bring-up and SpringBoard's BluetoothManager attaches cleanly on cold boot.
+ */
+static void
+bt_early_register(void)
+{
+	static struct kern_ctl_reg reg;
+	static const uint8_t address[6] = { 0x02, 0x52, 0x44, 0x57, 0x00, 0x02 };
+	int major;
+
+	if (bt_early_done) {
+		return;
+	}
+	printf("bt: early: IOService \"bluetooth\" (local-mac-address 02:52:44:57:00:02) %s\n",
+	    redwood_publish_named_service("bluetooth", "local-mac-address", address, sizeof(address)) ?
+	    "published" : "NOT published");
+	strlcpy(reg.ctl_name, "com.apple.uart.bluetooth", sizeof(reg.ctl_name));
+	reg.ctl_flags = CTL_FLAG_REG_SOCK_STREAM;      /* (not privileged: bluetoothd runs as mobile) */
+	reg.ctl_sendsize = 64 * 1024;
+	reg.ctl_recvsize = 64 * 1024;
+	reg.ctl_connect = bt_ctl_connect;
+	reg.ctl_disconnect = bt_ctl_disconnect;
+	reg.ctl_send = bt_ctl_send;
+	reg.ctl_setopt = bt_ctl_setopt;
+	reg.ctl_getopt = bt_ctl_getopt;
+	if (ctl_register(&reg, &bt_kctl) != 0) {
+		printf("bt: early: the kernel control could not be registered\n");
+		return;
+	}
+	major = cdevsw_add(-1, &bt_cdevsw);
+	if (major < 0 || devfs_make_node(makedev(major, 0), DEVFS_CHAR, UID_ROOT, GID_WHEEL, 0666, "uart.bluetooth") == NULL ||
+	    devfs_make_node(makedev(major, 1), DEVFS_CHAR, UID_ROOT, GID_WHEEL, 0666, "btwake") == NULL) {
+		printf("bt: early: /dev/uart.bluetooth could not be made (major %d)\n", major);
+	}
+	bt_early_done = true;
+}
+
 static void
 bt_stage4(void)
 {
-	static struct kern_ctl_reg reg;
 	static uint8_t rx[512], pkt[BT_PKT], tx[BT_TXQ];
-	uint32_t plen = 0, n;
+	uint32_t plen = 0, n, idle_ticks = 0;
 	uint64_t last_count = 0;
-	int major;
 
 	PE_parse_boot_argn("bt_vsc", &bt_vsc, sizeof(bt_vsc));
 	{
@@ -10749,28 +10821,14 @@ bt_stage4(void)
 		(void)bt_uart_write(read_addr, sizeof(read_addr));
 		n = bt_uart_read(ans, sizeof(ans), 200);
 		bt_show("stage 4: Read_BD_ADDR now", ans, n);
-		printf("bt: stage 4: IOService \"bluetooth\" (local-mac-address 02:52:44:57:00:02) %s\n",
-		    redwood_publish_named_service("bluetooth", "local-mac-address", address, sizeof(address)) ?
-		    "published" : "NOT published");
 	}
-	strlcpy(reg.ctl_name, "com.apple.uart.bluetooth", sizeof(reg.ctl_name));
-	reg.ctl_flags = CTL_FLAG_REG_SOCK_STREAM;      /* (not privileged: bluetoothd runs as mobile) */
-	reg.ctl_sendsize = 64 * 1024;
-	reg.ctl_recvsize = 64 * 1024;
-	reg.ctl_connect = bt_ctl_connect;
-	reg.ctl_disconnect = bt_ctl_disconnect;
-	reg.ctl_send = bt_ctl_send;
-	reg.ctl_setopt = bt_ctl_setopt;
-	reg.ctl_getopt = bt_ctl_getopt;
-	if (ctl_register(&reg, &bt_kctl) != 0) {
-		printf("bt: stage 4: the kernel control could not be registered\n");
-		return;
+	if (!bt_early_done) {
+		bt_early_register();
 	}
-	major = cdevsw_add(-1, &bt_cdevsw);
-	if (major < 0 || devfs_make_node(makedev(major, 0), DEVFS_CHAR, UID_ROOT, GID_WHEEL, 0666, "uart.bluetooth") == NULL ||
-	    devfs_make_node(makedev(major, 1), DEVFS_CHAR, UID_ROOT, GID_WHEEL, 0666, "btwake") == NULL) {
-		printf("bt: stage 4: /dev/uart.bluetooth could not be made (major %d)\n", major);
-	}
+	lck_mtx_lock(&bt_lock);
+	bt_hw_ready = true;
+	wakeup((void *)&bt_hw_ready);
+	lck_mtx_unlock(&bt_lock);
 	printf("bt: stage 4: THE CONTROLLER IS IOS'S: kernel control com.apple.uart.bluetooth, /dev/uart.bluetooth; vendor "
 	    "commands answered here (bt_vsc=%u)\n", bt_vsc);
 	for (;;) {
@@ -10784,8 +10842,8 @@ bt_stage4(void)
 		if (q != 0 && !bt_uart_write(tx, q)) {
 			printf("bt: stage 4: %u bytes to the controller NOT SENT\n", q);
 		}
-		/* the controller's bytes: whole packets to the client */
-		n = bt_uart_read(rx, sizeof(rx), 1);
+		/* the controller's bytes: whole packets to the client (non-blocking drain when idle) */
+		n = (q != 0 || idle_ticks < 50) ? bt_uart_read(rx, sizeof(rx), 1) : bt_uart_read_now(rx, sizeof(rx));
 		for (uint32_t i = 0; i < n; i++) {
 			int want;
 
@@ -10830,8 +10888,24 @@ bt_stage4(void)
 				plen = 0;
 			}
 		}
-		if (q == 0 && n == 0) {
-			sleep_ms(1);
+		if (q != 0 || n != 0) {
+			idle_ticks = 0;
+		} else {
+			struct timespec ts;
+
+			if (idle_ticks < 200) {
+				idle_ticks++;
+			}
+			extern bool redwood_display_asleep(void);
+
+			ts.tv_sec = 0;
+			ts.tv_nsec = idle_ticks < 50 ? 1 * NSEC_PER_MSEC : idle_ticks < 200 ? 5 * NSEC_PER_MSEC :
+			    (redwood_display_asleep() ? 50 : 20) * NSEC_PER_MSEC;
+			lck_mtx_lock(&bt_lock);
+			if (bt_txq_len == 0) {
+				msleep((void *)&bt_txq_len, &bt_lock, PZERO, "r5q-bt-idle", &ts);
+			}
+			lck_mtx_unlock(&bt_lock);
 		}
 		if (bt_n_cmd + bt_n_evt >= last_count + 500) {
 			last_count = bt_n_cmd + bt_n_evt;
@@ -10999,6 +11073,7 @@ redwood_bb_qmi_send(void *client, uint8_t service, uint8_t qmux_client, const vo
 }
 
 /* every port of that connection closed (CommCenter's transport closes): no callback for it after this returns */
+static void gps_pds_close(void *client);
 void redwood_bb_qmi_close(void *client);
 void
 redwood_bb_qmi_close(void *client)
@@ -11016,6 +11091,7 @@ redwood_bb_qmi_close(void *client)
 			qrtr_close(port);
 		}
 	}
+	gps_pds_close(client);
 }
 
 static void
@@ -11144,6 +11220,413 @@ cell_probe(__unused void *arg, __unused wait_result_t wr_unused)
 	}
 	qrtr_close(cell_port);
 	cell_port = NULL;
+}
+
+/*
+ * (Test 435) Gated QMI_LOC (0x10) GNSS probe behind boot-arg gps=1: queries service revision, registers for
+ * position / SV_INFO / NMEA / engine / fix session indications, starts a 20 s 1 Hz fix session, then stops cleanly.
+ * Strict privacy: never log coordinates or raw NMEA payload beyond the 6-char sentence type prefix before ','.
+ */
+static struct redwood_qrtr_port *gps_port;
+static uint8_t gps_resp[128];
+static volatile size_t gps_resp_len;
+static volatile uint16_t gps_resp_msg;
+static uint16_t gps_txn = 1;
+static volatile uint32_t gps_ind_pos, gps_ind_pos_ok, gps_ind_sv, gps_sv_max, gps_ind_nmea, gps_ind_eng, gps_ind_fix, gps_ind_other;
+static LCK_MTX_DECLARE(gps_pds_client_lock, &wifi_lock_group);
+static void *gps_pds_client;
+static uint8_t gps_pds_qmux_client;
+static volatile uint8_t gps_pds_enabled;
+static volatile uint8_t gps_pds_tracking;
+static volatile bool gps_pds_want_on, gps_pds_session_on;
+
+static void
+gps_pds_close(void *client)
+{
+	lck_mtx_lock(&gps_pds_client_lock);
+	if (gps_pds_client == client) {
+		gps_pds_client = NULL;
+		gps_pds_qmux_client = 0;
+		gps_pds_want_on = false;
+		wakeup((void *)&gps_pds_want_on);       /* (Test 450) else the GNSS session runs on with no client */
+	}
+	lck_mtx_unlock(&gps_pds_client_lock);
+}
+
+static void
+gps_pds_send_ind(uint16_t msgid, uint8_t tlv_type, const void *tlv_val, uint16_t tlv_len)
+{
+	uint8_t msg[512];
+	uint16_t pay_len;
+
+	if (7u + 3u + tlv_len > sizeof(msg)) {
+		return;
+	}
+	pay_len = (uint16_t)(3u + tlv_len);
+	msg[0] = 0x04;                          /* QMI indication */
+	msg[1] = 0x00; msg[2] = 0x00;           /* transaction ID */
+	msg[3] = (uint8_t)msgid;
+	msg[4] = (uint8_t)(msgid >> 8);
+	msg[5] = (uint8_t)pay_len;
+	msg[6] = (uint8_t)(pay_len >> 8);
+	msg[7] = tlv_type;
+	msg[8] = (uint8_t)tlv_len;
+	msg[9] = (uint8_t)(tlv_len >> 8);
+	if (tlv_len != 0) {
+		memcpy(msg + 10, tlv_val, tlv_len);
+	}
+	/* Serialize delivery with clientClose before it can release the client. */
+	lck_mtx_lock(&gps_pds_client_lock);
+	if (gps_pds_client != NULL && gps_pds_qmux_client != 0) {
+		RedwoodBasebandQmiReceive(gps_pds_client, 6, gps_pds_qmux_client, msg, 10u + tlv_len);
+	}
+	lck_mtx_unlock(&gps_pds_client_lock);
+}
+
+static inline uint32_t
+gps_le32(const uint8_t *p)
+{
+	return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+static void
+gps_receive(__unused void *context, __unused uint32_t node, __unused uint32_t port, const void *data, size_t length)
+{
+	const uint8_t *m = data;
+	uint16_t msg;
+
+	if (length < 7) {
+		return;
+	}
+	msg = (uint16_t)(m[3] | (m[4] << 8));
+	if (m[0] == 2) {
+		size_t n = length > sizeof(gps_resp) ? sizeof(gps_resp) : length;
+
+		memcpy(gps_resp, data, n);
+		gps_resp_msg = msg;
+		__asm__ volatile ("dmb ish" ::: "memory");
+		gps_resp_len = n;
+		return;
+	}
+	if (m[0] != 4) {
+		return;
+	}
+	{
+		const uint8_t *b = m + 7, *v;
+		size_t blen = length - 7;
+		uint16_t vl = 0;
+
+		switch (msg) {
+		case 0x0024: { /* EVENT_POSITION_REPORT_IND */
+			uint32_t st = ((v = qmi_tlv(b, blen, 0x01, &vl)) != NULL && vl >= 4) ? gps_le32(v) : 0xffffffffu;
+			bool has_lat = (qmi_tlv(b, blen, 0x10, &vl) != NULL && vl >= 8);
+			bool has_lon = (qmi_tlv(b, blen, 0x11, &vl) != NULL && vl >= 8);
+			bool has_alt = (qmi_tlv(b, blen, 0x13, &vl) != NULL && vl >= 4);
+			uint32_t tech = ((v = qmi_tlv(b, blen, 0x1d, &vl)) != NULL && vl >= 4) ? gps_le32(v) : 0;
+			uint32_t n = ++gps_ind_pos;
+
+			if (st == 0) {
+				gps_ind_pos_ok++;
+			}
+			if (n <= 5 || st == 0) {
+				printf("gps: POS ind #%u: status=%u has_lat=%u has_lon=%u has_alt=%u tech=0x%x\n",
+				    n, st, has_lat ? 1 : 0, has_lon ? 1 : 0, has_alt ? 1 : 0, tech);
+			}
+			break;
+		}
+		case 0x0025: { /* EVENT_GNSS_SV_INFO_IND */
+			uint32_t sv = ((v = qmi_tlv(b, blen, 0x10, &vl)) != NULL && vl >= 1) ? (uint32_t)v[0] : 0;
+			uint32_t n = ++gps_ind_sv;
+			bool best = sv > gps_sv_max;
+
+			if (best) {
+				gps_sv_max = sv;
+			}
+			if (n <= 5 || best) {
+				printf("gps: SV_INFO ind #%u: sv_count=%u (tlv_len=%u)\n", n, sv, (unsigned)vl);
+			}
+			break;
+		}
+		case 0x0026: { /* EVENT_NMEA_IND */
+			uint32_t n = ++gps_ind_nmea;
+
+			if ((v = qmi_tlv(b, blen, 0x01, &vl)) != NULL && vl > 0 && vl <= 480) {
+				gps_pds_send_ind(0x0001, 0x10, v, vl);
+			}
+			if (n <= 5) {
+				char hdr[7] = "";
+
+				if ((v = qmi_tlv(b, blen, 0x01, &vl)) != NULL) {
+					unsigned k = 0;
+
+					while (k < 6 && k < vl && v[k] != ',' && v[k] != '\r' && v[k] != '\n' && v[k] != '\0') {
+						hdr[k] = (char)v[k];
+						k++;
+					}
+					hdr[k] = '\0';
+				}
+				printf("gps: NMEA ind #%u: hdr=%s len=%u\n", n, hdr[0] ? hdr : "?", (unsigned)vl);
+			}
+			break;
+		}
+		case 0x002b: { /* EVENT_ENGINE_STATE_IND */
+			uint32_t st = ((v = qmi_tlv(b, blen, 0x01, &vl)) != NULL && vl >= 4) ? gps_le32(v) : 0xffffffffu;
+			uint32_t n = ++gps_ind_eng;
+
+			printf("gps: ENGINE_STATE ind #%u: state=%u\n", n, st);
+			break;
+		}
+		case 0x002c: { /* EVENT_FIX_SESSION_STATE_IND */
+			uint32_t st = ((v = qmi_tlv(b, blen, 0x01, &vl)) != NULL && vl >= 4) ? gps_le32(v) : 0xffffffffu;
+			uint32_t n = ++gps_ind_fix;
+
+			printf("gps: FIX_SESSION ind #%u: state=%u\n", n, st);
+			break;
+		}
+		case 0x0027: { /* GET_SERVICE_REVISION_IND */
+			uint32_t st = ((v = qmi_tlv(b, blen, 0x01, &vl)) != NULL && vl >= 4) ? gps_le32(v) : 0xffffffffu;
+			uint32_t rev = ((v = qmi_tlv(b, blen, 0x10, &vl)) != NULL && vl >= 4) ? gps_le32(v) : 0;
+
+			printf("gps: REV ind: status=%u rev=%u\n", st, rev);
+			break;
+		}
+		case 0x003e: { /* SET_NMEA_TYPES_IND */
+			uint32_t st = ((v = qmi_tlv(b, blen, 0x01, &vl)) != NULL && vl >= 4) ? gps_le32(v) : 0xffffffffu;
+
+			printf("gps: SET_NMEA ind: status=%u\n", st);
+			break;
+		}
+		default: {
+			uint32_t n = ++gps_ind_other;
+
+			if (n <= 5) {
+				printf("gps: other ind #%u: msg=0x%04x len=%zu\n", n, msg, blen);
+			}
+			break;
+		}
+		}
+	}
+}
+
+static const uint8_t *
+gps_ask(uint16_t msg, const uint8_t *tlvs, size_t tlvs_len, size_t *out_len, uint16_t *result, uint16_t *error)
+{
+	uint8_t out[64];
+	uint32_t node = 0, port = 0;
+	uint16_t txn = gps_txn++;
+	const uint8_t *r;
+	uint16_t rl = 0;
+
+	if (!cell_where(0x10, &node, &port) || tlvs_len > sizeof(out) - 7) {
+		return NULL;
+	}
+	out[0] = 0;
+	out[1] = (uint8_t)txn;
+	out[2] = (uint8_t)(txn >> 8);
+	out[3] = (uint8_t)msg;
+	out[4] = (uint8_t)(msg >> 8);
+	out[5] = (uint8_t)tlvs_len;
+	out[6] = (uint8_t)(tlvs_len >> 8);
+	if (tlvs_len != 0) {
+		memcpy(out + 7, tlvs, tlvs_len);
+	}
+	gps_resp_len = 0;
+	if (qrtr_send(gps_port, node, port, out, 7 + tlvs_len) != 0) {
+		return NULL;
+	}
+	for (unsigned ms = 0; ms < 3000; ms += 10) {
+		if (gps_resp_len != 0 && gps_resp_msg == msg) {
+			*out_len = gps_resp_len - 7;
+			r = qmi_tlv(gps_resp + 7, *out_len, 0x02, &rl);
+			*result = r != NULL && rl >= 4 ? (uint16_t)(r[0] | (r[1] << 8)) : 0xffff;
+			*error = r != NULL && rl >= 4 ? (uint16_t)(r[2] | (r[3] << 8)) : 0xffff;
+			return gps_resp + 7;
+		}
+		sleep_ms(10);
+	}
+	*result = 0xffff;
+	*error = 0xffff;
+	return NULL;
+}
+
+static void
+gps_probe(__unused void *arg, __unused wait_result_t wr_unused)
+{
+	static const uint8_t reg_events[] = {
+		0x01, 0x08, 0x00, 0x87, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+	};
+	static const uint8_t set_nmea[] = {
+		0x01, 0x04, 0x00, 0x1f, 0x00, 0x00, 0x00
+	};
+	static const uint8_t start_fix[] = {
+		0x01, 0x01, 0x00, 0x01,
+		0x10, 0x04, 0x00, 0x01, 0x00, 0x00, 0x00,
+		0x13, 0x04, 0x00, 0xe8, 0x03, 0x00, 0x00
+	};
+	static const uint8_t stop_fix[] = {
+		0x01, 0x01, 0x00, 0x01
+	};
+	uint32_t node = 0, port = 0, gps_level = 1;
+	const uint8_t *a;
+	size_t n = 0;
+	uint16_t res = 0, err = 0;
+
+	(void)PE_parse_boot_argn("gps", &gps_level, sizeof(gps_level));
+	for (unsigned s = 0; s < 240 && !cell_where(0x10, &node, &port); s++) {
+		sleep_ms(500);
+	}
+	if (!cell_where(0x10, &node, &port)) {
+		printf("gps: QMI_LOC (0x10) not found on QRTR after 120 s\n");
+		return;
+	}
+	printf("gps: QMI_LOC (0x10) found at %u:%u (gps=%u)\n", node, port, gps_level);
+	gps_port = qrtr_open(gps_receive, NULL, NULL);
+	if (gps_port == NULL) {
+		printf("gps: no QRTR port\n");
+		return;
+	}
+	sleep_ms(3000);
+	a = gps_ask(0x0021, reg_events, sizeof(reg_events), &n, &res, &err);
+	printf("gps: REG_EVENTS (0x187): %s (result %u error %u)\n", a ? "ok" : "NO ANSWER", res, err);
+	a = gps_ask(0x003e, set_nmea, sizeof(set_nmea), &n, &res, &err);
+	printf("gps: SET_NMEA_TYPES (0x1f): %s (result %u error %u)\n", a ? "ok" : "NO ANSWER", res, err);
+	if (gps_level >= 2) {
+		a = gps_ask(0x0027, NULL, 0, &n, &res, &err);
+		printf("gps: GET_SERVICE_REVISION: %s (result %u error %u)\n", a ? "ok" : "NO ANSWER", res, err);
+		a = gps_ask(0x0022, start_fix, sizeof(start_fix), &n, &res, &err);
+		printf("gps: START (sid=1, periodic 1 Hz): %s (result %u error %u)\n", a ? "ok" : "NO ANSWER", res, err);
+		for (unsigned s = 1; s <= 20; s++) {
+			sleep_ms(1000);
+			if (s == 10) {
+				printf("gps: +10 s: pos=%u pos_ok=%u sv=%u max_sv=%u nmea=%u eng=%u fix=%u other=%u\n",
+				    gps_ind_pos, gps_ind_pos_ok, gps_ind_sv, gps_sv_max, gps_ind_nmea, gps_ind_eng,
+				    gps_ind_fix, gps_ind_other);
+			}
+		}
+		a = gps_ask(0x0023, stop_fix, sizeof(stop_fix), &n, &res, &err);
+		printf("gps: STOP (sid=1): %s (result %u error %u)\n", a ? "ok" : "NO ANSWER", res, err);
+		sleep_ms(500);
+		printf("gps: probe done: pos=%u pos_ok=%u sv=%u max_sv=%u nmea=%u eng=%u fix=%u other=%u\n",
+		    gps_ind_pos, gps_ind_pos_ok, gps_ind_sv, gps_sv_max, gps_ind_nmea, gps_ind_eng,
+		    gps_ind_fix, gps_ind_other);
+	}
+	/*
+	 * (Test 436/438) Keep gps_port open so the QMI_PDS (0x06) <-> QMI_LOC (0x10) bridge starts/stops 1 Hz NMEA
+	 * streaming on demand whenever locationd enables or disables GPS tracking.
+	 */
+	for (;;) {
+		bool want;
+
+		lck_mtx_lock(&gps_pds_client_lock);
+		while (gps_pds_want_on == gps_pds_session_on) {
+			msleep((void *)&gps_pds_want_on, &gps_pds_client_lock, PZERO, "r5q-gps-idle", NULL);
+		}
+		want = gps_pds_want_on;
+		lck_mtx_unlock(&gps_pds_client_lock);
+
+		if (want && !gps_pds_session_on) {
+			a = gps_ask(0x0022, start_fix, sizeof(start_fix), &n, &res, &err);
+			gps_pds_session_on = (a != NULL && res == 0);
+			printf("gps: PDS->LOC START (sid=1, 1 Hz): %s (result %u error %u)\n",
+			    a ? "ok" : "NO ANSWER", res, err);
+			if (!gps_pds_session_on) {
+				sleep_ms(1000);
+			}
+		} else if (!want && gps_pds_session_on) {
+			a = gps_ask(0x0023, stop_fix, sizeof(stop_fix), &n, &res, &err);
+			gps_pds_session_on = false;
+			printf("gps: PDS->LOC STOP (sid=1): %s (result %u error %u)\n",
+			    a ? "ok" : "NO ANSWER", res, err);
+		}
+	}
+}
+
+int redwood_bb_pds_handle(void *client, uint8_t qmux_client, const void *message, size_t length);
+int
+redwood_bb_pds_handle(void *client, uint8_t qmux_client, const void *message, size_t length)
+{
+	const uint8_t *m = message;
+	uint32_t gps_on = 0;
+	uint16_t msgid, vl = 0, pay_len;
+	const uint8_t *v;
+	uint8_t resp[64];
+	uint32_t o = 14;
+	static uint32_t pds_logged;
+
+	if (!PE_parse_boot_argn("gps", &gps_on, sizeof(gps_on)) || gps_on == 0 || length < 7 || (m[0] & 0x06) != 0) {
+		return ENOTSUP;
+	}
+	msgid = (uint16_t)(m[3] | (m[4] << 8));
+	lck_mtx_lock(&gps_pds_client_lock);
+	gps_pds_client = client;
+	gps_pds_qmux_client = qmux_client;
+	lck_mtx_unlock(&gps_pds_client_lock);
+
+	/* QMI response header (7 bytes) + mandatory result TLV 0x02 (7 bytes: result 0, error 0) */
+	resp[0] = 0x02;
+	resp[1] = m[1];
+	resp[2] = m[2];
+	resp[3] = m[3];
+	resp[4] = m[4];
+	resp[7] = 0x02; resp[8] = 0x04; resp[9] = 0x00;
+	resp[10] = 0x00; resp[11] = 0x00; resp[12] = 0x00; resp[13] = 0x00;
+
+	switch (msgid) {
+	case 0x0036: /* QMI_PDS_GET_GPS_SERVICE_VERSION: TLV 0x01 { u8 major, u8 minor } */
+		resp[o++] = 0x01; resp[o++] = 0x02; resp[o++] = 0x00;
+		resp[o++] = 0x02; resp[o++] = 0x00;
+		break;
+	case 0x0020: /* QMI_PDS_GET_GPS_SERVICE_STATE: TLV 0x01 { u8 enabled, u8 tracking_state } */
+		resp[o++] = 0x01; resp[o++] = 0x02; resp[o++] = 0x00;
+		resp[o++] = gps_pds_enabled;
+		resp[o++] = gps_pds_tracking;
+		break;
+	case 0x0021: /* QMI_PDS_SET_GPS_SERVICE_STATE: req TLV 0x01 { u8 enable } */
+		if ((v = qmi_tlv(m + 7, length - 7, 0x01, &vl)) != NULL && vl >= 1) {
+			lck_mtx_lock(&gps_pds_client_lock);
+			gps_pds_enabled = v[0] ? 1 : 0;
+			gps_pds_tracking = gps_pds_enabled;
+			gps_pds_want_on = (gps_pds_enabled != 0);
+			wakeup((void *)&gps_pds_want_on);
+			lck_mtx_unlock(&gps_pds_client_lock);
+		}
+		break;
+	case 0x0030: /* QMI_PDS_GET_AUTO_TRACKING_STATE: TLV 0x01 { u8 auto_tracking_state } */
+		resp[o++] = 0x01; resp[o++] = 0x01; resp[o++] = 0x00;
+		resp[o++] = gps_pds_tracking;
+		break;
+	case 0x0031: /* QMI_PDS_SET_AUTO_TRACKING_STATE: req TLV 0x01 { u8 auto_tracking_state } */
+		if ((v = qmi_tlv(m + 7, length - 7, 0x01, &vl)) != NULL && vl >= 1) {
+			lck_mtx_lock(&gps_pds_client_lock);
+			gps_pds_tracking = v[0] ? 1 : 0;
+			if (gps_pds_tracking && gps_pds_enabled) {
+				gps_pds_want_on = true;
+				wakeup((void *)&gps_pds_want_on);
+			}
+			lck_mtx_unlock(&gps_pds_client_lock);
+		}
+		break;
+	case 0x003f: /* QMI_PDS_GET_DPO_CONFIG: TLV 0x01 { u8 dpo_enabled } */
+		resp[o++] = 0x01; resp[o++] = 0x01; resp[o++] = 0x00;
+		resp[o++] = 0x01;
+		break;
+	default:
+		break;
+	}
+
+	pay_len = (uint16_t)(o - 7);
+	resp[5] = (uint8_t)pay_len;
+	resp[6] = (uint8_t)(pay_len >> 8);
+	if (++pds_logged <= 60) {
+		printf("gps: PDS req 0x%04x (%zu B) -> resp (%u B) en=%u trk=%u\n",
+		    msgid, length, o, gps_pds_enabled, gps_pds_tracking);
+	}
+	RedwoodBasebandQmiReceive(client, 6, qmux_client, resp, o);
+	if (msgid == 0x0021) {
+		uint8_t st[2] = { gps_pds_enabled, gps_pds_tracking };
+		gps_pds_send_ind(0x0001, 0x15, st, sizeof(st));
+	}
+	return 0;
 }
 
 /*
@@ -11426,13 +11909,22 @@ redwood_wifi_init(void)
 			}
 		}
 		on = 0;
-		if (PE_parse_boot_argn("bt", &on, sizeof(on)) && on != 0 &&
-		    kernel_thread_start(bt_stage1, NULL, &thread) == KERN_SUCCESS) {      /* (Test 244) Bluetooth */
-			thread_deallocate(thread);
+		if (PE_parse_boot_argn("bt", &on, sizeof(on)) && on != 0) {
+			if (on == 9) {
+				bt_early_register();
+			}
+			if (kernel_thread_start(bt_stage1, NULL, &thread) == KERN_SUCCESS) {      /* (Test 244) Bluetooth */
+				thread_deallocate(thread);
+			}
 		}
 		on = 0;
 		if (PE_parse_boot_argn("cell", &on, sizeof(on)) && on != 0 &&
 		    kernel_thread_start(cell_probe, NULL, &thread) == KERN_SUCCESS) {     /* (Test 352) cellular, a look */
+			thread_deallocate(thread);
+		}
+		on = 0;
+		if (PE_parse_boot_argn("gps", &on, sizeof(on)) && on != 0 &&
+		    kernel_thread_start(gps_probe, NULL, &thread) == KERN_SUCCESS) {      /* (Test 435) QMI_LOC GNSS probe */
 			thread_deallocate(thread);
 		}
 		on = 0;
