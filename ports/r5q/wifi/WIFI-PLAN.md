@@ -1380,3 +1380,15 @@ Code in place, untested (paused for the night):
   - **SLPI & sensors:** Magnetometer calibration active (`slpi: see: mag_cal 1`); `cm_rate`: `a=90.7/s, g=87.0/s, m=50.0/s, d=88.7/s`.
   - **Power & display:** Fixed `phone.py charger` kernel S2MU106 fuel-gauge path (`SOC 89.60 %, 4245 mV, 321 mA, capacity 4410 mAh learned`) and enabled OLED low brightness.
   - **Native `@3x` Retina benchmark (`fbscale=3`, kept in `phone-args.txt`):** `mgq` reports `main-screen-width = 1125`, `main-screen-height = 2436`, `main-screen-scale = 3`; `memq` `memsize 6144 MB`, `memorystatus_level 72%`, `free 3449 MB`, `201` processes, footprint `1150 MB` (`@2x` baseline earlier in Test 434: `memorystatus_level 76%`, `free 3799 MB`, `180` processes, footprint `983 MB`). While scrolling Settings, `fps_test` hit `55.7`, `55.7`, `59.8`, `59.9 frames/s` (8 s average `33.7 frames/s` including idle tail), and `klog` measured `266 frames in 5532 ms (48 a second)` with `2986 us` each in the driver (`95 in 100 under 18 ms`, 0 swaps waited/gave up); Camera open/preview measured `243 frames in 5005 ms (48 a second)`, `5503 us` in driver. Lock, Home, Settings, FaceTime, and Camera screenshots fill `1080x2400` cleanly with accurate touch, 0 GPU faults (`adreno` 427 MHz), and 0 CrashReporter logs.
+
+## Test 451 (2026-11-24): a modem fatal error under a Wi-Fi pull
+
+- During a 24 MB pull over r5qd, QMI sends to the modem started failing with 55 (ENOBUFS from `glink_send`: no free
+  modem intent in the wait), then servreg: `"msm/modem/wlan_pd" IS NOW 0xfffffff (DOWN), transaction 2:
+  acknowledged`, and the modem went down: SMP2P `err-fatal`, item 421 `servreg_monitor.c:502:Servreg ack timedout:
+  msm/modem/wlan_pd`. The ack could not be sent on the starved channel, so the modem's servreg monitor killed it.
+  Wi-Fi, CommCenter and GPS were gone until a restart.
+- Not reproduced: after `phone.py restart`, ~90 MB of pulls (three movies) left the modem at `err-ready`.
+- Same family as Test 168 and t414 (wlan_pd restarting under sustained transfer), worse now that the modem is lost.
+  Open: keep a modem intent for servreg acks (or send them before anything queued), and find why the modem stops
+  returning intents under load.

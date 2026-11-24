@@ -1334,3 +1334,8 @@ every frame below has **0.00%**, warm or cold, which is the gate.
   -- the Test 427 bug, visible two days and 84 tests before it was found; Test 427's log comes out clean.
 - Open (minor, from the review): `cam_full=0` reports 1634 frame lines for the 3268-line cropped mode; the OIS movie
   mode is not re-sent after a session restart.
+- **Test 451 (kernel t451, root test451, standard):** both open items closed in code: the frame-line floor comes from
+  the streaming mode for the kernel and iOS alike (`redwood_r5q_cam_min_frame_lines`), and the OIS mode iOS asked for
+  is kept across a session restart (cleared when iOS closes the device). Camera.app movies IMG_0038 / IMG_0039:
+  1080p H.264 at 29.7 / 29.8 fps, picture and sound the same length; the restart path itself was not triggered (the
+  app's lens button zooms while recording).

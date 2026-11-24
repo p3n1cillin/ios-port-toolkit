@@ -43,6 +43,12 @@ What goes in the workspace:
 | `xnu-source-cache/` | XNU's build dependencies and `MacOSX13.3.sdk.tar.xz` | listed with their commits in `ports/r5q/research/xnu-source-staging.json` and `macos-sdk-input.json` (the SDK's SHA-256 is checked) |
 | `theos/` | the iOS toolchain (`toolchain/linux/iphone`) and `sdks/iPhoneOS16.5.sdk` | [Theos](https://theos.dev) and an iOS 16.5 SDK you obtain yourself |
 | `Mu-Silicium/`, `mu-venv/` | the phone's UEFI and its Python environment | [Mu-Silicium](https://github.com/Project-Silicium/Mu-Silicium), commit `e51cd877e31c`; its own setup instructions for the venv |
+| `sdks-source/iPhoneOS16.5.sdk` | the iOS SDK `pipeline/build_init.sh` and `build_root_app.sh` compile the iOS-side libraries with | the same SDK as Theos's (a copy or a symbolic link) |
+| `openh264-ios/` | Cisco's OpenH264 v2.4.1 encoder as a static arm64 iOS library, for the camera's H.264 video (`libredwood-media.dylib`, Tests 431-434) | `bash ports/r5q/pipeline/build_openh264.sh` (clones the release, builds `libopenh264_enc.a`); BSD-2-Clause -- Cisco's patent licence covers only its own binaries, see openh264.org before distributing a build |
+
+`pipeline/build_init.sh` builds `libredwood-media.dylib` only when OpenH264 and the donor's `userland/src` files
+(with `ports/r5q/userland-patches/` applied) are there; otherwise it says what is missing and builds init and
+var_store alone.
 
 The iOS 16.5 user space (the system image) is built by the donor's tooling from Apple's update files; it is not
 in either repository.

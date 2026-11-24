@@ -2627,6 +2627,9 @@ main_af_up(vm_offset_t north)
 static bool ois_on;
 static uint8_t ois_mode_cur;
 static volatile uint32_t ois_mode_req = 0xffffffffu;
+/* (Test 451) the mode iOS last asked for, kept across a session restart (a lens switch, the idle power-off and
+ * re-open) so a recording in progress gets movie mode back; cleared when iOS closes the camera device */
+static volatile uint32_t ois_mode_wanted;
 
 static const char *
 ois_write(uint16_t reg, const uint8_t *bytes, unsigned n)
@@ -2694,6 +2697,10 @@ main_ois_up(void)
 		ois_on = true;
 		spin_us(20000);
 		ois_look("on (still mode, servo on)");
+		if (ois_mode_wanted) {
+			ois_mode_req = 1;                       /* (Test 451) back to movie mode: ois_apply at the next frame */
+			rxlog("main camera: OIS: movie mode asked again (iOS is still recording)\n");
+		}
 	} else {
 		rxlog("main camera: OIS start: %s\n", problem);
 	}
@@ -2821,7 +2828,18 @@ redwood_r5q_cam_af_position(void)
 void
 redwood_r5q_cam_ois_mode(uint32_t mode)
 {
+	ois_mode_wanted = mode ? 1u : 0u;
 	ois_mode_req = mode ? 1u : 0u;
+}
+
+/* (Test 451) the shortest frame (in lines) the streaming mode allows: 1634 (60 a second) only for the full-frame
+ * IMX586 mode; redwood_camera.c reports the same to iOS, so its frame timing matches the sensor's */
+uint32_t redwood_r5q_cam_min_frame_lines(void);
+
+uint32_t
+redwood_r5q_cam_min_frame_lines(void)
+{
+	return cam_live == &imx586_full ? 1634u : 3268u;
 }
 
 static void
@@ -2839,7 +2857,7 @@ cam_exposure_apply(void)
 	}
 	exp_pending = false;
 	{
-		uint32_t min_fl = (cam_live == &imx586_full) ? 1634u : 3268u;
+		uint32_t min_fl = redwood_r5q_cam_min_frame_lines();
 		uint32_t req_fl = exp_frame == 0 ? 3268u : exp_frame;
 
 		fl = req_fl < min_fl ? min_fl : req_fl > 0xfff0 ? 0xfff0 : req_fl;

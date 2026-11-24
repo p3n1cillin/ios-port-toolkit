@@ -11558,6 +11558,15 @@ redwood_bb_pds_handle(void *client, uint8_t qmux_client, const void *message, si
 	}
 	msgid = (uint16_t)(m[3] | (m[4] << 8));
 	lck_mtx_lock(&gps_pds_client_lock);
+	{
+		extern bool RedwoodBasebandClientClosed(void *client);
+
+		/* (Test 451) a request racing clientClose must not leave a pointer to a connection being freed */
+		if (RedwoodBasebandClientClosed(client)) {
+			lck_mtx_unlock(&gps_pds_client_lock);
+			return EPIPE;
+		}
+	}
 	gps_pds_client = client;
 	gps_pds_qmux_client = qmux_client;
 	lck_mtx_unlock(&gps_pds_client_lock);

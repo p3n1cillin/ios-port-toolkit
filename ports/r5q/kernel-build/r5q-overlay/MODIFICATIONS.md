@@ -150,3 +150,6 @@ table grew from 16 to 96).
 - Test 450 (review fixes): `redwood_cpufreq.c` (no memory benchmark at boot with `cpufreq=2`), `redwood_wifi.c`
   (GPS stops when its client closes), `redwood_adsp.c` (the microphone source fixed per recording), `redwood_mic.c`
   (bounded unmute/settle retries).
+- Test 451 (the review's minor findings): `redwood_camera.c` / `redwood_sec_ts.c` (one frame-line floor for the
+  sensor and iOS; the OIS mode kept across a session restart), `iokit/Kernel/RedwoodBaseband.cpp` /
+  `redwood_wifi.c` (a closing connection is no longer adopted by the PDS bridge).

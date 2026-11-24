@@ -554,8 +554,9 @@ auto_brightness(const struct redwood_motion *m)
  * (Test 243 / 434) The magnetometer hard-iron calibrated before iOS sees it:
  *   1. Persist learned offset across boots in /private/var/tmp/r5q_magcal.dat.
  *   2. Reject transient single-sample glitches (> 80 uT jump from last good sample) unless >= 3 consecutive samples agree.
- *   3. Prefer SLPI sns_mag_cal bias when status >= 2 (Test 434), checking sign ambiguity automatically.
- *   4. Fallback 2-pass outlier-trimmed sphere fit over up to 64 samples (>= 10 uT spacing, >= 18 uT span on all 3 axes,
+ *   3. Seed from the SLPI sns_mag_cal bias at status >= 1, and stop our own fit only at status >= 2 (Tests 434, 451),
+ *      checking sign ambiguity automatically.
+ *   4. Fallback 2-pass outlier-trimmed sphere fit over up to 64 samples (>= 4 uT spacing, >= 18 uT span on all 3 axes,
  *      radius 20..80 uT, residual < 7.5 uT), blended smoothly so compass headings do not jump.
  */
 #include <time.h>
@@ -911,7 +912,14 @@ sensors_thread(__unused void *arg)
 									double eff = sgn * sb[k];
 									magcal_offset[k] = (1.0 - alpha) * magcal_offset[k] + alpha * eff;
 								}
-								slpi_cal_active = true;
+								/*
+								 * (Test 451) a status-1 (low accuracy) bias seeds the offset as before, but only
+								 * status >= 2 stops our own sphere fit: a poor first bias no longer pins the
+								 * hard-iron offset for the rest of the boot
+								 */
+								if (m.mag_cal_status >= 2) {
+									slpi_cal_active = true;
+								}
 								magcal_save_if_needed();
 								if (slpi_cal_logs++ < 5) {
 									snprintf(line, sizeof(line),
@@ -922,7 +930,11 @@ sensors_thread(__unused void *arg)
 								}
 							}
 						}
-					} else if (!slpi_cal_active) {
+						if (!slpi_cal_active) {
+							magcal_feed(raw);       /* (Test 451) still ours until SLPI is confident */
+						}
+					} else {
+						slpi_cal_active = false;        /* (Test 451) SLPI fell back to uncalibrated: our fit again */
 						magcal_feed(raw);
 					}
 					/*

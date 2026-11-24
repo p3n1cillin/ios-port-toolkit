@@ -3837,7 +3837,10 @@ r5q_frame(const uint8_t *frame, uint32_t bytes, __unused void *ctx)
 		 */
 		extern void redwood_r5q_cam_exposure(uint32_t lines, uint32_t gain, uint32_t frame_lines);
 		uint32_t unity = GAIN_UNITY ? GAIN_UNITY : 32;
-		uint32_t min_fl = (r5q_sensor == 2) ? 1634u : 3268u;
+		extern uint32_t redwood_r5q_cam_min_frame_lines(void);
+		/* (Test 451) as redwood_sec_ts.c clamps it: 1634 only while the full-frame IMX586 mode streams (with
+		 * cam_full=0 the cropped mode needs 3268, and iOS had been told 1634: its frame timing off by 2x) */
+		uint32_t min_fl = (r5q_sensor == 2) ? redwood_r5q_cam_min_frame_lines() : 3268u;
 		uint32_t req_fl = ios_ask.frame_lines == 0 ? 3268u : ios_ask.frame_lines;
 		uint32_t frame_lines = req_fl < min_fl ? min_fl : req_fl;
 		uint32_t lines = ios_ask.lines > frame_lines - 8 ? frame_lines - 8 : ios_ask.lines;
@@ -4030,6 +4033,11 @@ camdev_close(__unused dev_t dev, __unused int flags, __unused int type, __unused
 {
 	ios_open = false;
 	ios_wanted = false;
+	if (r5q_real) {
+		extern void redwood_r5q_cam_ois_mode(uint32_t mode);
+
+		redwood_r5q_cam_ois_mode(0);    /* (Test 451) no recording without the device: still mode next time */
+	}
 	wakeup(&ios_open);
 	return 0;
 }

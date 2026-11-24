@@ -36,5 +36,18 @@ rm -rf "$T"
 SDK=${SDK:-$IOS_WORK/sdks-source/iPhoneOS16.5.sdk}
 OH_INC=${OH_INC:-$IOS_WORK/openh264-ios/src/codec/api/wels}
 OH_LIB=${OH_LIB:-$IOS_WORK/openh264-ios/libopenh264_enc.a}
-clang -target arm64-apple-ios16.5 -isysroot $SDK -fuse-ld=lld -O2 -dynamiclib -install_name /redwood/lib/libredwood-media.dylib -framework CoreFoundation -framework CoreMedia -framework CoreVideo -framework IOSurface -framework VideoToolbox -lc++ -lobjc -I$U/src -I$OH_INC -o $OUT/libredwood-media.dylib $U/src/inject_media.c $U/src/camera_device.c $U/src/camera_isp.c $U/src/vt_h264_enc.c $OH_LIB
+# (Test 451) without OpenH264 or the donor's vt_h264_enc.c, say what is missing and keep init/var_store (set -e had
+# stopped here, and build_root_app.sh then quietly kept an older libredwood-media.dylib)
+missing=""
+[ -f "$OH_LIB" ] || missing="$missing $OH_LIB (bash pipeline/build_openh264.sh makes it)"
+[ -d "$OH_INC" ] || missing="$missing $OH_INC (the same)"
+for s in inject_media.c camera_device.c camera_isp.c vt_h264_enc.c; do
+	[ -f "$U/src/$s" ] || missing="$missing $U/src/$s (the donor's userland, with userland-patches/ applied)"
+done
+if [ -n "$missing" ]; then
+	echo "build_init: libredwood-media.dylib NOT built; missing:$missing"
+	echo "build_init: build_root_app.sh will use $OUT/libredwood-media.dylib if an older one is there, else the prebuilt"
+	exit 0
+fi
+clang-target arm64-apple-ios16.5 -isysroot $SDK -fuse-ld=lld -O2 -dynamiclib -install_name /redwood/lib/libredwood-media.dylib -framework CoreFoundation -framework CoreMedia -framework CoreVideo -framework IOSurface -framework VideoToolbox -lc++ -lobjc -I$U/src -I$OH_INC -o $OUT/libredwood-media.dylib $U/src/inject_media.c $U/src/camera_device.c $U/src/camera_isp.c $U/src/vt_h264_enc.c $OH_LIB
 echo "build_init: $OUT/libredwood-media.dylib ($(stat -c %s $OUT/libredwood-media.dylib) bytes)"

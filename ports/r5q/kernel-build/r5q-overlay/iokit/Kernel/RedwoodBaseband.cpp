@@ -90,6 +90,8 @@ class RedwoodBasebandUserClient : public IOUserClient
 	void            deliver(void);
 
 public:
+	/* (Test 451) set by clientClose before its ports close: the PDS bridge no longer adopts this connection */
+	volatile bool   fClosed;
 	void            fromModem(uint8_t svc, uint8_t client, const void * message, size_t length);
 	virtual bool initWithTask(task_t owningTask, void * securityID, UInt32 type, OSDictionary * properties) APPLE_KEXT_OVERRIDE;
 	virtual bool start(IOService * provider) APPLE_KEXT_OVERRIDE;
@@ -409,6 +411,17 @@ RedwoodBasebandQmiReceive(void * client, uint8_t service, uint8_t qmux_client, c
 	((RedwoodBasebandUserClient *) client)->fromModem(service, qmux_client, message, length);
 }
 
+/*
+ * (Test 451) whether a connection has begun closing. The PDS bridge asks under its lock before adopting a connection:
+ * clientClose sets fClosed before redwood_bb_qmi_close takes that lock, so a request racing the close is either
+ * adopted first and then dropped by the close, or seen as closed -- never kept after the object is freed.
+ */
+extern "C" bool
+RedwoodBasebandClientClosed(void * client)
+{
+	return ((RedwoodBasebandUserClient *) client)->fClosed;
+}
+
 bool
 RedwoodBasebandUserClient::start(IOService * provider)
 {
@@ -426,6 +439,8 @@ IOReturn
 RedwoodBasebandUserClient::clientClose(void)
 {
 	bblog("RedwoodBaseband: the connection to %s closed after %u calls\n", fOwner ? fOwner->getName() : "?", fCalls);
+	fClosed = true;                 /* (Test 451) before redwood_bb_qmi_close takes the PDS lock: see RedwoodBasebandClientClosed */
+	OSMemoryBarrier();
 	redwood_bb_qmi_close(this);     /* (Test 380) its QRTR ports: no callback for this connection after this */
 	if (!isInactive()) {
 		terminate();

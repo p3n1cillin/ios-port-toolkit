@@ -1,7 +1,7 @@
 # Native iOS porting toolkit (Android phones: Qualcomm first, MediaTek and Exynos/Tensor started)
 
 > **This repository** also carries the S10 Lite port's own working tree in [ports/r5q](ports/r5q/README.md)
-> (loader, kernel drivers, build pipeline, phone tool, iOS-side libraries and test tools, notes; up to Test 450:
+> (loader, kernel drivers, build pipeline, phone tool, iOS-side libraries and test tools, notes; up to Test 451:
 > Wi-Fi, sound and the microphone, sensors with rotation, auto-brightness and CoreMotion, Bluetooth under iOS's own
 > bluetoothd, GPS through the modem, and the phone's three cameras in iOS's Camera app with autofocus, OIS and
 > 1080p30/60 video with sound). Set-up: [docs/SETUP.md](docs/SETUP.md). Licences: MIT, with the loader and kernel

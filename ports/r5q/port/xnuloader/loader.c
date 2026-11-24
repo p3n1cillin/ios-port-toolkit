@@ -3877,8 +3877,20 @@ run_kernel(int have_checkpoint, uint64_t checkpoint)
 		}
 		if (n < BOOT_LINE_LENGTH - 1) ba->commandLine[n++] = ' ';
 	}
-	for (const char *c = pi.cmdline; *c && n < BOOT_LINE_LENGTH - 1; c++) {
-		ba->commandLine[n++] = *c;
+	const char *rest = pi.cmdline;
+
+	for (; *rest && n < BOOT_LINE_LENGTH - 1; rest++) {
+		ba->commandLine[n++] = *rest;
+	}
+	/*
+	 * (Test 451) XNU's boot line is BOOT_LINE_LENGTH bytes; what does not fit used to vanish without a word -- the
+	 * newest args, at the end, and the last one cut mid-token. Say how full it is, and what was dropped.
+	 */
+	if (*rest != '\0') {
+		print("[LAB] boot-args: FULL (%d bytes): the kernel will NOT see \"%s\" (the arg before it may be cut too)\n",
+		    (uint64_t)n, rest);
+	} else {
+		print("[LAB] boot-args: %d of %d bytes used\n", (uint64_t)n, (uint64_t)(BOOT_LINE_LENGTH - 1));
 	}
 
 	/* --- device tree ---------------------------------------------------- */

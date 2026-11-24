@@ -63,7 +63,20 @@ The shim emulator now sizes its source regions from the input files. Isolated ge
 checks for 435 to 436 and 436 to 437 verified that both honor the supplied kernel and root paths
 and propagate the shim test.
 
-## The standard image (2026-11-24, Test 450)
+## The standard image (2026-11-24, Test 451)
+
+`port/build/r5q-install-boot-standard.img` = r5q-install-boot-451.img (`SHA-256 fd90e2191aff03aefb17a582bd450052dce6abddb2f4a44f42b5f7f24dbed0a2`): kernel `t451`, root `test451` (`test451-root.apfs.new`, rebuilt for libr5q-bbd), `phone-args.txt` unchanged.
+On top of Test 450, the six minor findings of the review:
+- **Camera frame timing (`redwood_camera.c`, `redwood_sec_ts.c`):** one rule for the shortest frame, `redwood_r5q_cam_min_frame_lines()` (1634 lines only while the full-frame IMX586 mode streams, else 3268), used by both the sensor and what iOS is told; with `cam_full=0` iOS had been told 1634 for a 3268-line mode.
+- **OIS movie mode kept (`redwood_sec_ts.c`, `redwood_camera.c`):** the mode iOS last asked for survives a session restart (`main_ois_up` asks for movie mode again, logged "movie mode asked again"); closing the camera device clears it. Not exercised on hardware: the Camera app's lens button zooms instead of switching lenses while recording, so no session restart happens mid-recording from the UI.
+- **GPS client race (`RedwoodBaseband.cpp`, `redwood_wifi.c`):** `clientClose` sets `fClosed` before its ports close; the PDS bridge checks `RedwoodBasebandClientClosed()` under its lock and no longer adopts a closing connection.
+- **Compass (`wifi/inject_bbd.c`):** an SLPI bias at status 1 still seeds the offset, but only status >= 2 stops libr5q-bbd's own sphere fit, and status 0 starts it again. `cm_test 3`: accelerometer 30, gyro 15, magnetometer 25, device motion 30; no backboardd crash logs.
+- **Build (`pipeline/build_init.sh`, new `pipeline/build_openh264.sh`):** without OpenH264 or the donor's `vt_h264_enc.c` it says what is missing and still builds init and var_store. `build_openh264.sh` rebuilds `libopenh264_enc.a` (v2.4.1, 81 objects, as Test 431's) from a clean clone; libredwood-media.dylib links against it.
+- **Boot line (`port/xnuloader/loader.c`):** the loader logs `[LAB] boot-args: 590 of 607 bytes used`, or `FULL ... the kernel will NOT see "..."` (firmware ring, `phone.py logs`).
+- **Verified on hardware:** boots, Wi-Fi joined, 0 panics; `record_test 3` twice (-46.3 / -46.1 dBFS); two Camera.app movies imported into Photos, `IMG_0038.MOV` (1080p H.264, 389 frames in 13.10 s = 29.7 fps, AAC 13.10 s) and `IMG_0039.MOV` (382 frames in 12.83 s = 29.8 fps, AAC 12.83 s), `cam: ois mode=1` / `=0` around a recording.
+- **Seen on the way: a modem fatal error during a Wi-Fi pull (not reproduced).** ~3 minutes into the first run, while pulling a 24 MB movie over r5qd, every QMI send to the modem began failing with 55 (ENOBUFS: `glink_send` found no free modem intent within its wait), then servreg reported `msm/modem/wlan_pd` DOWN; our ack was logged but could not be sent, and the modem died: SMP2P `err-fatal`, item 421 "servreg_monitor.c:502:Servreg ack timedout:msm/modem/wlan_pd". After `phone.py restart`, ~90 MB of pulls left the modem healthy (`err-ready`). The same family as Tests 168 and 414 (wlan_pd restarting under sustained transfer), now with the modem itself lost because the ack path shares the starved GLINK channel. Open: send servreg acks on a path that cannot be starved (a reserved intent), and find what stops the modem from returning intents.
+
+## The standard image before (2026-11-24, Test 450)
 
 `port/build/r5q-install-boot-standard.img` = r5q-install-boot-450.img (`SHA-256 f1ac4d6bf2c39936d878ef0550c2eb01bd816fd72b6ef69fa7198a744953e9f7`): kernel `t450`, root `test447` (`test447-root.apfs.new`), `phone-args.txt` unchanged.
 On top of Test 449, fixes from a review of Tests 431-449 (three reviewers over the kernel, audio/camera and userland diffs):

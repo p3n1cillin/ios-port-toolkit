@@ -10,6 +10,8 @@ normally the newest ones -- are dropped or cut mid-token (`cpufreq=2` becomes `c
 silently is not there. On the S10 Lite the loader's own args (debug, the timer, UFS and DMA windows, rmtfs ...) and
 the payload's command line take 230 bytes besides phone-args.txt (`--reserve 230`; Test 449's whole line, read from
 its boot log, was 590 of 607 bytes: 17 left). Measure yours: `--line "<the boot-args line from the boot log>"`.
+Since Test 451 the r5q loader also says it in the log: `[LAB] boot-args: N of 607 bytes used`, or
+`[LAB] boot-args: FULL (...): the kernel will NOT see "..."` -- do the same in your loader.
 
 `+key=value` adds or replaces an arg and `-key` removes one, as `phone.py cycle` takes them. Also reported: keys
 given twice (which copy XNU's PE_parse_boot_argn sees depends on the kernel; do not rely on it).
