@@ -53,14 +53,20 @@ adds a table entry filled from its profile. Get the values with `tools/extract_p
 - Set each cluster that has a running core to its top row. The hardware switches the source and voltage itself.
   Its limits block still throttles when hot.
 - Boot-arg `cpufreq=1`. With `cpus=8`, all cores run (loader `R5Q_LAB_SMP`, kernel `cpus=8`).
+- `cpufreq=2` (S10 Lite, Test 439): a governor thread moves each cluster between its lowest and top LUT rows by
+  load, with `kern.redwood.cpufreq_state` for telemetry. Pair it with event-driven driver threads (`msleep`/`wakeup`
+  instead of polling: the S10 Lite went from >12,000 to ~350 wakeups a second) and longer poll periods while the
+  panel is off (`redwood_display_asleep()`), or the cores never idle long enough for it to matter.
 
-## Wi-Fi (in progress on the S10 Lite)
+## Wi-Fi (working on the S10 Lite)
 
 `wifi.kind` icnss is the WCN399x inside the SoC. It needs the modem/WLAN PIL firmware path and GLINK over SMEM,
 which makes it a much bigger job than PCIe (QCA6390/6490, BCM43xx). The donor did the S20+'s BCM4375 over PCIe
 with brcmfmac.
 
-For the S10 Lite, follow `work/ios-r5q/wifi/WIFI-PLAN.md`. Each stage is one test, and each stage reads before
-it writes. The first stage is the read-only survey in `redwood_wifi.c` (`wifi_survey`): the SMEM table of
+On the S10 Lite it works: the kernel's own WLFW/ath10k-style driver, WPA2, iOS's wifid through an Apple80211
+ioctl shim (`redwood_apple80211.c`: scan, join, link rate), automatic rejoin. For the full story follow
+`ports/r5q/wifi/WIFI-PLAN.md` (in the repo; `work/ios-r5q/wifi/` locally). Each stage is one test, and each stage
+reads before it writes. The first stage is the read-only survey in `redwood_wifi.c` (`wifi_survey`): the SMEM table of
 contents at 0x86000000, the SMP2P items, the AOP mailbox and the APCS doorbell. Writes later go only to the
 modem's own reserved memory and SMEM items.

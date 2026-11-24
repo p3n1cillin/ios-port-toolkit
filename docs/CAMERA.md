@@ -1,6 +1,7 @@
 # Camera: a Qualcomm CAMSS sensor into iOS's Camera app
 
-Proven on the Galaxy S10 Lite (SM8150, Titan 175, Samsung S5K3L6), Tests 267-292. The detailed log is
+Proven on the Galaxy S10 Lite (SM8150, Titan 175, Samsung S5K3L6), Tests 267-292; then its IMX586 main and IMX616
+front cameras, autofocus, OIS and 1080p30/60 video with sound (Tests 340-449). The detailed log is
 `work/ios-r5q/wifi/CAMERA-PLAN.md`. The register-level spec is `work/ios-r5q/wifi/CAMERA-RX-SPEC.md`. This page is the
 reusable recipe: what to gather from a new phone, in what order to bring the pieces up, and what bit us.
 
@@ -28,6 +29,12 @@ frames" from "the hardware gives frames".
 | Reset / standby GPIOs | `gpio-reset`, `gpio-standby` | GPIO22 |
 | CSI-PHY index and lanes | `csiphy-sd-index`, `lanes` in the module file | CSI-PHY 2, 4 lanes, settle 14 |
 | Init / mode / stream tables | the vendor's sensor module file (Chromatix: V1.4.0 uses 64-bit fields) | `pipeline/camsensor_v14.py` → `camera-<sensor>.tab` (kept local, never published) |
+| Lens motor, OIS, module EEPROM | the sensor's `actuator-src` / `ois-src` / `eeprom-src` → their nodes' `cci-device` + `cci-master` | actuator 0x0c, OIS 0x24, EEPROM 0x50 on CCI 1 master 1 = GPIO33/34 -- **not** the sensor's 17/18 |
+
+`python tools/cam_map.py live.dts` prints all of this per CCI controller: each master's pins, each part's 7-bit
+address, GPIOs and supplies (with the PMIC behind each), and a warning for every part that is on another bus than
+the sensor that links to it. `python tools/pmic_ldo.py dts live.dts` then gives the register value for every supply
+on an I2C PMIC.
 
 ## Bring-up order (each step its own test; log a line after each)
 
@@ -108,6 +115,36 @@ frames" from "the hardware gives frames".
 - **Exposure per sensor.** iOS keeps one set of numbers; convert per sensor: lines by the ratio of the line times,
   frame lines likewise, the gain into the sensor's coding (Samsung SMIA 32 = 1x; Sony `1024 - 1024 / gain`), and the
   coarse time within the sensor's margin (Sony: frame − 48).
+
+- **Decode every supply value your driver writes (r5q Test 427).** A camera on an I2C PMIC (Samsung's S2MPB03) gets
+  its voltages from your own register writes, and the LDOs do not share one encoding: on the S2MPB03, LDO1/2/4 count
+  12.5 mV steps from 0.7 V, LDO3 25 mV steps from 0.7 V, LDO5-7 25 mV steps from 1.8 V. The driver wrote LDO3 (the
+  IMX586's analog 1.8 V) as `0x80 | 0` -- 0.70 V. The sensor still answered I2C and streamed, but everything dim came
+  out black until the chip warmed up; three tests of exposure, PLL and line-length changes chased that symptom. Run
+  `pmic_ldo.py log <boot log> --dts live.dts` on the first boot: it flags every value that is on and outside what the
+  device tree asks for (it finds this bug in the r5q's Test 343 log, two days before it was found by hand).
+- **Find the lens motor and the OIS in the device tree, not by scanning the sensor's bus (Test 428).** Samsung
+  puts them, with the module EEPROM, on another CCI master. `cam_map.py` warns about it. The S10 Lite's motor is a
+  DW9823 / AK737x-style part: one write per position (register 0x00, the 10-bit code << 6 as two bytes), register
+  0x02 = 0x00 active, 0x40 standby. Start it at the module file's init position (300); between frames move it to what
+  iOS asked for (REDWOOD_CAMERA_FOCUS), and report the position back in each frame -- iOS's contrast autofocus then
+  hill-climbs on its own (Test 429). Park the lens in steps before standby, or it knocks against its stop.
+- **OIS controllers with their own gyro need no gyro link from the phone (Test 430).** The RUMBA S4 keeps its firmware
+  in its own flash and reads its own gyro: wait for idle (0x0001 = 0x01 or 0x13), the vendor's init writes
+  (`cam_ois_rumba_s4.c` `cam_ois_init`), the mode (0x0002: 0 still, 1 movie), servo on (0x0000 = 1); status 0x02 =
+  running. Switch to movie mode while iOS records (`VideoRecordingInProgress`, Tests 431-433) and back after; restore
+  the mode the app last set if the session restarts.
+- **Video: the encoder must keep real time, or iOS never finishes the movie (Tests 430-434).** With no hardware
+  encoder iOS falls back to a software HEVC encoder that did ~5 fps at 1080p on the SM8150. The audio track kept real
+  time, the video did not (10 s of picture in 17 s of sound); at stop iOS waits for frames that never come, the movie
+  stays in `DCIM/.MISC/Incoming/` and never reaches Photos. What fixed it: a NEON ISP (1080p in ~7 ms), Cisco's
+  OpenH264 registered as a VideoToolbox `'avc1'` encoder, and the Camera's "Most Compatible" (H.264) preference
+  (`CAMUserPreferenceCaptureEncodingBehavior = 1`): 1080p30 at 30.0 fps with sound in sync, and 1080p60 from a
+  1634-line sensor mode. Check every recording with `python tools/av_check.py MOVIE --fps 30`: it flags a picture
+  behind the sound, dropped frames, late tracks and an unfinished file.
+- **Keep the kernel's frame timing and the sensor's in one place.** If the sensor's frame length depends on which
+  mode streams (full frame or cropped), the kernel's frame headers must use the same rule; a 60 fps line count
+  reported for a 30 fps mode makes iOS's exposure and frame timing wrong by 2x.
 
 ## Checking the picture against the raw data (r5q, 2026-11-20)
 

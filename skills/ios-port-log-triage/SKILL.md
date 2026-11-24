@@ -44,6 +44,10 @@ description: Read the result of a native iOS port hardware test - runner exit co
 | No trace at all, Android back by itself | cold reset under the full firmware; add the log slot | 41-44 |
 | UsbfnIo not found | signal the USB controller init event group first | 45-48 |
 | iOS picture shifted | `ios-port-display` | 52-61 |
+| Camera dark/black in dim light, a silent microphone, movies that never reach Photos | `ios-port-media` (its table) | 419-450 |
+| A boot-arg has no effect, or the last args of the line are missing in the boot log | the boot line is full (XNU: 608 bytes) and the loader cut its end; `tools/bootargs_budget.py --line "<from the log>"` | 449 |
+| Hundreds of MB wired and all cores busy at every boot | a benchmark reading a boot-arg variable that an earlier parse left set (`cpufreq=2` started `membench` 2); reset a variable before each `PE_parse_boot_argn` that may fail | 450 |
+| A radio or a power-hungry block stays on after its iOS client quits | the close path cleared the wanted state but did not wake the thread sleeping on it | 450 |
 
 ## Recording
 

@@ -1,11 +1,11 @@
 # Native iOS porting toolkit (Android phones: Qualcomm first, MediaTek and Exynos/Tensor started)
 
 > **This repository** also carries the S10 Lite port's own working tree in [ports/r5q](ports/r5q/README.md)
-> (loader, kernel drivers, build pipeline, phone tool, iOS-side libraries and test tools, notes; up to Test 328:
-> Wi-Fi, sound, sensors with rotation, auto-brightness and CoreMotion device motion, Bluetooth under iOS's own
-> bluetoothd, and the phone's own rear camera in iOS's Camera app: preview under iOS's auto-exposure, photos saved).
-> Set-up: [docs/SETUP.md](docs/SETUP.md). Licences: MIT, with the loader and kernel drivers under the Apple Public
-> Source License 2.0: [NOTICE.md](NOTICE.md).
+> (loader, kernel drivers, build pipeline, phone tool, iOS-side libraries and test tools, notes; up to Test 450:
+> Wi-Fi, sound and the microphone, sensors with rotation, auto-brightness and CoreMotion, Bluetooth under iOS's own
+> bluetoothd, GPS through the modem, and the phone's three cameras in iOS's Camera app with autofocus, OIS and
+> 1080p30/60 video with sound). Set-up: [docs/SETUP.md](docs/SETUP.md). Licences: MIT, with the loader and kernel
+> drivers under the Apple Public Source License 2.0: [NOTICE.md](NOTICE.md).
 
 This toolkit captures how iOS 16.5 was made to boot natively on the **Samsung Galaxy S10 Lite** (SM-G770F,
 `r5q`, Snapdragon 855 / SM8150). As of Test 68 the phone runs to a usable home screen with:
@@ -14,7 +14,9 @@ This toolkit captures how iOS 16.5 was made to boot natively on the **Samsung Ga
 - all 8 cores at full clocks and the right time
 - a battery gauge and hardware buttons
 
-None of it was flashed permanently: every test went to the recovery partition and was restored automatically.
+Since then (Test 449, 2026-11-23) the same phone boots iOS from its own storage with Wi-Fi, sound, the microphone,
+the motion sensors, Bluetooth, GPS through the modem, and its three cameras with autofocus, OIS and 1080p video;
+the port's own tree is `ports/r5q`. Until Test 68 none of it was flashed permanently: every test went to the recovery partition and was restored automatically.
 
 The port built on a donor port (redwood-src: POCO X5 Pro, plus the Galaxy S20+ `y2q`). The toolkit turns
 what was hard-coded or hand-copied per test into four things:
@@ -80,6 +82,13 @@ toolkit/
     conf_bridge.py     JSON profile <-> the donor's common/devices/<codename>.conf (export / import / check)
     validate_profile.py  per-stage checklist of missing fields + consistency checks (overlaps, frames, slot, ...)
     profile_spec.py    the profile format (fields, stages, sources); profile_doc.py writes PROFILE.md from it
+    cam_map.py         live DT -> every camera part (sensor, lens motor, OIS, EEPROM): CCI master pins, 7-bit address,
+                       GPIOs, supplies and the PMIC behind each; warns when a part is off its sensor's bus
+    pmic_ldo.py        voltage registers of small I2C PMICs (S2MPB03, S2DOS05; pmic_ldo.json): decode, encode, every
+                       DT supply's register value, and a boot log's "LDOn 0xNN" values checked against the DT
+    slimbus_msg.py     Qualcomm NGD SLIMbus messages (WCD93xx codecs): build and decode, with the known traps flagged
+    av_check.py        a recorded movie: fps, picture-vs-sound length, frame gaps, late tracks, unfinished (ffprobe)
+    bootargs_budget.py how much of XNU's 608-byte boot line is left, and which args a +/- change would cut off
     selftest.py        checks the whole toolkit against the real S10 Lite port (host-only)
   generator/
     gen_test.py        profile + test spec -> the test's build/package/check/bundle scripts, loader profile,
@@ -95,8 +104,11 @@ toolkit/
                        run_native_test.py)
     fastboot_boot.py   one authorized RAM-only `fastboot boot` of a test image (fastboot-boot phones)
   skills/              ios-port-feasibility, ios-port-safety, ios-port-new-device, ios-port-next-test,
-                       ios-port-display, ios-port-peripherals, ios-port-sensors, ios-port-log-triage
+                       ios-port-display, ios-port-peripherals, ios-port-sensors, ios-port-media, ios-port-log-triage
   docs/
+    CAMERA.md          a CAMSS sensor into Camera.app: what to gather, the bring-up order, supplies, autofocus, OIS,
+                       video that keeps real time
+    AUDIO.md           the microphone: a WCD codec on SLIMbus into iOS's audio input, message formats and traps
     SENSORS.md         the sensors DSP (SLPI) from the kernel: FastRPC, the file server, SEE; where each value is
     IOS-SENSORS.md     iOS's side: virtual HID sensors, rotation, auto-brightness, CoreMotion, compass, magnetometer cal
     SYSTEM-PATCHING.md changing Apple code without breaking code signing: page hashes, the kernel's read-time cache
@@ -126,7 +138,7 @@ Load the skill `ios-port-feasibility`, then run
 3. `python tools/new_device.py <codename> --dts live.dts --model <SM-XXXX>`
 4. `python tools/validate_profile.py devices/<codename>.json --dts live.dts`. Gather what it lists, in stage order.
 
-**Check the toolkit:** `python tools/selftest.py` (17 checks with all options). Options:
+**Check the toolkit:** `python tools/selftest.py` (22 checks with all options; 18 without the optional inputs). Options:
 
 - `--y2q-dts <y2q.dts>` and `--donor-conf-dir <copy of the donor's common/devices>` add the S20+ checks.
 - `--mkbootimg <AOSP mkbootimg.py>` adds the boot-image v0-v4 checks.
@@ -352,8 +364,20 @@ inside mediaserverd. Then bring up the real path one step per test, logging afte
 5. IFE-lite into a buffer below 4 GB through one SMMU stream match;
 6. a ping-pong session that hands frames to iOS.
 
-On the S10 Lite the S5K3L6's frames reach iOS this way. The recipe and the lessons that each cost a hang (slow AHB
-on TCXO, never voting a rail to 0 that the boot raised): [docs/CAMERA.md](docs/CAMERA.md).
+On the S10 Lite the S5K3L6's frames reach iOS this way, then the IMX586 and IMX616 with autofocus, OIS and
+1080p30/60 video with sound. Before writing a driver, `tools/cam_map.py live.dts` maps every camera part (the S10
+Lite's lens motor and OIS are on another bus than the sensor) and `tools/pmic_ldo.py dts live.dts` gives each
+supply's register value (a wrong one left the camera blind in dim light, Test 427). The recipe and the lessons that
+each cost a hang (slow AHB on TCXO, never voting a rail to 0 that the boot raised): [docs/CAMERA.md](docs/CAMERA.md).
+Check recordings with `tools/av_check.py`.
+
+### 12b. Microphone: a WCD codec on SLIMbus
+
+The codec's registers and its samples both go over SLIMbus: find the codec (ADDR_QUERY, as a type-2 user message),
+set its capture route as Android's mixer paths do, open a SLIMbus channel through the ADSP's manager, then an AFE
+port and a record session in the DSP. `tools/slimbus_msg.py` builds and decodes every message. The order, the
+barriers the RX ring needs under camera DMA, and the teardown that keeps the next recording working:
+[docs/AUDIO.md](docs/AUDIO.md).
 
 ### 13. Memory: give the RAM disk back
 
@@ -370,7 +394,8 @@ Everything is read-only until step 7. `validate_profile.py` shows what is still 
    backups and sha256 of recovery, boot, vbmeta, dtbo and xbl. Also the recovery block node and size, the
    Download Mode procedure, and a stock firmware download for the exact model.
 2. **Live device tree** to `tools/new_device.py`. That gives the CPU, GIC, timer INTID, reserved memory,
-   TLMM, touch, battery, buttons, cpufreq, TE pin and Wi-Fi candidates, with evidence.
+   TLMM, touch, battery, buttons, cpufreq, TE pin and Wi-Fi candidates, with evidence. For the later stages,
+   `tools/cam_map.py` and `tools/pmic_ldo.py dts` on the same tree (camera parts, buses and supply registers).
 3. **XBL `uefiplat.cfg`** (UEFIExtract on the xbl backup) for `memory.uefi_fd`, `memory.display_reserved`, the
    DXE heap and the stock reservations. Run `validate_profile.py --dts` to list the no-map regions to add.
 4. **recovery.img header** for `bootimg.*`, and where the log slot fits in its padding (`log_slot.offset`).

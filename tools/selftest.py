@@ -11,6 +11,7 @@
   7  donor .conf  r5q exports to a guarded, recovery-only donor profile; (opt.) y2q.json agrees with the donor's y2q.conf
   8  vendors      MediaTek (pinmux) and Tensor/Exynos (samsung,pins) fixtures resolve pins, modes and pin registers
   9  brands       fastboot-boot safety (RAM only), the redwood profile, feasibility tiers; (opt.) boot images v0-v4
+ 10  media        cam_map, pmic_ldo, slimbus_msg and bootargs_budget against what the r5q port found by hand
 """
 import argparse
 import json
@@ -179,6 +180,23 @@ def main():
         rows = conf_bridge.check(y, (a.donor_conf_dir / 'y2q.conf').read_text())
         case('donor .conf: y2q profile agrees with the donor\'s y2q.conf', all(r[3] for r in rows),
              f'{sum(r[3] for r in rows)}/{len(rows)} variables')
+
+    # 10  media and boot-line tools against what the r5q port found by hand (Tests 427-449)
+    import cam_map
+    import dtslib
+    cams, warns = cam_map.build(dtslib.load(W / 'live.dts'))
+    act = [d for e in cams for d in e['devices'] if d['kind'] == 'actuator']
+    ok = (len(act) == 1 and act[0]['addr7'] == 0x0c and (act[0]['sda'], act[0]['scl']) == (33, 34)
+          and any('actuator' in w and 'GPIO33/34' in w for w in warns))
+    case('cam_map: the main camera\'s lens motor at 0x0c on GPIO33/34, flagged off the sensor\'s bus (Test 428)', ok)
+    for tool, what in (('pmic_ldo.py', 'pmic_ldo: S2MPB03/S2DOS05 encodings and the Test 427 0.70 V bug'),
+                       ('slimbus_msg.py', 'slimbus_msg: the r5q driver\'s messages rebuilt byte for byte (Tests 419-421)')):
+        r = subprocess.run([sys.executable, str(HERE / tool), 'selftest'], capture_output=True, text=True)
+        case(what, r.returncode == 0, f'{r.stdout.count("PASS")} checks')
+    import bootargs_budget
+    rep = bootargs_budget.check(['a=1', 'cpufreq=2'], reserve=0, limit=10)
+    case('bootargs_budget: an over-long line names the cut arg', rep['cut'] == ['cpufreq=2 (becomes "cpufr")'],
+         str(rep['cut']))
 
     bad = [r for r in results if not r[1]]
     print(f'\n{len(results) - len(bad)}/{len(results)} passed')

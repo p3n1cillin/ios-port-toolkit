@@ -47,6 +47,9 @@ When data is missing, generate it from a Linux tree.
 6. Check: `python toolkit/tools/validate_profile.py devices/<codename>.json --dts live.dts`.
    The MISSING list per stage is your to-do list. ERRORs are overlaps or bad geometry. Fix them before
    building anything.
+7. For the later stages, still read-only: `python toolkit/tools/cam_map.py live.dts` (every camera part, its bus,
+   pins and supplies) and `python toolkit/tools/pmic_ldo.py dts live.dts` (the register value of each supply on an
+   I2C PMIC). Keep the output with the profile's evidence; `ios-port-media` uses it.
 
 Treat extractor values as **candidates**. Its notes flag the known traps:
 
