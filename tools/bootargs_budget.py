@@ -66,7 +66,17 @@ def main(argv=None):
     ap.add_argument('--line', help='a whole boot line instead of a file')
     ap.add_argument('--reserve', type=int, default=0, help="bytes the loader's own args take in front (r5q: ~140)")
     ap.add_argument('--limit', type=int, default=BOOT_LINE_LENGTH)
-    a = ap.parse_args(argv)
+    # (-key removals look like options to argparse: take the unknown ones as changes, in the order given)
+    argv = list(sys.argv[1:] if argv is None else argv)
+    a, unknown = ap.parse_known_args(argv)
+    bad = [u for u in unknown if not u.startswith('-') or u.startswith('--')]
+    if bad:
+        ap.error(f'unrecognized arguments: {" ".join(bad)}')
+    if a.line is not None and a.file is not None:      # (with --line, the first +key=value lands in `file`)
+        a.changes = [str(a.file)] + a.changes
+        a.file = None
+    order = {c: i for i, c in enumerate(argv)}
+    a.changes = sorted(a.changes + unknown, key=lambda c: order.get(c, 0))
     if a.line is None and a.file is None:
         ap.error('give a file or --line')
     text = a.line if a.line is not None else a.file.read_text(encoding='utf-8')

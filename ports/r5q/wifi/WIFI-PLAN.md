@@ -1392,3 +1392,11 @@ Code in place, untested (paused for the night):
 - Same family as Test 168 and t414 (wlan_pd restarting under sustained transfer), worse now that the modem is lost.
   Open: keep a modem intent for servreg acks (or send them before anything queued), and find why the modem stops
   returning intents under load.
+- **Test 452 (kernel t452, standard): the fix.** `glink_send` now asks the modem for an intent (GLINK
+  INTENT_REQUEST) whenever none is free, as Linux's `__qcom_glink_send()` does -- it had asked only when none was big
+  enough, and otherwise waited up to 5 s for an in-use one to come back. The servreg acknowledgement's send is
+  checked, retried and logged. Test switch `glink_starve=1` forces every send through the request path. With it and
+  `wifi_fw_crash=90`: 800 requests, all granted; the forced firmware crash's DOWN/UP acknowledgements sent in 0 ms and
+  taken; Wi-Fi back in 14.3 s; the modem stayed up. With the standard args: two 1080p movies and ~135 MB pulled, the
+  modem `err-ready`, nothing waited or failed. The natural trigger was not reproduced; the log now names it if it
+  happens (`wifi: glink: no free intent ... asked for one`, `waited ~N ms`).

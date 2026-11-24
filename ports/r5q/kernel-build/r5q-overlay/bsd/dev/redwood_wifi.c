@@ -2338,7 +2338,10 @@ static struct {
 	struct {
 		uint32_t id, size;
 		bool there, in_use;
+		bool asked_for;                 /* (Test 452) told while a request of ours was open: made for it */
 	} their_intents[64];                    /* what we may send into */
+	bool request_open;                      /* (Test 452) a request sent and not answered yet */
+	uint32_t requests, granted, refused, long_waits, longest_ms;   /* (Test 452) for the log */
 	struct {
 		uint32_t size, fill;
 		uint8_t *data;
@@ -2603,6 +2606,7 @@ glink_pump(void)
 						glink.their_intents[n].in_use = false;
 						glink.their_intents[n].size = words[0];
 						glink.their_intents[n].id = words[1];
+						glink.their_intents[n].asked_for = glink.request_open;
 						break;
 					}
 				}
@@ -2633,7 +2637,13 @@ glink_pump(void)
 		case GLINK_INTENT_REQUEST_ACK:
 			glink_advance(length);
 			glink.request_answered = true;
+			glink.request_open = false;
 			glink.request_granted = message.param2 != 0;
+			if (glink.request_granted) {
+				glink.granted++;
+			} else {
+				glink.refused++;
+			}
 			break;
 		case GLINK_DATA:
 		case GLINK_DATA_MORE: {
@@ -2719,13 +2729,20 @@ glink_send(const void *data, uint32_t length)
 	} header = { { GLINK_DATA, GLINK_US, 0 }, length, 0 };
 	bool asked = false, fits;
 	int found = -1;
+	unsigned asks = 0, waited = 0;
+	static int starve = -1;                 /* (Test 452) boot-arg glink_starve=1: see below */
 
+	if (starve < 0) {
+		uint32_t v = 0;
+
+		starve = PE_parse_boot_argn("glink_starve", &v, sizeof(v)) && v != 0;
+	}
 	lck_mtx_lock(&glink_lock);
 	if (glink.up && length + sizeof(header) + 8 > glink.ours_size - GLINK_RESERVE) {
 		lck_mtx_unlock(&glink_lock);
 		return EMSGSIZE;
 	}
-	for (unsigned waited = 0;; waited++) {
+	for (;; waited++) {
 		glink_pump();
 		if (!glink.up || !glink.open || glink.broken) {
 			lck_mtx_unlock(&glink_lock);
@@ -2737,6 +2754,13 @@ glink_send(const void *data, uint32_t length)
 			if (!glink.their_intents[n].there || glink.their_intents[n].size < length) {
 				continue;
 			}
+			/*
+			 * (Test 452) glink_starve=1, a test: only intents the DSP made for one of our requests are used, so every
+			 * send at first, and every burst later, goes through the request below -- the path that starvation needs
+			 */
+			if (starve && !glink.their_intents[n].asked_for) {
+				continue;
+			}
 			fits = true;                            /* (one that is in use comes back: that is waited for) */
 			if (!glink.their_intents[n].in_use && (found < 0 || glink.their_intents[n].size < glink.their_intents[found].size)) {
 				found = (int)n;
@@ -2745,12 +2769,28 @@ glink_send(const void *data, uint32_t length)
 		if (found >= 0 && glink_room() >= ((length + sizeof(header) + 7) & ~7u)) {
 			break;
 		}
-		if (!fits && !asked) {
+		/*
+		 * (Test 452) No free intent of the DSP's that this fits: ask for one, as Linux's __qcom_glink_send() does,
+		 * and not only when none is big enough. Under load the modem held all its IPCRTR intents for seconds (a
+		 * service of its own slow to read what we sent), and waiting for them to come back starved everything on the
+		 * channel: QMI failed with ENOBUFS, and then the servreg acknowledgement of a Wi-Fi domain restart could not
+		 * be sent, so the modem's servreg monitor killed the modem (Test 451: "Servreg ack timedout:
+		 * msm/modem/wlan_pd"). Asked again each time the last request is answered and still nothing is free, up to 8.
+		 */
+		if (found < 0 && asks < 8 && (!asked || glink.request_answered)) {
 			glink.request_answered = false;
+			glink.request_open = true;
 			glink_say(GLINK_INTENT_REQUEST, GLINK_US, length, NULL, 0);
 			asked = true;
+			asks++;
+			if (glink.requests++ < 20 || glink.requests % 200 == 0) {
+				printf("wifi: glink: no free intent of the DSP's for %u bytes: asked for one (request %u; %u granted, "
+				    "%u refused so far)\n", length, glink.requests, glink.granted, glink.refused);
+			}
 		}
 		if (waited >= (r5q_modem ? 50000u : 5000u) || (!fits && asked && glink.request_answered && !glink.request_granted)) {
+			printf("wifi: glink: %u bytes NOT SENT: no intent of the DSP's after %u requests (%s)\n", length, asks,
+			    fits ? "all in use" : "none big enough, refused");
 			lck_mtx_unlock(&glink_lock);
 			return found < 0 ? ENOBUFS : EAGAIN;
 		}
@@ -2765,6 +2805,15 @@ glink_send(const void *data, uint32_t length)
 	glink.their_intents[found].in_use = true;
 	header.message.param2 = glink.their_intents[found].id;
 	glink_put(&header, sizeof(header), data, length);
+	if (waited >= (r5q_modem ? 1000u : 100u)) {     /* (Test 452) a send that waited 100 ms or more */
+		uint32_t ms = r5q_modem ? waited / 10 : waited;
+
+		glink.longest_ms = ms > glink.longest_ms ? ms : glink.longest_ms;
+		if (glink.long_waits++ < 20 || glink.long_waits % 100 == 0) {
+			printf("wifi: glink: %u bytes waited ~%u ms for an intent (%u requests; long waits %u, longest %u ms)\n",
+			    length, ms, asks, glink.long_waits, glink.longest_ms);
+		}
+	}
 	lck_mtx_unlock(&glink_lock);
 	return 0;
 }
@@ -5625,7 +5674,7 @@ servreg_state(uint32_t s)
 	       "UNINIT" : "?";
 }
 
-static void
+static int
 servreg_send(uint16_t msg, const char *path, bool enable, uint16_t transaction, bool ack)
 {
 	uint8_t out[160];
@@ -5647,7 +5696,7 @@ servreg_send(uint16_t msg, const char *path, bool enable, uint16_t transaction, 
 	}
 	out[5] = (uint8_t)(at - 7);
 	out[6] = (uint8_t)((at - 7) >> 8);
-	qrtr_send(servreg_port, servreg_node, servreg_where, out, at);
+	return qrtr_send(servreg_port, servreg_node, servreg_where, out, at);
 }
 
 static void
@@ -5682,7 +5731,7 @@ servreg_receive(__unused void *context, uint32_t node, uint32_t port, const void
 		if ((v = qmi_tlv(m + 7, length - 7, 0x03, &n)) != NULL && n == 2) {
 			memcpy(&transaction, v, 2);
 		}
-		printf("wifi: servreg: +%llu ms: \"%s\" IS NOW %#x (%s), transaction %u: acknowledged\n", (now_us() - tftp_began) / 1000,
+		printf("wifi: servreg: +%llu ms: \"%s\" IS NOW %#x (%s), transaction %u: acknowledging\n", (now_us() - tftp_began) / 1000,
 		    path, state, servreg_state(state), transaction);
 		if (strcmp(path, "msm/modem/wlan_pd") == 0) {
 			if (state == 0x0fffffff || state == 0x2fffffff) {
@@ -5692,7 +5741,20 @@ servreg_receive(__unused void *context, uint32_t node, uint32_t port, const void
 				r5q_pd_back = true;
 			}
 		}
-		servreg_send(0x23, path, true, transaction, true);
+		/*
+		 * (Test 452) the modem kills itself if this acknowledgement does not come (Test 451: "Servreg ack timedout");
+		 * it had been sent once without a look at the result. Now: checked, tried again twice, and said either way.
+		 */
+		{
+			uint64_t t0 = now_us();
+			int error = servreg_send(0x23, path, true, transaction, true);
+
+			for (int again = 0; error != 0 && again < 2; again++) {
+				error = servreg_send(0x23, path, true, transaction, true);
+			}
+			printf("wifi: servreg: the acknowledgement of transaction %u %s after %llu ms%s\n", transaction,
+			    error == 0 ? "sent" : "NOT SENT", (now_us() - t0) / 1000, error == 0 ? "" : " -- the modem will not wait");
+		}
 	} else if (m[0] == 2 && msg == 0x23) {
 		if ((v = qmi_tlv(m + 7, length - 7, 0x02, &n)) != NULL && n == 4) {
 			memcpy(result, v, 4);

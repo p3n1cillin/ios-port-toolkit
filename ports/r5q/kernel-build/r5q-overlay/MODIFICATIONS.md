@@ -153,3 +153,5 @@ table grew from 16 to 96).
 - Test 451 (the review's minor findings): `redwood_camera.c` / `redwood_sec_ts.c` (one frame-line floor for the
   sensor and iOS; the OIS mode kept across a session restart), `iokit/Kernel/RedwoodBaseband.cpp` /
   `redwood_wifi.c` (a closing connection is no longer adopted by the PDS bridge).
+- `bsd/dev/redwood_wifi.c` (Test 452): GLINK asks the modem for an intent whenever none is free (as Linux's
+  `__qcom_glink_send()`), the servreg acknowledgement's send checked and retried, test switch `glink_starve`.

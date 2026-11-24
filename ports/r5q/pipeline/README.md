@@ -63,7 +63,17 @@ The shim emulator now sizes its source regions from the input files. Isolated ge
 checks for 435 to 436 and 436 to 437 verified that both honor the supplied kernel and root paths
 and propagate the shim test.
 
-## The standard image (2026-11-24, Test 451)
+## The standard image (2026-11-24, Test 452)
+
+`port/build/r5q-install-boot-standard.img` = r5q-install-boot-452.img (`SHA-256 aba6de86382709f4f309d31712068cf310596fb70ade9c6584b9d67a7c2dfc56`): kernel `t452`, root `test451`, `phone-args.txt` unchanged.
+On top of Test 451, the fix for Test 451's modem fatal error (`redwood_wifi.c`):
+- **GLINK asks the modem for an intent whenever none is free**, as Linux's `__qcom_glink_send()` does. It had asked only when no intent was big enough; when all were in use it waited up to 5 s for one to come back, so a modem holding its IPCRTR intents under load starved every QMI client (ENOBUFS) and the servreg acknowledgement. Asked again after each answer, up to 8 times a message; every request, long wait (100 ms or more) and failed send is logged (`wifi: glink: ...`).
+- **The servreg acknowledgement is checked:** its send's result was ignored (and "acknowledged" printed before it); now it is tried up to three times and logged `the acknowledgement of transaction N sent after X ms`, or `NOT SENT`.
+- **Test switch `glink_starve=1`:** only intents the modem made for one of our requests are used, so every send goes through the request path.
+- **Verified on hardware, worst case first:** `+glink_starve=1 +wifi_fw_crash=90 -torch_max_s` (the boot line has 1 byte left with them: `toolkit/tools/bootargs_budget.py`). 800 intent requests, 800 granted, 0 refused, 0 sends failed; the forced Wi-Fi firmware crash at ~106 s: `wlan_pd` DOWN, the acknowledgement sent after 0 ms and taken (result 0), UP, taken; the Wi-Fi bring-up again done in 14.3 s and rejoined; the modem `err-ready`, r5qd answering. Then the standard args (`phone.py cycle ... std`): two Camera.app movies (IMG_0040 / IMG_0041: 1080p H.264 at 30.0 fps, picture and sound the same length) and ~135 MB pulled over Wi-Fi: the modem `err-ready` throughout, no intent waits, no ENOBUFS, no failed sends.
+- Not proven: the original trigger (the modem holding its intents under load) was never reproduced on demand, so the fix is tested by forcing its path, not by the natural failure. If it comes back, the log now says so: `glink: no free intent ... asked for one` and `waited ~N ms`.
+
+## The standard image before (2026-11-24, Test 451)
 
 `port/build/r5q-install-boot-standard.img` = r5q-install-boot-451.img (`SHA-256 fd90e2191aff03aefb17a582bd450052dce6abddb2f4a44f42b5f7f24dbed0a2`): kernel `t451`, root `test451` (`test451-root.apfs.new`, rebuilt for libr5q-bbd), `phone-args.txt` unchanged.
 On top of Test 450, the six minor findings of the review:

@@ -61,6 +61,24 @@ Everything above was found from iOS's own log, read on the PC:
 The `qmux` category logs every QMI frame CommCenter sends and parses (`QMI: Svc=... Req/Resp MsgId=... Bin=[...]`),
 which makes framing bugs easy to see.
 
+## Keeping the modem alive: GLINK intents and servreg acknowledgements (Tests 451-452)
+
+Everything on the modem's IPCRTR channel -- CommCenter's QMI, GPS, the Wi-Fi firmware's WLFW, servreg -- needs a
+free *intent* of the modem's (a receive buffer it advertised) for each message sent. Under load the modem can hold
+its intents for seconds. Two rules:
+
+- **When no intent is free, ask for one (GLINK INTENT_REQUEST), as Linux's `__qcom_glink_send()` does.** The S10
+  Lite's sender asked only when none was big enough and otherwise waited; under a large Wi-Fi transfer every QMI send
+  failed with ENOBUFS for ~20 s.
+- **Treat servreg acknowledgements as fatal if lost.** The modem's service registry waits for the AP to acknowledge
+  each domain state change (e.g. `msm/modem/wlan_pd` going DOWN when the Wi-Fi firmware restarts). If the
+  acknowledgement cannot be sent, the modem kills itself: SMP2P `err-fatal`, SMEM item 421
+  "servreg_monitor.c:502:Servreg ack timedout". Check the send's result and retry; log it.
+
+Test the starved path on purpose rather than waiting for it: a switch that makes the sender use only intents it
+asked for (r5q: `glink_starve=1`), together with a forced Wi-Fi firmware crash (`wifi_fw_crash=S`), exercises both
+rules in one boot.
+
 ## Without the injected helper, and the UI (Tests 389-391)
 
 - **Engage from boot.** The manager engages its router after a baseband reset, but not after its first fake boot.

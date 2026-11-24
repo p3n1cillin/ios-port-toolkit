@@ -197,6 +197,13 @@ def main():
     rep = bootargs_budget.check(['a=1', 'cpufreq=2'], reserve=0, limit=10)
     case('bootargs_budget: an over-long line names the cut arg', rep['cut'] == ['cpufreq=2 (becomes "cpufr")'],
          str(rep['cut']))
+    import contextlib
+    import io
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        code = bootargs_budget.main(['--line', 'a=1 torch_max_s=120 b=2', '+c=3', '-torch_max_s', '--limit', '20'])
+    case('bootargs_budget: -key removals parse (Test 452)', code == 0 and out.getvalue().startswith('3 args, 11 bytes'),
+         out.getvalue().splitlines()[0] if out.getvalue() else '')
 
     bad = [r for r in results if not r[1]]
     print(f'\n{len(results) - len(bad)}/{len(results)} passed')

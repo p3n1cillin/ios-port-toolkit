@@ -39,7 +39,7 @@ by init (`var_hfs=1`) in place of the 1.6 GB RAM filesystem; iOS reports "3.7 GB
 `pipeline/build_init.sh` + `pipeline/macho_static.py` (static init from source with LLVM's linker),
 `pipeline/panic_sym.py`.
 
-## Since Test 430 (2026-11-21 to 11-24, Tests 431-451)
+## Since Test 430 (2026-11-21 to 11-24, Tests 431-452)
 
 The standard image is listed in [pipeline/README.md](pipeline/README.md) with each step's evidence. In short:
 
@@ -59,11 +59,14 @@ The standard image is listed in [pipeline/README.md](pipeline/README.md) with ea
   locationd -- satellites seen, no position fix yet (Tests 436-438). Bluetooth registered before launchd (Test 445).
 - **Test 450:** fixes from a review of the above (the memory benchmark no longer starts with `cpufreq=2`, GPS stops
   when its client closes, the microphone choice is fixed per recording, bounded settle retries).
-- **Test 451 (standard):** the review's minor findings: one frame-line rule for the sensor and iOS, the OIS movie
+- **Test 451:** the review's minor findings: one frame-line rule for the sensor and iOS, the OIS movie
   mode kept across a session restart, no PDS adoption of a closing baseband connection, the compass's own fit kept
   until SLPI is confident, `build_init.sh` without OpenH264 (and `pipeline/build_openh264.sh` to make it), and the
-  loader logging how full the boot line is. Open: a modem fatal error seen once during a Wi-Fi pull
-  ("Servreg ack timedout: wlan_pd"; [wifi/WIFI-PLAN.md](wifi/WIFI-PLAN.md), Test 451).
+  loader logging how full the boot line is. Seen once: a modem fatal error during a Wi-Fi pull ("Servreg ack
+  timedout: wlan_pd").
+- **Test 452 (standard):** its fix: GLINK asks the modem for an intent whenever none is free (as Linux does), and
+  the servreg acknowledgement is checked and retried. Forced through that path (`glink_starve=1`) with a forced Wi-Fi
+  firmware crash, the modem stayed up and Wi-Fi came back in 14 s ([wifi/WIFI-PLAN.md](wifi/WIFI-PLAN.md)).
 
 ## State (Test 353)
 
